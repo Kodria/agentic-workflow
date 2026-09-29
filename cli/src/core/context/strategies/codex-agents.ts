@@ -61,8 +61,11 @@ export class CodexAgentsStrategy implements InjectionStrategy {
         if (!fs.existsSync(input.ref.absPath)) {
             throw new Error(`materialized context not found at ${input.ref.absPath}`);
         }
+        // Cursor: using-awm moves to the sessionStart hook (Plan B S2); project AGENTS.md
+        // carries PROJECT_GUIDANCE only (R4/R10). Copilot stays the sole full-context carrier.
         const markdown = fs.readFileSync(input.ref.absPath, 'utf8');
-        return injectFile(this.targetFile(provider, scope, input.projectRoot), withProjectGuidance(markdown, scope));
+        const body = input.agent === 'cursor' ? PROJECT_GUIDANCE : withProjectGuidance(markdown, scope);
+        return injectFile(this.targetFile(provider, scope, input.projectRoot), body);
     }
 
     remove(input: InjectionInput, provider: ProviderConfig): void {
@@ -84,7 +87,8 @@ export class CodexAgentsStrategy implements InjectionStrategy {
 
         const expected = fs.readFileSync(input.ref.absPath, 'utf8');
         if (sha256(expected) !== input.ref.contentHash) return 'stale';
-        return body === normalizeManagedBody(withProjectGuidance(expected, scope)) ? 'injected' : 'stale';
+        const expectedBody = input.agent === 'cursor' ? PROJECT_GUIDANCE : withProjectGuidance(expected, scope);
+        return body === normalizeManagedBody(expectedBody) ? 'injected' : 'stale';
     }
 
     injectGlobal(context: { markdown: string }, provider: ProviderConfig): InjectResult {

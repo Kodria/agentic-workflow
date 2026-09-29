@@ -65,7 +65,7 @@ function makeProjectRoot(): string {
     return projectRoot;
 }
 
-it('awm add demo materializes a real Cursor .mdc file end-to-end', () => {
+it('awm add demo materializes a Cursor skill link under .agents/skills end-to-end', () => {
     const content = makeContentFixture();
     const projectRoot = makeProjectRoot();
     const bundles = discoverBundles(content);
@@ -77,12 +77,10 @@ it('awm add demo materializes a real Cursor .mdc file end-to-end', () => {
     );
 
     expect(outcome.code).toBe(0);
-    const mdcPath = path.join(projectRoot, '.cursor/rules/demo-skill.mdc');
-    expect(fs.existsSync(mdcPath)).toBe(true);
-    const rendered = fs.readFileSync(mdcPath, 'utf8');
-    expect(rendered).toContain('description: A demo skill for add.test.ts e2e');
-    expect(rendered).toContain('alwaysApply: false');
-    expect(rendered).toContain('Follow the demo skill body.');
+    const linked = path.join(projectRoot, '.agents/skills/demo-skill');
+    expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/demo-skill.mdc'))).toBe(false);
+    expect(fs.lstatSync(linked).isSymbolicLink() || fs.existsSync(path.join(linked, 'SKILL.md'))).toBe(true);
+    expect(fs.readFileSync(path.join(linked, 'SKILL.md'), 'utf8')).toContain('Follow the demo skill body.');
 
     fs.rmSync(content, { recursive: true, force: true });
     fs.rmSync(projectRoot, { recursive: true, force: true });

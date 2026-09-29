@@ -38,7 +38,7 @@ The generated source is the provider configuration, so installation paths and de
 | `opencode` | config-managed | `~/.agents/skills` | `.agents/skills` | `link` |
 | `claude-code` | hooks-native | `~/.claude/skills` | `.claude/skills` | `link` |
 | `codex` | hooks-native | `~/.agents/skills` | `.agents/skills` | `link` |
-| `cursor` | agents-md-managed | `~/.cursor/rules` | `.cursor/rules` | `cursor-mdc` |
+| `cursor` | hooks-native | `~/.agents/skills` | `.agents/skills` | `link` |
 | `copilot` | agents-md-managed | **unsupported** | `.github/instructions` | `copilot-instructions` |
 
 ### Agent profiles, workflows, hooks, and context
@@ -49,7 +49,7 @@ The generated source is the provider configuration, so installation paths and de
 | `opencode` | `~/.config/opencode/agents` · `link` | — (not applicable) | — (none) | `~/.config/opencode/opencode.json` → `instructions` field | — (no gate) |
 | `claude-code` | `~/.claude/agents` · `link` | — (not applicable) | `cc-settings-merge` | hook `SessionStart` | — (no gate) |
 | `codex` | `~/.codex/agents` · `codex-agent-toml` | — (not applicable) | `codex-hooks-json` | `AGENTS.md` + `~/.codex/AGENTS.md` | 0.145.0 |
-| `cursor` | — (not applicable) | — (not applicable) | — (none) | project `AGENTS.md` (no global equivalent) | — (no gate) |
+| `cursor` | `~/.cursor/agents` · `link` | — (not applicable) | `cursor-hooks-json` | project `AGENTS.md` (no global equivalent) | — (no gate) |
 | `copilot` | — (not applicable) | — (not applicable) | — (none) | project `AGENTS.md` (no global equivalent) | — (no gate) |
 
 > Generated from `cli/src/providers/index.ts`. **Do not edit by hand** — `npm run docs:matrix` regenerates it and

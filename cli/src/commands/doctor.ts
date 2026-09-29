@@ -68,6 +68,7 @@ const CHECK_LABELS: Record<ProviderCheck['id'], string> = {
     'agents.native': 'native agents',
     'workflows.global': 'global workflows',
     'context.global': 'global context',
+    'context.overlap': 'Claude/Cursor delivery overlap',
     'hook.trust': 'hook SessionStart',
     'guidance.project': 'project guidance',
     'constitution.delivery': 'constitution delivery',
@@ -90,7 +91,7 @@ export function attachRoutingSetupGuidance(report: ProviderDiagnosticReport, gui
 }
 
 const OK_STATES: ProviderCheckState[] = ['supported', 'healthy', 'shared', 'delivered'];
-const PENDING_STATES: ProviderCheckState[] = ['pending', 'pending-trust'];
+const PENDING_STATES: ProviderCheckState[] = ['pending', 'pending-trust', 'pending-first-run'];
 const WARN_STATES: ProviderCheckState[] = ['stale'];
 
 function providerGlyph(state: ProviderCheckState): string {
@@ -103,6 +104,7 @@ function providerGlyph(state: ProviderCheckState): string {
 function providerCheckDetail(check: ProviderCheck): string {
     if (check.id === 'binary.version' && check.target) return pc.dim(` (${check.target})`);
     if (check.state === 'pending-trust') return pc.dim(' (pending trust)');
+    if (check.state === 'pending-first-run') return pc.dim(' (pending first run)');
     if (check.detail) return pc.dim(` (${check.detail})`);
     return '';
 }

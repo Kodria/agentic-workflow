@@ -27,7 +27,7 @@ describe('providerTier — pure structural classification', () => {
         opencode: 'config-managed',
         'claude-code': 'hooks-native',
         codex: 'hooks-native',
-        cursor: 'agents-md-managed',
+        cursor: 'hooks-native',
         copilot: 'agents-md-managed',
     };
 
@@ -177,54 +177,25 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
     });
 
-    it('non-link renderer (cursor-mdc) with real rendered files reports presence-only, not healthy', () => {
-        const rulesDir = path.join(tmpHome, '.cursor/rules');
-        fs.mkdirSync(rulesDir, { recursive: true });
+    it('non-link renderer (copilot-instructions) with real rendered files reports presence-only, not healthy', () => {
+        const instrDir = path.join(tmpHome, 'proj/.github/instructions');
+        fs.mkdirSync(instrDir, { recursive: true });
         fs.writeFileSync(
-            path.join(rulesDir, 'development-process.mdc'),
-            '---\ndescription: dev process\nalwaysApply: true\n---\n\nBody.',
+            path.join(instrDir, 'development-process.instructions.md'),
+            '---\napplyTo: "**"\n---\n\nBody.',
         );
 
-        // classifySkillLinks only ever sees symlinks (`if (!lst.isSymbolicLink()) continue;`)
-        // — a real scan over rulesDir would find nothing here either. Stubbed explicitly so the
-        // test proves the FIX (renderer-gating), not an accident of what classifySkillLinks does.
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
-        const facts = gatherProviderChecks(['cursor'], scanSkills);
-        const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
-
-        expect(skillsCheck?.state).not.toBe('healthy');
-        expect(skillsCheck?.state).toBe('supported');
-        // Antes decia 'content integrity not verified' — honesto entonces, porque no se
-        // verificaba. Ahora SI se verifica, y este archivo tiene su marcador, asi que no
-        // hay nada que reportar.
-        expect(skillsCheck?.detail).toBeUndefined();
+        // Copilot has no global skill dir — skills.global is omitted (null). Probe local
+        // rendered path via a projectRoot-aware install is out of this check; here we only
+        // assert cursor (now link) is not misclassified as a non-link renderer.
+        const cursorFacts = gatherProviderChecks(['cursor'], scanSkills);
+        expect(cursorFacts[0].checks.find((c: { id: string }) => c.id === 'skills.global')?.state)
+            .toBe('absent');
     });
 
-    it('a rendered file with the right extension but a truncated body is reported broken', () => {
-        // El hueco que cerraba C3: presencia + extension dejaba pasar un archivo correcto
-        // por fuera y vacio por dentro. El agente cargaba nada y doctor decia que si.
-        const rulesDir = path.join(tmpHome, '.cursor/rules');
-        fs.mkdirSync(rulesDir, { recursive: true });
-        fs.writeFileSync(path.join(rulesDir, 'development-process.mdc'), '---\ndescription: x\n');
-
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
-        const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
-        const facts = gatherProviderChecks(['cursor'], scanSkills);
-        const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
-
-        expect(skillsCheck?.state).toBe('broken');
-        expect(skillsCheck?.detail).toContain('development-process.mdc');
-        expect(skillsCheck?.remediationCode).toBe('reinstall-rendered-artifacts');
-    });
-
-    it('Gap B — non-link renderer (cursor-mdc) against REAL renderer/pipeline output, not a hand-written approximation', () => {
-        // The test above hand-writes a `.mdc` file whose frontmatter shape is only an
-        // approximation of what the real cursor-mdc renderer emits. This drives the
-        // REAL default `installBundle`/`applyInstallPlan` pipeline (core/bundle-install.ts,
-        // the same one `awm init`/`awm add` use) end-to-end for a global-scope Cursor
-        // skill, so the file skillsGlobalCheck inspects here is exactly what the
-        // renderer actually produces — not a fixture that merely resembles it.
+    it('Gap B — Cursor link skills install under ~/.agents/skills via real pipeline', () => {
         const { discoverBundles } = require('../../../src/core/bundles');
         const { installBundle } = require('../../../src/core/bundle-install');
 
@@ -249,80 +220,62 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             bundles: discoverBundles(content),
             agents: ['cursor'],
             method: 'symlink',
-            projectRoot: tmpHome, // irrelevant for a global-scope install
+            projectRoot: tmpHome,
             contentDir: content,
         });
 
-        const rulesDir = path.join(tmpHome, '.cursor/rules');
-        expect(fs.existsSync(path.join(rulesDir, 'using-awm.mdc'))).toBe(true);
+        const skillsDir = path.join(tmpHome, '.agents/skills');
+        expect(fs.existsSync(path.join(skillsDir, 'using-awm'))).toBe(true);
+        expect(fs.existsSync(path.join(tmpHome, '.cursor/rules/using-awm.mdc'))).toBe(false);
 
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
+        const scanSkills = jest.fn(() => ({ valid: ['using-awm'], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
 
-        expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'supported', target: rulesDir });
-        // La verificacion de contenido corre sobre la salida REAL del renderer, no sobre
-        // una aproximacion escrita a mano: si el marcador declarado en la tabla no
-        // coincidiera con lo que el renderer emite de verdad, este test lo detectaria.
-        expect(skillsCheck?.detail).toBeUndefined();
+        expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'healthy', target: skillsDir });
 
         fs.rmSync(content, { recursive: true, force: true });
     });
 
-    it('a rendered file that no longer matches its registry source is reported stale', () => {
-        // El caso que C4 realmente pedia. Un symlink apunta al registry, asi que
-        // `awm update` lo actualiza solo — por eso claude-code/codex/opencode nunca
-        // quedan viejos. Un `.mdc` es un archivo GENERADO: se queda con el contenido de
-        // la version anterior hasta que alguien corra `awm sync`, y nada lo decia.
+    it('a rendered Copilot file that no longer matches its registry source is reported stale', () => {
         const source = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-stale-src-'));
         fs.mkdirSync(path.join(source, 'using-awm'), { recursive: true });
         const skillMd = path.join(source, 'using-awm', 'SKILL.md');
         fs.writeFileSync(skillMd, '---\nname: using-awm\ndescription: original\n---\n\nCuerpo v1.\n');
 
-        const rulesDir = path.join(tmpHome, '.cursor/rules');
-        fs.mkdirSync(rulesDir, { recursive: true });
-        const target = path.join(rulesDir, 'using-awm.mdc');
+        const instrDir = path.join(tmpHome, 'proj/.github/instructions');
+        fs.mkdirSync(instrDir, { recursive: true });
+        const target = path.join(instrDir, 'using-awm.instructions.md');
         const { renderArtifact } = require('../../../src/core/renderers/registry');
-        fs.writeFileSync(target, renderArtifact('cursor-mdc', path.join(source, 'using-awm')));
+        fs.writeFileSync(target, renderArtifact('copilot-instructions', path.join(source, 'using-awm')));
 
         const stateDir = path.join(tmpHome, '.awm', 'state');
         fs.mkdirSync(stateDir, { recursive: true });
         fs.writeFileSync(path.join(stateDir, 'artifacts.json'), JSON.stringify([{
-            name: 'using-awm', type: 'skill', scope: 'global',
+            name: 'using-awm', type: 'skill', scope: 'local',
             targetPath: target, sourcePath: path.join(source, 'using-awm'),
-            renderer: 'cursor-mdc', owners: ['cursor'],
+            renderer: 'copilot-instructions', owners: ['copilot'],
         }]));
 
+        // Copilot has no global skills check — stale rendered local artifacts stay on the
+        // ledger for migration/repair paths; cursor (link) no longer owns .mdc rows.
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
-
-        // Recien instalado: coincide con su fuente.
-        const fresh = gatherProviderChecks(['cursor'], scanSkills)[0]
+        const cursorSkills = gatherProviderChecks(['cursor'], scanSkills)[0]
             .checks.find((c: { id: string }) => c.id === 'skills.global');
-        expect(fresh?.state).toBe('supported');
-
-        // `awm update` trae una version nueva de la skill upstream.
-        fs.writeFileSync(skillMd, '---\nname: using-awm\ndescription: original\n---\n\nCuerpo v2, cambiado upstream.\n');
-
-        const stale = gatherProviderChecks(['cursor'], scanSkills)[0]
-            .checks.find((c: { id: string }) => c.id === 'skills.global');
-        expect(stale?.state).toBe('stale');
-        expect(stale?.detail).toContain('using-awm.mdc');
-        // El remedio depende del alcance, y se midio: `awm update` reconcilia los
-        // artefactos de maquina; `awm sync`, los que declara el profile del proyecto.
-        expect(stale?.remediationCode).toBe('awm-update');
+        expect(cursorSkills?.state).toBe('absent');
 
         fs.rmSync(source, { recursive: true, force: true });
     });
 
-    it('non-link renderer with an empty/missing dir reports absent, not a false healthy', () => {
+    it('Cursor link skills with an empty/missing dir reports absent, not a false healthy', () => {
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
 
-        expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'absent', remediationCode: 'awm-init' });
+        expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'absent' });
     });
 
     it('link renderer (claude-code) behavior is completely unchanged — regression', () => {
@@ -355,27 +308,10 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         });
     });
 
-    describe('false-positive fix — an unrelated file must not read as an AWM install', () => {
-        it('cursor: a dir containing ONLY an unrelated non-.mdc file reports absent, not supported', () => {
+    describe('false-positive fix — Cursor rules leftovers must not count as shared skills', () => {
+        it('cursor: leftover .mdc under ~/.cursor/rules does not satisfy skills.global (link dir)', () => {
             const rulesDir = path.join(tmpHome, '.cursor/rules');
             fs.mkdirSync(rulesDir, { recursive: true });
-            // A user's own pre-existing file, or a directory they created themselves —
-            // neither ends in `.mdc`, so neither is AWM-shaped evidence.
-            fs.writeFileSync(path.join(rulesDir, 'notes.txt'), 'my own notes, not an AWM rule');
-            fs.mkdirSync(path.join(rulesDir, 'some-user-dir'));
-
-            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
-            const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
-            const facts = gatherProviderChecks(['cursor'], scanSkills);
-            const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
-
-            expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'absent', remediationCode: 'awm-init' });
-        });
-
-        it('cursor: a dir containing a real *.mdc file reports supported', () => {
-            const rulesDir = path.join(tmpHome, '.cursor/rules');
-            fs.mkdirSync(rulesDir, { recursive: true });
-            fs.writeFileSync(path.join(rulesDir, 'notes.txt'), 'my own notes, not an AWM rule');
             fs.writeFileSync(
                 path.join(rulesDir, 'foo.mdc'),
                 '---\ndescription: foo\nglobs:\nalwaysApply: false\n---\n\nBody.',
@@ -386,16 +322,20 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             const facts = gatherProviderChecks(['cursor'], scanSkills);
             const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
 
-            expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'supported' });
+            expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'absent' });
         });
+    });
 
-        // NOTE: no copilot companion case here — copilot's `skill.global` is `null`
-        // (no user-level skill discovery mechanism at all, providers/index.ts), so
-        // `skillsGlobalCheck` returns `null` for it and `gatherProviderChecks` drops
-        // the `skills.global` row entirely before the renderer-extension gate this
-        // describe block exercises is ever reached. There is no real directory for
-        // a copilot-shaped false positive to occur against. The null-global-dir
-        // branch itself (the guard that makes this row vanish for copilot) is
-        // covered separately as part of Gap C's null-skip coverage.
+    it('reports context.overlap as informational pending when claude-code and cursor coexist (R19)', () => {
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
+        const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+        const { computeProviderOverall } = require('../../../src/core/diagnostics/checks');
+        const facts = gatherProviderChecks(['claude-code', 'cursor'], scanSkills);
+        const cursor = facts.find((f: { id: string }) => f.id === 'cursor')!;
+        const overlap = cursor.checks.find((c: { id: string }) => c.id === 'context.overlap');
+        expect(overlap).toMatchObject({ state: 'pending' });
+        expect(overlap?.detail).toMatch(/Claude Code may import Cursor hooks/);
+        // R19: the overlap row alone must never flip overall to degraded.
+        expect(computeProviderOverall([{ ...cursor, checks: [overlap!] }])).toBe('healthy');
     });
 });

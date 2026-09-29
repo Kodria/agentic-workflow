@@ -21,6 +21,13 @@ export type InstallOptions = {
     agent: AgentTarget;
     registryRoot: string;
     installMethod: 'symlink' | 'copy';
+    /** Cursor R16.2: omit preCompact/postToolUse when deferred re-anchor is disabled. */
+    disableDeferredReanchor?: boolean;
+    /**
+     * Cursor R20 floor override. When omitted, install resolves the installed
+     * baseline registry version. Tests pass an explicit value to avoid git I/O.
+     */
+    baselineRegistryVersion?: string | null;
 };
 
 export type InstallResult = {
@@ -137,13 +144,14 @@ export type HookStatus = {
      *  `HEALTHY` — un hook que nunca corrio no se puede afirmar que entregue contexto —
      *  y tampoco `DEGRADED`, porque no hay nada roto que arreglar. Ver D-010. */
     overall: 'HEALTHY' | 'DEGRADED' | 'NOT_INSTALLED' | 'PENDING_TRUST';
-    // Codex-only: whether a runtime heartbeat confirms the installed script
+    // Codex/Cursor: whether a runtime heartbeat confirms the installed script
     // matches what actually ran last session. Absent for agents (Claude)
-    // that don't have a heartbeat mechanism.
-    trust?: 'pending-trust' | 'healthy' | 'stale';
+    // that don't have a heartbeat mechanism. Cursor uses `pending-first-run`
+    // (no approval UX); Codex keeps `pending-trust`.
+    trust?: 'pending-trust' | 'pending-first-run' | 'healthy' | 'stale';
     checks: {
-        // Claude-only checks (the materialized using-awm.md bootstrap skill file
-        // and the run-hook.cmd wrapper script). Absent for agents without them.
+        // Claude/Cursor: materialized using-awm.md beside hook scripts.
+        // Claude also has run-hook.cmd; Cursor does not.
         bootstrapSkill?: CheckResult;
         sessionStartScript: CheckResult;
         runHookWrapper?: CheckResult;

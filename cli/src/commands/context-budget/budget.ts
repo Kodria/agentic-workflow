@@ -1,5 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { awmHome } from '../../core/paths';
+import {
+    CURSOR_REANCHOR_MAX_BYTES,
+    CURSOR_REANCHOR_PIN,
+    CURSOR_SESSION_START_MAX_BYTES,
+    CURSOR_SESSION_START_PIN,
+} from '../../core/cursor-budgets';
 
 /**
  * The feedforward context budget.
@@ -30,7 +37,13 @@ export const DEFAULT_FILES = ['AGENTS.md', 'CONSTITUTION.md', 'CLAUDE.md'];
 
 export const CONFIG_FILE = path.join('.awm', 'context-budget.json');
 
-export type BudgetConfig = { files: string[]; maxBytes: number };
+export type BudgetConfig = {
+    files: string[];
+    maxBytes: number;
+    /** Optional Cursor hook payload pins (Plan B R5). */
+    [CURSOR_SESSION_START_PIN]?: number;
+    [CURSOR_REANCHOR_PIN]?: number;
+};
 
 export type BudgetReport = {
     /** 'pinned' on the first check; 'within' under budget; 'over' past it;
@@ -40,6 +53,14 @@ export type BudgetReport = {
     maxBytes: number;
     /** Per-file sizes, in the order declared. Absent files are omitted. */
     breakdown: { file: string; bytes: number }[];
+    /** Cursor hook pin comparison when hooks are installed; omitted when absent. */
+    cursorHooks?: {
+        status: 'within' | 'over' | 'absent';
+        sessionStartMaxBytes: number;
+        reanchorMaxBytes: number;
+        observedSessionStartMaxBytes: number | null;
+        observedReanchorMaxBytes: number | null;
+    };
 };
 
 /** Rough but stable: ~4 bytes per token for prose. Reporting only — never a gate input. */
@@ -73,13 +94,52 @@ export function readConfig(cwd: string): BudgetConfig | null {
     try {
         const raw = JSON.parse(fs.readFileSync(path.join(cwd, CONFIG_FILE), 'utf-8'));
         if (typeof raw.maxBytes !== 'number' || !Number.isFinite(raw.maxBytes)) return null;
-        return {
+        const config: BudgetConfig = {
             files: Array.isArray(raw.files) && raw.files.length ? raw.files : DEFAULT_FILES,
             maxBytes: raw.maxBytes,
         };
+        if (typeof raw[CURSOR_SESSION_START_PIN] === 'number' && Number.isFinite(raw[CURSOR_SESSION_START_PIN])) {
+            config[CURSOR_SESSION_START_PIN] = raw[CURSOR_SESSION_START_PIN];
+        }
+        if (typeof raw[CURSOR_REANCHOR_PIN] === 'number' && Number.isFinite(raw[CURSOR_REANCHOR_PIN])) {
+            config[CURSOR_REANCHOR_PIN] = raw[CURSOR_REANCHOR_PIN];
+        }
+        return config;
     } catch {
         return null;
     }
+}
+
+/** Read MAX_*_BYTES assignments from an installed Cursor session-start script. */
+export function readCursorHookByteCaps(scriptPath: string): { session: number | null; reanchor: number | null } {
+    if (!fs.existsSync(scriptPath)) return { session: null, reanchor: null };
+    const text = fs.readFileSync(scriptPath, 'utf8');
+    const session = /MAX_SESSION_BYTES\s*=\s*(\d+)\s*\*\s*(\d+)/.exec(text);
+    const reanchor = /MAX_REANCHOR_BYTES\s*=\s*(\d+)\s*\*\s*(\d+)/.exec(text);
+    return {
+        session: session ? Number(session[1]) * Number(session[2]) : null,
+        reanchor: reanchor ? Number(reanchor[1]) * Number(reanchor[2]) : null,
+    };
+}
+
+export function evaluateCursorHookBudgets(config: BudgetConfig | null): BudgetReport['cursorHooks'] {
+    const scriptPath = path.join(awmHome(), 'hooks/cursor/session-start');
+    if (!fs.existsSync(scriptPath)) {
+        return undefined; // unmeasurable / absent — do not fail
+    }
+    const pinSession = config?.[CURSOR_SESSION_START_PIN] ?? CURSOR_SESSION_START_MAX_BYTES;
+    const pinReanchor = config?.[CURSOR_REANCHOR_PIN] ?? CURSOR_REANCHOR_MAX_BYTES;
+    const observed = readCursorHookByteCaps(scriptPath);
+    const sessionOk = observed.session === null || observed.session <= pinSession;
+    const reanchorOk = observed.reanchor === null || observed.reanchor <= pinReanchor;
+    const constantsOk = CURSOR_SESSION_START_MAX_BYTES <= pinSession && CURSOR_REANCHOR_MAX_BYTES <= pinReanchor;
+    return {
+        status: sessionOk && reanchorOk && constantsOk ? 'within' : 'over',
+        sessionStartMaxBytes: pinSession,
+        reanchorMaxBytes: pinReanchor,
+        observedSessionStartMaxBytes: observed.session,
+        observedReanchorMaxBytes: observed.reanchor,
+    };
 }
 
 export function writeConfig(cwd: string, config: BudgetConfig): void {
@@ -102,6 +162,7 @@ export function writeConfig(cwd: string, config: BudgetConfig): void {
  */
 export function checkBudget(cwd: string): BudgetReport {
     const config = readConfig(cwd);
+    const cursorHooks = evaluateCursorHookBudgets(config);
     if (!config) {
         const { total, breakdown } = measure(cwd, DEFAULT_FILES);
         // Fijar sobre CERO archivos es una trampa, no una linea base.
@@ -115,16 +176,19 @@ export function checkBudget(cwd: string): BudgetReport {
         //
         // Se reporta y NO se escribe config: el proximo run, ya con contexto, fija bien.
         if (breakdown.length === 0) {
-            return { status: 'unmeasurable', totalBytes: 0, maxBytes: 0, breakdown };
+            return { status: 'unmeasurable', totalBytes: 0, maxBytes: 0, breakdown, ...(cursorHooks ? { cursorHooks } : {}) };
         }
         writeConfig(cwd, { files: DEFAULT_FILES, maxBytes: total });
-        return { status: 'pinned', totalBytes: total, maxBytes: total, breakdown };
+        return { status: 'pinned', totalBytes: total, maxBytes: total, breakdown, ...(cursorHooks ? { cursorHooks } : {}) };
     }
     const { total, breakdown } = measure(cwd, config.files);
+    const fileStatus = total > config.maxBytes ? 'over' : 'within';
+    const status = fileStatus === 'over' || cursorHooks?.status === 'over' ? 'over' : fileStatus;
     return {
-        status: total > config.maxBytes ? 'over' : 'within',
+        status,
         totalBytes: total,
         maxBytes: config.maxBytes,
         breakdown,
+        ...(cursorHooks ? { cursorHooks } : {}),
     };
 }

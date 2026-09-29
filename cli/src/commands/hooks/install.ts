@@ -1,6 +1,7 @@
 import { getHookConfig } from '../../providers';
 import { installClaudeHook } from './claude';
 import { installCodexHook } from './codex';
+import { installCursorHook } from './cursor';
 import type { InstallOptions, InstallResult } from './shared';
 
 export type { InstallOptions, InstallResult };
@@ -16,6 +17,8 @@ export function installHook(options: InstallOptions): InstallResult {
             return installClaudeHook(options);
         case 'codex-hooks-json':
             return installCodexHook(options);
+        case 'cursor-hooks-json':
+            return installCursorHook(options);
         /* istanbul ignore next -- HookConfig['type'] is exhaustively handled above */
         default: {
             const exhaustive: never = config.type;

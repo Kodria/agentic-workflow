@@ -4,6 +4,7 @@ import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
 import { computeHookStatus } from './status';
 import { claudeResyncSourcesExist, installClaudeHook } from './claude';
 import { codexResyncSourcesExist, resyncCodexHookFiles } from './codex';
+import { cursorResyncSourcesExist, resyncCursorHookFiles } from './cursor';
 
 export type ResyncAction = 'resynced' | 'not-installed' | 'registry-missing';
 
@@ -54,6 +55,15 @@ export function resyncInstalledHooks(
                     continue;
                 }
                 resyncCodexHookFiles(config, registryRoot, method);
+                results.push({ agent, action: 'resynced' });
+                break;
+            }
+            case 'cursor-hooks-json': {
+                if (!cursorResyncSourcesExist(registryRoot)) {
+                    results.push({ agent, action: 'registry-missing' });
+                    continue;
+                }
+                resyncCursorHookFiles(config, registryRoot, method);
                 results.push({ agent, action: 'resynced' });
                 break;
             }

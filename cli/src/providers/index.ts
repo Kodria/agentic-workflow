@@ -38,11 +38,11 @@ export type ArtifactConfig = {
 };
 
 export type HookConfig = {
-    type: 'cc-settings-merge' | 'codex-hooks-json';
+    type: 'cc-settings-merge' | 'codex-hooks-json' | 'cursor-hooks-json';
     settingsPath: string;
     scriptsDir: string;
-    matcher: string;
-    eventName: string;
+    matcher: string;      // unused for cursor (empty string)
+    eventName: string;    // unused for cursor (empty string)
 };
 
 export type SettingsMergeHookConfig = HookConfig & {
@@ -217,13 +217,27 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         cursor: {
             label: 'Cursor',
             configHome: configHomeFor('cursor'),
+            // Skills join the Codex/OpenCode shared physical dirs (~/.agents/skills +
+            // .agents/skills, renderer link). cursor-mdc remains registered for S3
+            // migration reads of historical ~/.cursor/rules installs.
             skill: {
-                global: path.join(root('cursor'), 'rules'),
-                local: '.cursor/rules',
-                renderer: 'cursor-mdc',
+                global: path.join(home, '.agents/skills'),
+                local: '.agents/skills',
+                renderer: 'link',
             },
             workflow: null,
-            agent: null,
+            agent: {
+                global: path.join(root('cursor'), 'agents'),
+                local: '.cursor/agents',
+                renderer: 'link',
+            },
+            hooks: {
+                type: 'cursor-hooks-json',
+                settingsPath: path.join(root('cursor'), 'hooks.json'),
+                scriptsDir: path.join(awm, 'hooks/cursor'),
+                matcher: '',
+                eventName: '',
+            },
             injection: {
                 type: 'managed-agents-md',
                 // Cursor has no confirmed user-level/global AGENTS.md-equivalent file — its

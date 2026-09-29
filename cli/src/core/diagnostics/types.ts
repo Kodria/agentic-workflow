@@ -81,12 +81,13 @@ export interface ProjectFacts {
 export type ProviderCheckState =
     | 'supported' | 'unsupported' | 'missing'
     | 'healthy' | 'broken' | 'shared' | 'stale'
-    | 'absent' | 'conflict' | 'pending-trust'
+    | 'absent' | 'conflict' | 'pending-trust' | 'pending-first-run'
     | 'delivered' | 'pending';
 
 export type ProviderCheck = {
     id: 'binary.version' | 'skills.global' | 'agents.native' | 'workflows.global' |
-        'context.global' | 'hook.trust' | 'guidance.project' | 'constitution.delivery' | 'routing.machine';
+        'context.global' | 'context.overlap' | 'hook.trust' | 'guidance.project' |
+        'constitution.delivery' | 'routing.machine';
     state: ProviderCheckState;
     target?: string;
     owners?: AgentTarget[];
@@ -101,11 +102,11 @@ export type ProviderCheck = {
 // `provider-checks.ts`) — not from any live check result:
 //   - 'hooks-native': has a `hooks` config (session-start hook re-anchors
 //     state every session — the strongest capability level). Today:
-//     claude-code, codex.
+//     claude-code, codex, cursor.
 //   - 'agents-md-managed': no `hooks`, but delivers context via the
 //     `managed-agents-md` convention (a single-block AGENTS.md the agent is
 //     expected to read on its own trigger, no active re-anchor). Today:
-//     cursor, copilot.
+//     copilot.
 //   - 'config-managed': no `hooks`, delivers context by writing into the
 //     agent's own config file (`injection.type === 'config-instructions'`) —
 //     same "no active re-anchor" reliability as agents-md-managed, but a

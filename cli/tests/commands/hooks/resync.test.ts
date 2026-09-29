@@ -64,6 +64,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'resynced' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         const settings = JSON.parse(fs.readFileSync(path.join(tmpHome, '.claude/settings.json'), 'utf8'));
         expect(settings.hooks.SubagentStart[0].hooks[0].command).toBe('awm model-policy hook-event --event start');
@@ -87,6 +88,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'not-installed' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/session-start'))).toBe(false);
     });
@@ -127,6 +129,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'resynced' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false);
         const content = fs.readFileSync(skillDest, 'utf-8');
@@ -148,6 +151,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'resynced' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(true);
         // Task 6: using-awm.md is materialized regardless of the scripts' install method —
@@ -167,6 +171,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'registry-missing' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
     });
@@ -185,6 +190,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'resynced' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.existsSync(path.join(scriptsDir, 'session-start'))).toBe(true);
         // detectInstallMethod fell back to copy since lstatSync threw
@@ -212,6 +218,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'registry-missing' },
             { agent: 'codex', action: 'not-installed' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         // old script left intact — never leave user without hook
         expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
@@ -247,6 +254,7 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([
             { agent: 'claude-code', action: 'not-installed' },
             { agent: 'codex', action: 'resynced' },
+            { agent: 'cursor', action: 'not-installed' },
         ]);
         expect(fs.readFileSync(path.join(codexScriptsDir, 'session-start'), 'utf-8')).toContain('NEW CODEX');
     });

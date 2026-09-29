@@ -30,6 +30,7 @@ import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../cor
 import { applyInstallPlan as realApplyInstallPlan, InstallSummary } from '../core/install-transaction';
 import { InstallPlan } from '../core/install-planner';
 import { resyncInstalledHooks, ResyncResult } from '../commands/hooks/resync';
+import { migrateCursorMdcSkills } from '../core/init/migrate-cursor-mdc';
 // `core/update-check.ts` imports `@clack/prompts` (ESM-only) at its top level
 // for its interactive confirm() prompt — required lazily below, inside the
 // default dep, so `require()`-ing this module for `runUpdateCore` alone never
@@ -210,6 +211,10 @@ export async function runUpdateCore(
     }
     if (artifactResult.installed.length > 0) {
         console.log(pc.green(`  ✓ Reconciled artifacts: ${artifactResult.installed.join(', ')}`));
+    }
+
+    if (selectedAgents.includes('cursor')) {
+        migrateCursorMdcSkills({});
     }
 
     const hooksRoot = capabilityRoot('hooks');

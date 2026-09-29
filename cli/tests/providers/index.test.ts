@@ -183,10 +183,26 @@ describe('Providers Routing', () => {
             expect(isAgentTarget('copilot')).toBe(true);
         });
 
-        it('resolves Cursor skill paths for both scopes', () => {
-            expect(getTargetPath('skill', 'cursor', 'local')).toBe('.cursor/rules');
+        it('joins the shared agents skills dirs with link renderer (Plan B R1/R2)', () => {
+            expect(providerFor('cursor').skill).toEqual({
+                global: path.join(process.env.HOME!, '.agents/skills'),
+                local: '.agents/skills',
+                renderer: 'link',
+            });
+            expect(getTargetPath('skill', 'cursor', 'local')).toBe('.agents/skills');
             expect(getTargetPath('skill', 'cursor', 'global'))
-                .toBe(path.join(process.env.HOME!, '.cursor/rules'));
+                .toBe(path.join(process.env.HOME!, '.agents/skills'));
+        });
+
+        it('installs canonical Cursor agents under .cursor/agents with link (Plan B R6/R9)', () => {
+            expect(providerFor('cursor').agent).toEqual({
+                global: path.join(process.env.HOME!, '.cursor/agents'),
+                local: '.cursor/agents',
+                renderer: 'link',
+            });
+            expect(getTargetPath('agent', 'cursor', 'local')).toBe('.cursor/agents');
+            expect(getTargetPath('agent', 'cursor', 'global'))
+                .toBe(path.join(process.env.HOME!, '.cursor/agents'));
         });
 
         it('resolves the Copilot local skill path', () => {
@@ -199,7 +215,7 @@ describe('Providers Routing', () => {
             );
         });
 
-        it('keeps workflow/agent unsupported (null) for both, via the existing generic message', () => {
+        it('keeps workflow unsupported for cursor and agent unsupported for copilot', () => {
             expect(() => getTargetPath('workflow', 'cursor', 'local')).toThrow(
                 'workflows are not supported by Cursor.',
             );
@@ -208,29 +224,27 @@ describe('Providers Routing', () => {
             );
         });
 
-        it('declares no hooks config for cursor or copilot', () => {
-            expect(providerFor('cursor').hooks).toBeUndefined();
+        it('declares cursor-hooks-json for cursor and none for copilot', () => {
+            expect(providerFor('cursor').hooks).toEqual({
+                type: 'cursor-hooks-json',
+                settingsPath: path.join(tmpHome, '.cursor/hooks.json'),
+                scriptsDir: path.join(process.env.AWM_HOME!, 'hooks/cursor'),
+                matcher: '',
+                eventName: '',
+            });
             expect(providerFor('copilot').hooks).toBeUndefined();
         });
 
-        it('assigns the Cursor .mdc and Copilot instructions renderers to their skill artifact config (Task 4.3)', () => {
-            expect(providerFor('cursor').skill.renderer).toBe('cursor-mdc');
+        it('assigns Copilot instructions renderer; Cursor skills use link (cursor-mdc kept for migration)', () => {
+            expect(providerFor('cursor').skill.renderer).toBe('link');
             expect(providerFor('copilot').skill.renderer).toBe('copilot-instructions');
         });
 
-        it('assertLinkRenderer still refuses the Cursor/Copilot skill renderers (Task 4.3 code-quality-review fix)', () => {
-            // Regression: an earlier version of this task widened assertLinkRenderer to
-            // allow these two through, on the theory that a raw unrendered copy is "at
-            // least a plausible degraded install" — wrong. assertLinkRenderer's only
-            // callers (core/provider-artifacts.ts's legacy preflight, src/index.ts's
-            // legacy interactive `awm add`) can only symlink/copy verbatim; they never
-            // render. A raw SKILL.md copy at `.cursor/rules/<name>` or
-            // `.github/instructions/<name>` has no `.mdc`/`.instructions.md` extension
-            // and no frontmatter (`alwaysApply`/`applyTo`) — neither Cursor nor Copilot
-            // would ever read it. This must keep throwing, same as codex-agent-toml
-            // always has, directing users to commands/add.ts's real render pipeline
-            // instead (which never calls assertLinkRenderer at all).
-            expect(() => assertLinkRenderer('skill', 'cursor')).toThrow(/not implemented yet/);
+        it('assertLinkRenderer accepts Cursor link skills and still refuses Copilot', () => {
+            expect(() => assertLinkRenderer('skill', 'cursor')).not.toThrow();
+            expect(assertLinkRenderer('skill', 'cursor')?.renderer).toBe('link');
+            // Copilot still renders via the add pipeline only — a raw SKILL.md under
+            // `.github/instructions/` lacks `.instructions.md` + applyTo frontmatter.
             expect(() => assertLinkRenderer('skill', 'copilot')).toThrow(/not implemented yet/);
         });
     });

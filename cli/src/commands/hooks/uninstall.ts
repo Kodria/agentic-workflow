@@ -1,6 +1,7 @@
 import { getHookConfig } from '../../providers';
 import { uninstallClaudeHook } from './claude';
 import { uninstallCodexHook } from './codex';
+import { uninstallCursorHook } from './cursor';
 import type { UninstallOptions, UninstallResult } from './shared';
 
 export type { UninstallOptions, UninstallResult };
@@ -16,6 +17,8 @@ export function uninstallHook(options: UninstallOptions): UninstallResult {
             return uninstallClaudeHook(options.agent as 'claude-code');
         case 'codex-hooks-json':
             return uninstallCodexHook(options.agent as 'codex');
+        case 'cursor-hooks-json':
+            return uninstallCursorHook(options.agent as 'cursor');
         /* istanbul ignore next -- HookConfig['type'] is exhaustively handled above */
         default: {
             const exhaustive: never = config.type;

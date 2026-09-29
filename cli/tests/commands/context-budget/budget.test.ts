@@ -160,3 +160,84 @@ describe('pinning refuses to happen when there is nothing to measure', () => {
         expect(fs.existsSync(path.join(cwd, CONFIG_FILE))).toBe(true);
     });
 });
+
+describe('Cursor hook budget pins (Plan B R5)', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+    const dirs: string[] = [];
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-cursor-budget-home-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        dirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true }));
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    it('skips cursor pins when hooks are not installed', () => {
+        const { checkBudget } = require('../../../src/commands/context-budget/budget');
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-budget-'));
+        dirs.push(dir);
+        fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'a'.repeat(100));
+        const report = checkBudget(dir);
+        expect(report.cursorHooks).toBeUndefined();
+        expect(report.status).toBe('pinned');
+    });
+
+    it('marks over when installed script caps exceed pin or disagree with module constants', () => {
+        const { checkBudget, writeConfig } = require('../../../src/commands/context-budget/budget');
+        const {
+            CURSOR_SESSION_START_MAX_BYTES,
+            CURSOR_REANCHOR_MAX_BYTES,
+        } = require('../../../src/core/cursor-budgets');
+        expect(CURSOR_SESSION_START_MAX_BYTES).toBe(24 * 1024);
+        expect(CURSOR_REANCHOR_MAX_BYTES).toBe(4 * 1024);
+
+        const scripts = path.join(tmpHome, '.awm/hooks/cursor');
+        fs.mkdirSync(scripts, { recursive: true });
+        fs.writeFileSync(
+            path.join(scripts, 'session-start'),
+            'const MAX_SESSION_BYTES = 24 * 1024;\nconst MAX_REANCHOR_BYTES = 4 * 1024;\n',
+        );
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-budget-'));
+        dirs.push(dir);
+        fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'a'.repeat(100));
+        writeConfig(dir, {
+            files: ['AGENTS.md'],
+            maxBytes: 1000,
+            'cursor.sessionStartMaxBytes': 1024, // below observed 24KiB
+            'cursor.reanchorMaxBytes': 4096,
+        });
+        const report = checkBudget(dir);
+        expect(report.cursorHooks?.status).toBe('over');
+        expect(report.status).toBe('over');
+    });
+
+    it('is within when script literals match defaults', () => {
+        const { checkBudget } = require('../../../src/commands/context-budget/budget');
+        const scripts = path.join(tmpHome, '.awm/hooks/cursor');
+        fs.mkdirSync(scripts, { recursive: true });
+        fs.writeFileSync(
+            path.join(scripts, 'session-start'),
+            'const MAX_SESSION_BYTES = 24 * 1024;\nconst MAX_REANCHOR_BYTES = 4 * 1024;\n',
+        );
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-budget-'));
+        dirs.push(dir);
+        fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'a'.repeat(100));
+        const report = checkBudget(dir);
+        expect(report.cursorHooks?.status).toBe('within');
+        expect(report.cursorHooks?.observedSessionStartMaxBytes).toBe(24 * 1024);
+    });
+});
