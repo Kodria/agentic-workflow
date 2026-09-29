@@ -1,3 +1,8 @@
+## Unreleased
+
+### Changes
+- **watch:** suspend durable custody (`awm watch`) for all providers until routing/custody resumes; native v1 unattended ignores leftover journals while suspended
+
 ## v9.15.0 - 2026-09-29
 
 ### Features

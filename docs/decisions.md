@@ -27,6 +27,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-020](#d-020) | 2026-08-14 | Retrospective coverage runs before ledger archive | Active |
 | [D-021](#d-021) | 2026-08-18 | AWM se licencia bajo Apache-2.0; la marca queda fuera del grant | Vigente |
 | [D-022](#d-022) | 2026-08-19 | Un cambio de metadata publicada se titula `fix:`, y CI puede forzar el bump | Vigente |
+| [D-023](#d-023) | 2026-09-29 | Custodia durable (`awm watch`) suspendida para todos los providers | Vigente |
 
 ---
 
@@ -567,3 +568,24 @@ falló — simplemente no hizo nada, que es la variante más silenciosa.
   vez de heredar el silencio. La comprobación corre sobre el workflow **sin comentarios**:
   mencionar un flag en un comentario no lo hace invocable, y la primera versión del test
   se dejaba engañar por eso.
+
+## D-023
+
+**Custodia durable (`awm watch` / Camino B) queda suspendida para todos los providers hasta retomar routing/custody.**
+
+El camino soportado de trabajo desatendido es la sesión nativa del provider
+(`compact-slices/v1`, sin journal). El supervisor durable —journal, relaunch de
+controller, jobs de verificación— no está funcionando bien en ningún provider y
+estaba causando problemas operativos; no se borra la maquinaria, se apaga el
+opt-in.
+
+**Implica:**
+- Todo verbo de `awm watch` (incluido `--init`, `rebind`, recoveries,
+  `archive-unused`, `journal-status`) sale fail-closed con un mensaje fijo.
+- La admisión nativa v1 desatendida trata cualquier journal residual como
+  `journal: "not-required"` mientras dure la suspensión, para que un leftover
+  no atrape la sesión.
+- La suite Jest re-habilita la maquinaria con `AWM_ALLOW_DURABLE_CUSTODY=1`
+  (solo en el harness). Los operadores no setean esa variable.
+- Cuando se retome routing/custody, se levanta la suspensión en
+  `cli/src/core/journal/durable-custody.ts` y se revalida el camino.

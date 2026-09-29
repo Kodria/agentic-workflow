@@ -14,5 +14,9 @@ module.exports = async () => {
   // operator's real ~/.awm directory.
   process.env.HOME = path.join(testTmp, 'home');
   process.env.AWM_HOME = path.join(testTmp, 'awm-home');
+  // Keep the durable-custody / awm watch machinery exercisable in Jest while
+  // operators see it suspended (see durable-custody.ts). Never set this outside
+  // the test harness.
+  process.env.AWM_ALLOW_DURABLE_CUSTODY = '1';
   delete process.env.CODEX_HOME;
 };
