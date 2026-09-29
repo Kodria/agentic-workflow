@@ -270,12 +270,8 @@ describe('installBundle', () => {
         expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(true);
     });
 
-    it('materializes a skill as a rendered Cursor .mdc via the real default applyInstallPlan (Task 4.3 e2e)', () => {
+    it('materializes a Cursor skill as a link under .agents/skills via the real default applyInstallPlan (Plan B e2e)', () => {
         const { content, projectRoot, bundles } = makeFixture();
-        // s-base's fixture SKILL.md (makeFixture, above) has no `description`
-        // field — real for a bare skill fixture, but cursor-mdc.ts's renderer
-        // requires one (parseSkillSource). Seed a real description here so
-        // this is a genuine end-to-end render, not just a source-existence check.
         fs.writeFileSync(
             path.join(content, 'skills', 's-base', 'SKILL.md'),
             '---\nname: s-base\ndescription: Base skill for bundle-install fixtures\n---\n\nDo the base thing.\n',
@@ -291,15 +287,12 @@ describe('installBundle', () => {
             contentDir: content,
         });
 
-        const mdcPath = path.join(projectRoot, '.cursor/rules/s-base.mdc');
-        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base'))).toBe(false);
-        expect(fs.existsSync(mdcPath)).toBe(true);
-        const rendered = fs.readFileSync(mdcPath, 'utf8');
-        expect(rendered).toContain('description: Base skill for bundle-install fixtures');
-        expect(rendered).toContain('alwaysApply: false');
-        expect(rendered).toContain('Do the base thing.');
+        const linked = path.join(projectRoot, '.agents/skills/s-base');
+        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base.mdc'))).toBe(false);
+        expect(fs.lstatSync(linked).isSymbolicLink() || fs.existsSync(path.join(linked, 'SKILL.md'))).toBe(true);
+        expect(fs.readFileSync(path.join(linked, 'SKILL.md'), 'utf8')).toContain('Do the base thing.');
         expect(result.transactionId).toBeTruthy();
-        expect(result.modifiedFiles).toContain(mdcPath);
+        expect(result.modifiedFiles).toContain(linked);
     });
 
     it('materializes a skill as rendered Copilot .instructions.md via the real default applyInstallPlan (Task 4.3 e2e)', () => {
@@ -340,7 +333,8 @@ describe('installBundle', () => {
             bundleName: 'base', bundles, agents: ['cursor'],
             method: 'symlink', projectRoot, contentDir: content,
         });
-        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base.mdc'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base.mdc'))).toBe(false);
         expect(cursorResult.recordedExtension).toBe('base');
 
         const copilotResult = addBundle({
