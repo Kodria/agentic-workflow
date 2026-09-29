@@ -454,7 +454,11 @@ describe('plan admit Commander wiring', () => {
         } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
-    it.each([['cursor', 'global'], ['cursor', 'local'], ['copilot', 'local']] as const)('does not prove absence for actual unowned rendered %s %s runtime contracts', async (target, scope) => {
+    // Cursor skills are link-installed under ~/.agents/skills (same as Codex); only
+    // content renderers still need this "rendered copy ≠ ownership" proof. Link
+    // unowned cases are covered by the runtime-unowned scenarios above.
+    it('does not prove absence for actual unowned rendered copilot local runtime contracts', async () => {
+        const target = 'copilot' as const;
         const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rendered-admission-')));
         const oldHome = process.env.HOME;
         process.env.HOME = path.join(root, 'home');
@@ -466,7 +470,7 @@ describe('plan admit Commander wiring', () => {
         fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), JSON.stringify({ minCliVersion: '1.0.0' }));
         fs.writeFileSync(path.join(root, 'source.md'), 'project source');
         const provider = providerFor(target);
-        const directory = scope === 'global' ? provider.skill.global! : path.resolve(root, provider.skill.local);
+        const directory = path.resolve(root, provider.skill.local);
         fs.mkdirSync(directory, { recursive: true });
         const installedFile = path.join(directory, renderedFilename('using-awm', provider.skill.renderer));
         fs.writeFileSync(installedFile, renderArtifact(provider.skill.renderer, skillSource)!);
@@ -492,6 +496,48 @@ describe('plan admit Commander wiring', () => {
             const reportedIdentity = fs.lstatSync(reported![1], { bigint: true });
             const installedIdentity = fs.lstatSync(installedFile, { bigint: true });
             expect(reportedIdentity.isFile()).toBe(true);
+            expect(reportedIdentity.ino).not.toBe(0n);
+            expect([reportedIdentity.dev, reportedIdentity.ino]).toEqual([installedIdentity.dev, installedIdentity.ino]);
+            expect(sensors).not.toHaveBeenCalled();
+        } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it.each([['cursor', 'global'], ['cursor', 'local']] as const)('does not prove absence for actual unowned linked %s %s runtime contracts', async (target, scope) => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-linked-admission-')));
+        const oldHome = process.env.HOME;
+        process.env.HOME = path.join(root, 'home');
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const registryRoot = path.join(root, 'registry');
+        fs.mkdirSync(path.join(registryRoot, 'skills'), { recursive: true });
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), JSON.stringify({ minCliVersion: '1.0.0' }));
+        fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        const unowned = path.join(root, 'unowned', 'using-awm');
+        fs.mkdirSync(unowned, { recursive: true });
+        fs.writeFileSync(path.join(unowned, 'SKILL.md'), '---\nname: using-awm\ndescription: contract\n---\nRuntime contract.\n');
+        const provider = providerFor(target);
+        const directory = scope === 'global' ? provider.skill.global! : path.resolve(root, provider.skill.local);
+        fs.mkdirSync(directory, { recursive: true });
+        const artifact = path.join(directory, renderedFilename('using-awm', provider.skill.renderer));
+        fs.symlinkSync(unowned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
+        const sensors = jest.fn();
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
+            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            readPreferences: () => ({ defaultAgent: target, enabledAgents: [target], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' }] }),
+            runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', target, '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+            expect(output.state).toBe('blocked');
+            const reported = /^Runtime artifact (.+) has no unique physical registry owner/.exec(output.diagnostics[0].message);
+            expect(reported).not.toBeNull();
+            const reportedIdentity = fs.lstatSync(reported![1], { bigint: true });
+            const installedIdentity = fs.lstatSync(artifact, { bigint: true });
+            expect(reportedIdentity.isSymbolicLink() || reportedIdentity.isDirectory()).toBe(true);
             expect(reportedIdentity.ino).not.toBe(0n);
             expect([reportedIdentity.dev, reportedIdentity.ino]).toEqual([installedIdentity.dev, installedIdentity.ino]);
             expect(sensors).not.toHaveBeenCalled();
