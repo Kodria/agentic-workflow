@@ -239,3 +239,14 @@ describe('planSensorBootstrap', () => {
         } finally { fs.rmSync(project, { recursive: true, force: true }); }
     });
 });
+
+describe('bootstrap only-project honesty (S3)', () => {
+    it('does not invent pack:"generic" when planning an only-project write path is requested via pack null (RF-3.2)', async () => {
+        // Bootstrap options today reject null pack (stable id only). Until an explicit
+        // pack-less planner mode exists, requesting pack:null must fail closed — never
+        // coerce to generic and write a lying pack pin.
+        (resolveSensorProject as jest.Mock).mockReturnValue(missing);
+        await expect(planSensorBootstrap(root, { mode: 'project-sensors', pack: null as never })).rejects.toThrow(/pack/i);
+        expect(detectStack).not.toHaveBeenCalled();
+    });
+});

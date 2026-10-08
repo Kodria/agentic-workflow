@@ -135,18 +135,20 @@ function readPackDefaults(pack: string, registryRoot: string, cwd: string): Sens
 }
 
 export function buildManifest(
-    pack: string,
-    existing?: SensorManifest,
+    pack: string | null | undefined,
+    existing?: SensorManifest | { pack?: string | null; sensors?: Record<string, Record<string, unknown>> },
     registryRoot?: string,
     cwd: string = process.cwd(),
-): SensorManifest {
-    const fromPack = registryRoot ? readPackDefaults(pack, registryRoot, cwd) : null;
+): SensorManifest | { sensors: SensorManifest['sensors'] } {
+    const fromPack = typeof pack === 'string' && pack.length > 0 && registryRoot
+        ? readPackDefaults(pack, registryRoot, cwd)
+        : null;
     // No registry root, or the pack has no pack.json there → `{}` is the honest floor,
     // not a bug to paper over with CLI-hardcoded defaults. `checkManifest` (preflight)
     // and `computeSensorStatus` both surface a zero-sensor manifest as degraded, with a
     // remedy pointing at the registry — never silently inventing sensors here instead.
     const defaults = fromPack ?? {};
-    const existingSensors = existing?.sensors ?? {};
+    const existingSensors = (existing?.sensors ?? {}) as Record<string, Record<string, unknown>>;
     // Per-FIELD merge, not whole-sensor-object replacement: if `existingSensors.foo`
     // exists at all, a naive `{ ...defaults, ...existingSensors }` would replace
     // `defaults.foo` wholesale, permanently dropping any field that only lives in the
@@ -155,11 +157,21 @@ export function buildManifest(
     // field-by-field within each sensor entry lets a user's hand-edited field (e.g. a
     // custom `cmd`) win, while still inheriting any field the existing manifest doesn't
     // specify.
+    //
+    // Exception — `source: "project"` entries are project-owned: never overlay pack
+    // defaults onto them (RF-3.1). Keep the entry byte-stable in meaning.
     const sensorNames = new Set([...Object.keys(defaults), ...Object.keys(existingSensors)]);
     const sensors: SensorManifest['sensors'] = {};
     for (const name of sensorNames) {
-        sensors[name] = { ...defaults[name], ...existingSensors[name] };
+        const existingEntry = existingSensors[name];
+        if (existingEntry && existingEntry.source === 'project') {
+            sensors[name] = { ...existingEntry } as SensorManifest['sensors'][string];
+            continue;
+        }
+        sensors[name] = { ...defaults[name], ...existingSensors[name] } as SensorManifest['sensors'][string];
     }
+    // Only-project write path: omit pack entirely — never invent `generic` (RF-3.2).
+    if (typeof pack !== 'string' || pack.length === 0) return { sensors };
     return { pack, sensors };
 }
 

@@ -16,7 +16,7 @@ type CoverageManifest = Exclude<ParsedSensorManifest, { kind: 'v3' }> | { kind: 
 
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; registryRoot?: string; manifest: CoverageManifest }
+    | { kind: 'no_reference'; projectRoot: string; pack: string | null; registry: string | null; registryRoot?: string; manifest: CoverageManifest }
     | { kind: 'ready'; projectRoot: string; pack: string; registry: string; registryRoot?: string; manifest: CoverageManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
@@ -90,6 +90,13 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
     const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
     if (manifest.kind === 'v3' && manifest.pack.mode !== 'project-sensors') return { kind: 'not_configured' };
     const coverageManifest = manifest as CoverageManifest;
+    // Only-project manifests have no pack coverage contract to evaluate (RF-2.9).
+    if (coverageManifest.kind === 'v3') {
+        const packId = coverageManifest.pack.pack;
+        if (typeof packId !== 'string' || packId.length === 0) {
+            return { kind: 'no_reference', projectRoot, pack: null, registry: null, manifest: coverageManifest };
+        }
+    }
     const source = coverageManifest.kind === 'v3'
         ? (() => {
             const resolution = resolveSensorSource(coverageManifest, { registries: listRegistries() });

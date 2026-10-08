@@ -103,3 +103,116 @@ describe('initSensors compatibility API', () => {
         expect(applySensorBootstrap).not.toHaveBeenCalled();
     });
 });
+
+describe('buildManifest project-declared preserve (S3)', () => {
+    let tmpDir: string;
+    let registryRoot: string;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-s3-'));
+        registryRoot = makeRegistry();
+        fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+    });
+    afterEach(() => {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(registryRoot, { recursive: true, force: true });
+    });
+
+    it('preserves an existing source:project entry byte-stable when regenerating pack sensors (RF-3.1)', () => {
+        const projectEntry = {
+            source: 'project' as const,
+            enabled: true,
+            fast: true,
+            command: { executable: 'terraform', resolution: 'path' as const, args: ['fmt', '-check'] },
+            formatter: 'exit-code',
+            description: 'keep-me',
+        };
+        // Collides with a pack default name: per-field merge would otherwise inject pack `cmd`.
+        const existing = {
+            pack: 'js-ts',
+            sensors: {
+                typecheck: projectEntry,
+            },
+        };
+
+        const merged = buildManifest('js-ts', existing as never, registryRoot, tmpDir);
+
+        expect(merged.sensors.typecheck).toEqual(projectEntry);
+        expect(merged.sensors.typecheck).not.toHaveProperty('cmd');
+    });
+
+    it('writes an only-project manifest without forcing pack:"generic" (RF-3.2)', () => {
+        const projectEntry = {
+            source: 'project' as const,
+            enabled: true,
+            command: { executable: 'terraform', resolution: 'path' as const, args: ['fmt', '-check'] },
+            formatter: 'exit-code',
+        };
+
+        const onlyProject = buildManifest(null as unknown as string, {
+            sensors: { 'iac-format': projectEntry },
+        } as never, undefined, tmpDir);
+
+        expect(onlyProject).not.toMatchObject({ pack: 'generic' });
+        expect(Object.prototype.hasOwnProperty.call(onlyProject, 'pack')).toBe(false);
+        expect(onlyProject.sensors['iac-format']).toEqual(projectEntry);
+        expect(JSON.stringify(onlyProject)).not.toMatch(/"pack"\s*:/);
+    });
+
+    it('preserves source:project entries when materialize regenerates pack sensors (RF-3.1)', () => {
+        const { materializePortableSensors } = require('../../../src/commands/sensors/compatibility/materialize');
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-mat-home-'));
+        const previousHome = process.env.AWM_HOME;
+        try {
+            process.env.AWM_HOME = home;
+            const packDir = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+            fs.mkdirSync(packDir, { recursive: true });
+            fs.writeFileSync(path.join(packDir, 'eslint.config.awm.mjs'), 'export default []\n');
+            fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
+                schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: {} },
+                sensors: { lint: { variants: [] } },
+            }));
+            const projectEntry = {
+                source: 'project' as const,
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path' as const, args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+                description: 'preserve-me',
+            };
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' },
+                sensors: { 'iac-format': projectEntry },
+            }));
+            const evidence = {
+                state: 'certified' as const, reason: 'range-and-probe', variantId: 'eslint-10',
+                toolVersion: '10.0.0', runtimeVersion: process.versions.node, certifiedRange: '>=10 <11', evidence: [],
+            };
+            const result = materializePortableSensors({
+                projectRoot: tmpDir,
+                pack: 'js-ts',
+                source: {
+                    path: path.join(packDir, 'pack.json'),
+                    content: fs.readFileSync(path.join(packDir, 'pack.json'), 'utf8'),
+                    registry: { name: 'baseline', remote: 'https://example.test/baseline.git', contentRoot: path.join(home, 'registries', 'baseline') },
+                },
+                configure: false,
+                sensors: {
+                    lint: {
+                        enabled: true, variantId: 'eslint-10',
+                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                        assets: ['eslint.config.awm.mjs'],
+                        initializedCompatibility: evidence,
+                    },
+                },
+            });
+            expect(result.manifest.sensors['iac-format']).toEqual(projectEntry);
+            expect(JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8')).sensors['iac-format']).toEqual(projectEntry);
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+});

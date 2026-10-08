@@ -195,12 +195,32 @@ function checkManifest(status: SensorStatusResult): PreflightCheck {
         };
     }
     if (status.mode === 'invalid') {
+        if (status.reason === 'schema-unsupported') {
+            return {
+                id: 'manifest',
+                ok: false,
+                detail: '.awm/sensors.json uses an unsupported schema',
+                remedy: 'fix or regenerate it with `awm sensors init`',
+            };
+        }
+        // JSON.parse succeeded but schema/entry validation failed (RF-4.1/4.2).
+        // Never claim "not valid JSON"; name the sensor/field from status.reason.
+        if (typeof status.reason === 'string' && (status.reason.startsWith('schema-invalid') || status.reason.includes('Invalid sensor manifest'))) {
+            const detail = status.reason.startsWith('schema-invalid:')
+                ? status.reason.slice('schema-invalid:'.length).trim()
+                : status.reason;
+            // RF-3.3: project schema invalidity must not lead with `awm sensors init`.
+            return {
+                id: 'manifest',
+                ok: false,
+                detail,
+                remedy: 'repair the invalid sensor entry in .awm/sensors.json',
+            };
+        }
         return {
             id: 'manifest',
             ok: false,
-            detail: status.reason === 'schema-unsupported'
-                ? '.awm/sensors.json uses an unsupported schema'
-                : '.awm/sensors.json is not valid JSON',
+            detail: '.awm/sensors.json is not valid JSON',
             remedy: 'fix or regenerate it with `awm sensors init`',
         };
     }

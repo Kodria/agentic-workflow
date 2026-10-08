@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
+import { runCoverage } from '../../../src/commands/sensors/coverage';
 
 jest.mock('../../../src/commands/sensors/exec', () => ({
     runCommand: jest.fn(),
@@ -425,5 +426,79 @@ describe('computeSensorStatus', () => {
             else process.env.AWM_HOME = previousHome;
             fs.rmSync(home, { recursive: true, force: true });
         }
+    });
+});
+
+describe('project-declared status and coverage (S3)', () => {
+    let tmpDir: string;
+    let pathDir: string;
+    let originalPath: string | undefined;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-s3-'));
+        pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-s3-path-'));
+        originalPath = process.env.PATH;
+        process.env.PATH = pathDir;
+        fs.writeFileSync(path.join(pathDir, 'terraform'), '#!/bin/sh\nexit 0\n');
+        fs.chmodSync(path.join(pathDir, 'terraform'), 0o755);
+    });
+    afterEach(() => {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(pathDir, { recursive: true, force: true });
+    });
+
+    function writeOnlyProject(sensors: Record<string, unknown>) {
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors,
+        }));
+    }
+
+    it('lists each only-project sensor with project-declared provenance (RF-2.8)', async () => {
+        writeOnlyProject({
+            'iac-format': {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+            },
+        });
+
+        const result = await computeSensorStatus(tmpDir);
+
+        expect(Object.keys(result.checks).length).toBeGreaterThan(0);
+        expect(result.checks['iac-format']).toMatchObject({
+            ok: true,
+            certification: 'project-declared',
+        });
+        expect(result.checks['iac-format'].detail).toMatch(/project-declared/i);
+        expect(result.overall).not.toBe('NOT_CONFIGURED');
+        // Must not be empty Pack:none / DEGRADED with zero detail solely because pack is absent.
+        expect(result.pack === null || result.pack === undefined).toBe(true);
+        expect(Object.keys(result.checks)).not.toEqual([]);
+    });
+
+    it('reports coverage as inconclusive / no pack-reference for only-project (RF-2.9)', async () => {
+        writeOnlyProject({
+            'iac-format': {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+            },
+        });
+
+        const coverage = await runCoverage(tmpDir);
+
+        expect(coverage.overall).toBe('inconclusive');
+        expect(coverage.static.status).toBe('inconclusive');
+        expect(coverage.static.reason).toBe('no_reference');
+        expect(coverage.static.classes).toEqual([]);
+        expect(coverage.overall).not.toBe('covered');
+        expect(JSON.stringify(coverage)).not.toMatch(/"certification"\s*:\s*"certified"/);
     });
 });

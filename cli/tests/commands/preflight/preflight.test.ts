@@ -934,4 +934,60 @@ describe('preflight', () => {
         expect(check(report, 'manifest').detail).not.toContain('no .awm/sensors.json');
         expect(check(report, 'tools')).toBeUndefined();
     });
+
+    describe('project-declared diagnostics (S3)', () => {
+        it('does not claim not-valid-JSON when JSON parses but a project field fails schema (RF-4.1/4.2)', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {
+                        broken: {
+                            source: 'project',
+                            enabled: true,
+                            command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                            formatter: 'not-a-formatter',
+                        },
+                    },
+                },
+            });
+
+            const report = await preflight(dir);
+            const manifestCheck = check(report, 'manifest');
+
+            expect(manifestCheck.ok).toBe(false);
+            expect(manifestCheck.detail).not.toBe('.awm/sensors.json is not valid JSON');
+            expect(manifestCheck.detail).not.toMatch(/not valid JSON/i);
+            expect(manifestCheck.detail).toMatch(/broken/);
+            expect(manifestCheck.detail).toMatch(/formatter/);
+            expect(report.reason).toMatch(/schema-invalid/i);
+        });
+
+        it('still reports not-valid-JSON for truly broken JSON (RF-4.1)', async () => {
+            const dir = make({ manifest: '{ not json' });
+            const report = await preflight(dir);
+            expect(check(report, 'manifest').detail).toContain('not valid JSON');
+        });
+
+        it('does not recommend awm sensors init as the first remedy for project schema invalidity (RF-3.3)', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {
+                        broken: {
+                            source: 'project',
+                            enabled: true,
+                            command: { executable: 'terraform', resolution: 'path', args: ['fmt'] },
+                            formatter: 'not-a-formatter',
+                        },
+                    },
+                },
+            });
+
+            const remedy = check(await preflight(dir), 'manifest').remedy ?? '';
+            const firstLine = remedy.split('\n')[0] ?? remedy;
+            expect(firstLine).not.toMatch(/awm sensors init/i);
+        });
+    });
 });

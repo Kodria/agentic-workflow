@@ -179,6 +179,8 @@ export type RunOutput = {
 export type SensorCheck = {
     ok: boolean;
     detail: string;
+    /** Present for project-declared sensors; never `certified`. */
+    certification?: 'project-declared';
 };
 
 export type SensorAuthority = {
