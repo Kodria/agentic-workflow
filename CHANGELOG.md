@@ -1,3 +1,8 @@
+## v9.16.1 - 2026-10-08
+
+### Fixes
+- **process:** stabilize descendant activity on Darwin CI (#211)
+
 ## v9.16.0 - 2026-09-29
 
 ### Features
