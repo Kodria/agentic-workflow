@@ -88,7 +88,7 @@
     {
       "id": "CMD-RUNTIME",
       "program": "npm",
-      "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/prepare.test.ts", "tests/commands/sensors/run.test.ts"],
+      "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/prepare.test.ts", "tests/commands/sensors/run.test.ts", "tests/commands/sensors/result.test.ts"],
       "covers": ["RF-1.7", "RF-2.1", "RF-2.2", "RF-2.3", "RF-2.4", "RF-2.5", "RF-2.6", "RF-2.7"]
     },
     {
