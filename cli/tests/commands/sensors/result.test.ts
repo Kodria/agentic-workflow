@@ -1,4 +1,4 @@
-import { interpretResult } from '../../../src/commands/sensors/result';
+import { executePrepared, interpretResult } from '../../../src/commands/sensors/result';
 import type { PreparedSensorExecution } from '../../../src/commands/sensors/types';
 import { exited, ok } from './exec-fixtures';
 
@@ -39,5 +39,22 @@ describe('interpretResult exit-code formatter (RF-2.4)', () => {
         expect(result.errors[0]!.message.length).toBeLessThanOrEqual(220);
         expect(result.errors[0]!.message).toMatch(/x{10,}|stderr-tail|exit 1/);
         expect(result.certification).toBe('project-declared');
+    });
+});
+
+describe('executePrepared synthetic provenance (RF-2.2)', () => {
+    it('includes certification on synthetic/disabled results the same way interpretResult does', async () => {
+        const result = await executePrepared(prepared({
+            command: undefined,
+            syntheticStatus: 'skipped',
+            syntheticReason: 'disabled',
+            certification: 'project-declared',
+        }));
+        expect(result).toMatchObject({
+            name: 'iac-format',
+            status: 'skipped',
+            skipReason: 'disabled',
+            certification: 'project-declared',
+        });
     });
 });

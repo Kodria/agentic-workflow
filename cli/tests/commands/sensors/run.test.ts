@@ -894,23 +894,42 @@ describe('runSensors project-declared parity (S2)', () => {
         expect(result.overall).toBe('pass');
     });
 
-    it('marks a project entry that collides with a live pack sensor id invalid and keeps the pack sensor (RF-1.7)', async () => {
-        writeManifest({
-            lint: packBoundLint(),
-            // `typecheck` is defined by the selected js-ts pack — project must not override it.
-            typecheck: projectIac('process.exit(0)'),
-        });
+    it('marks a colliding project entry invalid and still prepares/runs the pack sensor for that id (RF-1.7)', async () => {
+        // Project entry reuses pack id `lint` — invalid, but pack lint must remain executable.
+        writeManifest({ lint: projectIac('process.exit(0)') });
         mockRunStructuredCommand.mockResolvedValue(ok());
         const { runSensors } = require('../../../src/commands/sensors/run');
         const result = await runSensors({ cwd: project, all: true });
         expect(result.invalidEntries).toEqual([
             expect.objectContaining({
-                name: 'typecheck',
-                reason: expect.stringMatching(/project-sensor-name-collision:\s*typecheck/),
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
             }),
         ]);
-        expect(result.sensors.some((s: { name: string; certification?: string }) =>
-            s.name === 'typecheck' && s.certification === 'project-declared')).toBe(false);
-        expect(result.sensors.some((s: { name: string }) => s.name === 'lint')).toBe(true);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        expect(lint).toBeDefined();
+        expect(lint.certification).not.toBe('project-declared');
+        expect(lint.status).toBe('pass');
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'live-eslint' }),
+            expect.any(Object),
+        );
+    });
+
+    it('carries project-declared provenance on a disabled/synthetic project sensor (RF-2.2)', async () => {
+        writeManifest({
+            'iac-format': { ...projectIac('process.exit(0)'), enabled: false },
+        }, null);
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({
+                name: 'iac-format',
+                status: 'skipped',
+                skipReason: 'disabled',
+                certification: 'project-declared',
+            }),
+        ]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
     });
 });

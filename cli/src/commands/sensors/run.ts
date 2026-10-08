@@ -298,12 +298,14 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const sensorsMap = activeManifest.sensors ?? {};
     for (const [name, sensor] of Object.entries(sensorsMap)) {
         const entry = sensor as V3ManifestSensor | SensorManifest['sensors'][string];
-        if (parsed.kind !== 'legacy' && isProjectDeclaredSensor(entry as V3ManifestSensor)) {
-            if (live?.pack.sensors[name]) {
-                invalidEntries.push({ name, reason: `project-sensor-name-collision: ${name}` });
-                continue;
-            }
-            const projectEntry = entry as ProjectDeclaredSensor;
+        const projectEntry = parsed.kind !== 'legacy' && isProjectDeclaredSensor(entry as V3ManifestSensor)
+            ? entry as ProjectDeclaredSensor
+            : null;
+        const collidedWithPack = projectEntry !== null && live?.pack.sensors[name] !== undefined;
+        if (collidedWithPack) {
+            invalidEntries.push({ name, reason: `project-sensor-name-collision: ${name}` });
+            // RF-1.7: keep the pack sensor — fall through to pack-bound prepare using live.
+        } else if (projectEntry !== null) {
             const fast = projectEntry.fast ?? false;
             if (!shouldRun(fast, opts)) continue;
             const execution = prepareV2Sensor({
@@ -320,15 +322,29 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         }
 
         const liveSensor = parsed.kind !== 'legacy' ? live?.pack.sensors[name] : undefined;
+        const liveState = parsed.kind !== 'legacy' ? live?.sensors[name] : undefined;
+        let packBoundSensor = entry as any;
+        if (collidedWithPack && liveSensor && liveState?.variantId) {
+            const variant = liveSensor.variants.find(candidate => candidate.id === liveState.variantId)
+                ?? liveSensor.variants[0];
+            packBoundSensor = {
+                enabled: true,
+                ...(liveSensor.fast !== undefined ? { fast: liveSensor.fast } : {}),
+                ...(liveSensor.timeout !== undefined ? { timeout: liveSensor.timeout } : {}),
+                variantId: liveState.variantId,
+                command: variant.command,
+                initializedCompatibility: liveState,
+            };
+        }
         const fast = parsed.kind !== 'legacy'
-            ? (entry as { fast?: boolean }).fast ?? liveSensor?.fast ?? false
+            ? packBoundSensor.fast ?? liveSensor?.fast ?? false
             : (entry as { fast?: boolean }).fast ?? false;
         if (!shouldRun(fast, opts)) continue;
 
         const execution = parsed.kind !== 'legacy'
-            ? prepareV2Sensor({ name, sensor: entry as any, liveSensor, liveState: live?.sensors[name], requestedScope, changed: changed ?? undefined })
+            ? prepareV2Sensor({ name, sensor: packBoundSensor, liveSensor, liveState, requestedScope, changed: changed ?? undefined })
             : prepareLegacySensor({ name, config: entry as any, requestedScope, changed: changed ?? undefined });
-        prepared.push((entry as { enabled?: boolean }).enabled === false
+        prepared.push(packBoundSensor.enabled === false
             ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
             : execution);
     }

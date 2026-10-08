@@ -128,6 +128,7 @@ export async function executePrepared(prepared: PreparedSensorExecution, cwd = p
             status,
             errors: [],
             ...(prepared.syntheticReason ? { skipReason: prepared.syntheticReason } : {}),
+            ...(prepared.certification ? { certification: prepared.certification } : {}),
             execution: executionEvidence(prepared, 0),
         }, prepared);
     }
