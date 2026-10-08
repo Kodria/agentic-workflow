@@ -611,4 +611,38 @@ describe('project-declared status pack collision (S3 RF-1.7)', () => {
         expect(result.checks['lint'].detail).toMatch(/project-sensor-name-collision|pack (sensor )?kept/i);
         expect(result.overall).not.toBe('READY');
     });
+
+    it('soft-isolate + pack + colliding project id does not certify project-declared READY (RF-1.7)', async () => {
+        // Invalid sibling forces softIsolatedChecks; lint collides with live pack id.
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'exit-code',
+                },
+                bad: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'not-a-formatter',
+                },
+            },
+        }));
+
+        const result = await computeSensorStatus(project);
+
+        expect(result.mode).toBe('invalid');
+        expect(result.checks['bad']).toMatchObject({ ok: false });
+        expect(result.checks['lint']).toBeDefined();
+        expect(result.checks['lint'].ok).toBe(false);
+        expect(result.checks['lint'].certification).not.toBe('project-declared');
+        expect(result.checks['lint'].detail).toMatch(/project-sensor-name-collision|pack (sensor )?kept/i);
+        expect(result.overall).not.toBe('READY');
+    });
 });

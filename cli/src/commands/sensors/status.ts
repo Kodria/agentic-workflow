@@ -276,12 +276,30 @@ function softIsolatedChecks(
     const recovered = softRecoverInvalidProject(project);
     if (!recovered) return {};
     const checks: Record<string, SensorCheck> = {};
-    const sensors = recovered.manifest.kind === 'v3' && recovered.manifest.pack.mode === 'project-sensors'
-        ? recovered.manifest.pack.sensors
-        : {};
+    const v3Project = recovered.manifest.kind === 'v3' && recovered.manifest.pack.mode === 'project-sensors'
+        ? recovered.manifest.pack
+        : null;
+    const sensors = v3Project?.sensors ?? {};
+    // RF-1.7: same collision path as configured status — live pack probe when pack is selected.
+    const packSelected = v3Project !== null && hasSelectedPack(v3Project);
+    let liveIds: Set<string> | null = null;
+    if (packSelected) {
+        try {
+            const resolution = resolveSensorSource(recovered.manifest, { registries: listRegistries() });
+            liveIds = 'source' in resolution ? livePackSensorIds(resolution.source) : null;
+        } catch {
+            liveIds = null;
+        }
+    }
     for (const [name, sensor] of Object.entries(sensors)) {
         if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
-            checks[name] = projectSensorCheck(sensor as ProjectDeclaredSensor, recovered.packageRoot);
+            checks[name] = projectDeclaredOrCollisionCheck(
+                name,
+                sensor as ProjectDeclaredSensor,
+                recovered.packageRoot,
+                packSelected,
+                liveIds,
+            );
             continue;
         }
         const packSensor = sensor as SensorManifestV2['sensors'][string];

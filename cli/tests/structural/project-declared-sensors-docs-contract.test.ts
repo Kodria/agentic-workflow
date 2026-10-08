@@ -56,6 +56,14 @@ describe('project-declared sensors docs contract (CMD-DOCS)', () => {
         expect(section).toMatch(
             /provenance[\s\S]{0,220}(?:does not|never)\s+(?:block|blocks)[\s\S]{0,100}(?:unattended|gates)/i,
         );
+        // Optional pack (omit or null) — RF-5.2 clause already in cli-reference prose.
+        expect(section).toMatch(
+            /[Pp]ack may be omitted or set\s+to\s+`?null`?[\s\S]{0,120}project-declared/i,
+        );
+        // JSON-vs-schema diagnostics distinction — RF-5.2.
+        expect(section).toMatch(
+            /not valid JSON[\s\S]{0,220}schema-invalid/i,
+        );
     });
 
     it('setup-sensors skill documents project vs pack, JSON example, and non-gating provenance (RF-5.1)', () => {
