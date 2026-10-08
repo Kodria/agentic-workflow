@@ -136,51 +136,59 @@ export function resolveSemgrepPolicy(policyRef: unknown, source: unknown, locati
     return parseSemgrepPolicy(parsed, candidate);
 }
 
-export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {
-    const value = record(input, source, 'command');
-    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput', 'pythonEnvironmentRoot'], source, 'command');
-    const executable = text(value.executable, source, 'command.executable');
+export function parseStructuredCommand(input: unknown, source: unknown, location = 'command'): StructuredCommand {
+    const value = record(input, source, location);
+    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput', 'pythonEnvironmentRoot'], source, location);
+    const executable = text(value.executable, source, `${location}.executable`);
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(executable) || SHELL_EXECUTABLES.has(executable.toLowerCase().replace(/\.exe$/, ''))) {
-        invalid(source, 'command.executable must not be a shell or path');
+        invalid(source, `${location}.executable must not be a shell or path`);
     }
     if (value.resolution !== 'node-modules-bin' && value.resolution !== 'python-environment' && value.resolution !== 'path') {
-        invalid(source, 'command.resolution must be a supported resolution');
+        invalid(source, `${location}.resolution must be a supported resolution`);
     }
-    const args = stringArray(value.args, source, 'command.args');
+    const args = stringArray(value.args, source, `${location}.args`);
     for (const [index, arg] of args.entries()) {
-        if (arg.includes('{files}') && arg !== '{files}') invalid(source, `command.args[${index}] must not embed {files}`);
+        if (arg.includes('{files}') && arg !== '{files}') invalid(source, `${location}.args[${index}] must not embed {files}`);
     }
     const command: StructuredCommand = { executable, resolution: value.resolution, args };
     if ('pythonEnvironmentRoot' in value) {
-        if (value.resolution !== 'python-environment' || (value.pythonEnvironmentRoot !== '.venv' && value.pythonEnvironmentRoot !== 'venv')) invalid(source, 'command.pythonEnvironmentRoot must name the selected .venv or venv Python environment');
+        if (value.resolution !== 'python-environment' || (value.pythonEnvironmentRoot !== '.venv' && value.pythonEnvironmentRoot !== 'venv')) {
+            invalid(source, `${location}.pythonEnvironmentRoot must name the selected .venv or venv Python environment`);
+        }
         command.pythonEnvironmentRoot = value.pythonEnvironmentRoot;
     }
     const executablePackageManager = normalizedPackageManager(executable);
-    if (PACKAGE_MANAGERS.has(executablePackageManager) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
+    if (PACKAGE_MANAGERS.has(executablePackageManager) && !('packageManager' in value)) {
+        invalid(source, `${location}.packageManager is required for a package-manager executable`);
+    }
     if ('packageManager' in value) {
-        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(normalizedPackageManager(value.packageManager))) invalid(source, 'command.packageManager must be npm, pnpm, yarn, or bun');
+        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(normalizedPackageManager(value.packageManager))) {
+            invalid(source, `${location}.packageManager must be npm, pnpm, yarn, or bun`);
+        }
         const packageManager = normalizedPackageManager(value.packageManager);
-        if (packageManager !== executablePackageManager) invalid(source, 'command.packageManager must match executable');
+        if (packageManager !== executablePackageManager) invalid(source, `${location}.packageManager must match executable`);
         command.packageManager = packageManager as StructuredCommand['packageManager'];
     }
     if ('environment' in value) {
-        const environment = record(value.environment, source, 'command.environment');
-        fields(environment, ['ESLINT_USE_FLAT_CONFIG'], source, 'command.environment');
-        if ((environment.ESLINT_USE_FLAT_CONFIG !== 'true' && environment.ESLINT_USE_FLAT_CONFIG !== 'false') || Object.keys(environment).length !== 1) invalid(source, 'command.environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+        const environment = record(value.environment, source, `${location}.environment`);
+        fields(environment, ['ESLINT_USE_FLAT_CONFIG'], source, `${location}.environment`);
+        if ((environment.ESLINT_USE_FLAT_CONFIG !== 'true' && environment.ESLINT_USE_FLAT_CONFIG !== 'false') || Object.keys(environment).length !== 1) {
+            invalid(source, `${location}.environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping`);
+        }
         command.environment = { ESLINT_USE_FLAT_CONFIG: environment.ESLINT_USE_FLAT_CONFIG };
     }
     if ('fileInput' in value) {
-        const fileInput = record(value.fileInput, source, 'command.fileInput');
-        fields(fileInput, ['placeholder', 'extensions'], source, 'command.fileInput');
-        if (fileInput.placeholder !== '{files}') invalid(source, 'command.fileInput.placeholder must be {files}');
-        const extensions = stringArray(fileInput.extensions, source, 'command.fileInput.extensions');
+        const fileInput = record(value.fileInput, source, `${location}.fileInput`);
+        fields(fileInput, ['placeholder', 'extensions'], source, `${location}.fileInput`);
+        if (fileInput.placeholder !== '{files}') invalid(source, `${location}.fileInput.placeholder must be {files}`);
+        const extensions = stringArray(fileInput.extensions, source, `${location}.fileInput.extensions`);
         for (const [index, extension] of extensions.entries()) {
-            if (!/^\.[A-Za-z0-9]+$/.test(extension)) invalid(source, `command.fileInput.extensions[${index}] must be an extension`);
+            if (!/^\.[A-Za-z0-9]+$/.test(extension)) invalid(source, `${location}.fileInput.extensions[${index}] must be an extension`);
         }
-        if (args.filter(arg => arg === '{files}').length !== 1) invalid(source, 'command.fileInput requires exactly one {files} argument');
+        if (args.filter(arg => arg === '{files}').length !== 1) invalid(source, `${location}.fileInput requires exactly one {files} argument`);
         command.fileInput = { placeholder: '{files}', extensions };
     } else if (args.includes('{files}')) {
-        invalid(source, 'command {files} argument requires fileInput');
+        invalid(source, `${location} {files} argument requires fileInput`);
     }
     return command;
 }

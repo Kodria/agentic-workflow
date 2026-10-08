@@ -251,7 +251,7 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
     const sensor: ProjectDeclaredSensor = {
         source: 'project',
         enabled: value.enabled,
-        command: parseStructuredCommand(value.command, source),
+        command: parseStructuredCommand(value.command, source, `${location}.command`),
         formatter: 'exit-code',
     };
     if ('formatter' in value) {
@@ -295,7 +295,7 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
-        command: parseStructuredCommand(value.command, source),
+        command: parseStructuredCommand(value.command, source, `${location}.command`),
         initializedCompatibility: parseCompatibilityEvidence(value.initializedCompatibility, source, `${location}.initializedCompatibility`),
     };
     if (sensor.initializedCompatibility.variantId !== null && sensor.initializedCompatibility.variantId !== sensor.variantId) invalid(source, `${location}.initializedCompatibility.variantId must match variantId`);

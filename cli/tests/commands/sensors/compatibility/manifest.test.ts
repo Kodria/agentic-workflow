@@ -313,6 +313,22 @@ describe('sensor manifest contract', () => {
             },
         );
 
+        it('soft-rejects an invalid project command with sensors.<name>.command in the reason (RF-1.12)', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({
+                    command: { executable: 'bash', resolution: 'path', args: ['-c', 'true'] },
+                }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toHaveLength(1);
+            expect(soft.invalidEntries[0]?.reason).toMatch(/sensors\.custom\.command/);
+            expect(soft).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { lint: { variantId: 'eslint-9' } } },
+            });
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+        });
+
         it('soft-rejects an unmarked custom command as missing source (RF-1.2)', () => {
             const soft = parseSensorManifestWithIssues({
                 schemaVersion: 3,
