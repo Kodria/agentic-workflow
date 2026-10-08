@@ -89,13 +89,13 @@
       "id": "CMD-RUNTIME",
       "program": "npm",
       "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/prepare.test.ts", "tests/commands/sensors/run.test.ts", "tests/commands/sensors/result.test.ts"],
-      "covers": ["RF-1.7", "RF-2.1", "RF-2.2", "RF-2.3", "RF-2.4", "RF-2.5", "RF-2.6", "RF-2.7"]
+      "covers": ["RF-1.7", "RF-2.1", "RF-2.2", "RF-2.3", "RF-2.4", "RF-2.5", "RF-2.6", "RF-2.7", "RF-4.3"]
     },
     {
       "id": "CMD-DIAG-INIT",
       "program": "npm",
       "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/status.test.ts", "tests/commands/preflight/preflight.test.ts", "tests/commands/sensors/init.test.ts", "tests/commands/sensors/bootstrap.test.ts"],
-      "covers": ["RF-2.8", "RF-2.9", "RF-3.1", "RF-3.2", "RF-3.3", "RF-4.1", "RF-4.2", "RF-4.3"]
+      "covers": ["RF-2.8", "RF-2.9", "RF-3.1", "RF-3.2", "RF-3.3", "RF-4.1", "RF-4.2"]
     },
     {
       "id": "CMD-DOCS",
