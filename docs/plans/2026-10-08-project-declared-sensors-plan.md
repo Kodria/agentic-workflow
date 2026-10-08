@@ -140,7 +140,7 @@
     {
       "id": "S3",
       "title": "Status, preflight diagnostics, init preserve",
-      "requirements": ["RF-2.8", "RF-2.9", "RF-3.1", "RF-3.2", "RF-3.3", "RF-4.1", "RF-4.2", "RF-4.3"],
+      "requirements": ["RF-2.8", "RF-2.9", "RF-3.1", "RF-3.2", "RF-3.3", "RF-4.1", "RF-4.2"],
       "dependsOn": ["S1", "S2"],
       "sectionAnchor": "slice-s3",
       "sources": ["SRC-STATUS", "SRC-PREFLIGHT", "SRC-INIT", "SRC-DESIGN"],
@@ -249,7 +249,7 @@ Security: never introduce shell execution for project commands. If baseline API 
 ### Slice S3: Status, preflight diagnostics, init preserve
 
 #### Surfaces
-Own RF-2.8, RF-2.9, RF-3.1–RF-3.3, RF-4.1–RF-4.3 in `status.ts`, `run.ts` JSON reasons, `preflight/checks.ts`, `init.ts` / bootstrap materialize paths, and matching tests (`status.test.ts`, `preflight.test.ts`, `init.test.ts`, `bootstrap.test.ts`). Grouping: operator-facing diagnosis + non-destructive regen.
+Own RF-2.8, RF-2.9, RF-3.1–RF-3.3, RF-4.1–RF-4.2 in `status.ts`, `preflight/checks.ts`, `init.ts` / bootstrap materialize paths, and matching tests (`status.test.ts`, `preflight.test.ts`, `init.test.ts`, `bootstrap.test.ts`). RF-4.3 (run JSON `invalidEntries`) is owned by S2 / CMD-RUNTIME. Grouping: operator-facing diagnosis + non-destructive regen.
 
 #### Implementation
 1. RED — tests that fail today:
@@ -334,7 +334,7 @@ Public-contract: if registry PR must land after CLI release, keep docs examples 
 | RF-3.3 | S3 | CMD-DIAG-INIT remedy not init-first |
 | RF-4.1 | S3 | CMD-DIAG-INIT preflight JSON vs schema |
 | RF-4.2 | S3 | CMD-DIAG-INIT named field errors |
-| RF-4.3 | S3 | CMD-DIAG-INIT run JSON invalid entries |
+| RF-4.3 | S2 | CMD-RUNTIME run JSON invalid entries |
 | RF-5.1 | S4 | CMD-DOCS setup-sensors contract |
 | RF-5.2 | S4 | CMD-DOCS cli-reference contract |
 
