@@ -1,5 +1,7 @@
 # Project-Declared Sensors Implementation Plan
 <!-- awm-qa-complete: 2026-10-08 -->
+<!-- awm-docs-complete: 2026-10-08 -->
+<!-- awm-retro-complete: 2026-10-08 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
