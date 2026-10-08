@@ -1,6 +1,6 @@
 import { listRegistries } from '../../core/registries';
 import { parseSensorPack } from './compatibility/contract';
-import { parseSensorManifest, serializeManifestV3, type SensorManifestV3, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
+import { asPackBoundProjectSensors, parseSensorManifest, serializeManifestV3, type SensorManifestV3, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
 import { listPackSources, type PackSource } from './compatibility/pack-source';
 import { resolveParsedPackCompatibility } from './compatibility/live';
 import { resolveSensorSource } from './compatibility/source';
@@ -176,7 +176,8 @@ export function applySensorBootstrap(plan: BootstrapPlan): 'created' | 'migrated
     }
     if (plan.manifest.mode === 'project-sensors') {
         if (!plan.source) throw new Error('project-sensors bootstrap plan requires its resolved source');
-        materializePortableSensors({ projectRoot: plan.projectRoot, pack: plan.manifest.pack, source: plan.source, ...(plan.manifest.packageRoot ? { packageRoot: plan.manifest.packageRoot } : {}), sensors: plan.manifest.sensors, configure: plan.configure !== false });
+        const packBound = asPackBoundProjectSensors(plan.manifest);
+        materializePortableSensors({ projectRoot: plan.projectRoot, pack: packBound.pack, source: plan.source, ...(packBound.packageRoot ? { packageRoot: packBound.packageRoot } : {}), sensors: packBound.sensors, configure: plan.configure !== false });
         return 'created';
     }
     const parsed = parseSensorManifest(plan.manifest, 'bootstrap declaration');

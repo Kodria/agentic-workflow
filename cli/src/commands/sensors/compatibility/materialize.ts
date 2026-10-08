@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
+import { asPackBoundProjectSensors, isPackBoundManifestSensor, parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
 import { resolveSemgrepPolicy } from './contract';
 import { readInspectedBoundedFile, readInspectedBoundedFileWithIdentity, removeObservedProjectFile, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './safe-file';
 import { PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE } from '../../../core/secure-fs/native-bridge';
@@ -201,9 +201,9 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     };
     const parsed = parseSensorManifest(candidate, 'portable materialized manifest');
     if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') throw new Error('portable materialized manifest must be v3 project-sensors');
-    const manifest = parsed.pack;
+    const manifest = asPackBoundProjectSensors(parsed.pack);
     for (const [name, sensor] of Object.entries(manifest.sensors)) {
-        if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
+        if (isPackBoundManifestSensor(sensor) && sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
     }
     const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     // Establish every registry authority and read every selected byte before the

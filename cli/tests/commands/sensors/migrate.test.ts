@@ -162,11 +162,12 @@ describe('planV2Migration', () => {
         try {
             fs.writeFileSync(manifestPath, original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
-            const withoutPolicy = { ...candidate.sensors.lint };
+            const lint = candidate.sensors.lint;
+            const withoutPolicy = { ...lint };
             delete withoutPolicy.policyRef;
             for (const changed of [
-                { ...candidate.sensors.lint, fast: false },
-                { ...candidate.sensors.lint, variantId: 'eslint-8', initializedCompatibility: { ...candidate.sensors.lint.initializedCompatibility, variantId: 'eslint-8', toolVersion: '8.0.0', certifiedRange: '>=8 <9' } },
+                { ...lint, fast: false },
+                { ...lint, variantId: 'eslint-8', initializedCompatibility: { ...lint.initializedCompatibility, variantId: 'eslint-8', toolVersion: '8.0.0', certifiedRange: '>=8 <9' } },
                 withoutPolicy,
             ]) {
                 expect(() => replaceV2ManifestWithV3(manifestPath, { ...candidate, sensors: { lint: changed } }, resolvedSource())).toThrow('semantic mismatch');

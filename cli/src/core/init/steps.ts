@@ -70,7 +70,10 @@ export const defaultActions: InitActions = {
         if (plan.kind === 'blocked') throw new Error(`sensor bootstrap blocked: ${plan.reason}; ${plan.remedy}`);
         if (plan.kind === 'migrate') throw new Error('sensor init does not migrate an existing v2 manifest; run awm sensors bootstrap');
         if (plan.kind === 'create') applySensorBootstrap(plan);
-        const pack = plan.kind === 'create' && plan.manifest.mode === 'project-sensors' ? plan.manifest.pack : detectStack(o.cwd).pack;
+        const detected = detectStack(o.cwd).pack;
+        const declared = plan.kind === 'create' && plan.manifest.mode === 'project-sensors' ? plan.manifest.pack : undefined;
+        const pack = typeof declared === 'string' && declared.length > 0 ? declared : detected;
+        if (typeof pack !== 'string' || pack.length === 0) throw new Error('sensor init could not resolve a pack id');
         return { detection: { pack }, manifest: { pack } };
     },
 
