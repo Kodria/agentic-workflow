@@ -72,9 +72,9 @@ describe('project-declared sensors docs contract (CMD-DOCS)', () => {
         // dedicated body section — frontmatter description must not satisfy these.
         const projectVsPacks = skillSection(body, '## Project sensors vs packs');
 
-        expect(projectVsPacks).toMatch(
-            /Prefer a \*\*pack\*\*|Declare a \*\*project sensor\*\*|when the check is project-owned/i,
-        );
+        // Both guidance clauses are required — Prefer|Declare OR let either alone satisfy.
+        expect(projectVsPacks).toMatch(/Prefer a \*\*pack\*\*/);
+        expect(projectVsPacks).toMatch(/Declare a \*\*project sensor\*\* when the check is project-owned/i);
         expect(projectVsPacks).toMatch(/"source"\s*:\s*"project"/);
         expect(projectVsPacks).toMatch(/```json[\s\S]*?"source"\s*:\s*"project"[\s\S]*?```/);
         expect(projectVsPacks).toMatch(

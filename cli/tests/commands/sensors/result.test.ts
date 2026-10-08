@@ -25,7 +25,6 @@ describe('interpretResult exit-code formatter (RF-2.4)', () => {
             errors: [],
             certification: 'project-declared',
         });
-        expect(result.errors.every(error => error.file === undefined)).toBe(true);
     });
 
     it('maps non-zero exit to fail with truncated combined stdout/stderr evidence and no invented per-file findings', () => {
@@ -36,9 +35,20 @@ describe('interpretResult exit-code formatter (RF-2.4)', () => {
         expect(result.errors[0]!.file).toBeUndefined();
         expect(result.errors[0]!.line).toBeUndefined();
         expect(result.errors[0]!.rule).toBeUndefined();
-        expect(result.errors[0]!.message.length).toBeLessThanOrEqual(220);
-        expect(result.errors[0]!.message).toMatch(/x{10,}|stderr-tail|exit 1/);
+        // Combined = stdout+stderr; truncateEvidence caps at 200 — must be truncated
+        // stdout-first content, not a loose "exit 1" / stderr-only fallback.
+        expect(result.errors[0]!.message.length).toBeLessThanOrEqual(200);
+        expect(result.errors[0]!.message).toMatch(/^x{10,}/);
+        expect(result.errors[0]!.message).not.toMatch(/exit 1/);
         expect(result.certification).toBe('project-declared');
+    });
+
+    it('maps non-zero exit with empty stdout/stderr to fail evidence that includes exit N', () => {
+        const result = interpretResult(prepared(), exited(7, '', ''));
+        expect(result.status).toBe('fail');
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0]!.file).toBeUndefined();
+        expect(result.errors[0]!.message).toMatch(/exit 7/);
     });
 });
 

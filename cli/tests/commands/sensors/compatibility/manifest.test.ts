@@ -354,18 +354,8 @@ describe('sensor manifest contract', () => {
                 kind: 'v3',
                 pack: { sensors: { lint: { variantId: 'eslint-9' } } },
             });
-            expect(() => JSON.parse(JSON.stringify({
-                schemaVersion: 3,
-                mode: 'project-sensors',
-                pack: 'js-ts',
-                source: { registry: 'baseline' },
-                sensors: {
-                    custom: {
-                        enabled: true,
-                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
-                    },
-                },
-            }))).not.toThrow();
+            // Soft-isolation: unmarked custom must be dropped, pack sibling kept.
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
         });
 
         it('rejects unknown formatter and defaults omitted formatter to exit-code', () => {

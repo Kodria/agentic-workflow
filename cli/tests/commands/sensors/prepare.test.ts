@@ -158,6 +158,22 @@ describe('prepareV2Sensor: project-declared entries (S2)', () => {
         });
         expect(prepared.certification).toBe('project-declared');
     });
+
+    test('returns synthetic not-applicable when project applicabilityPaths are not met', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor({
+                applicability: { allFiles: ['terraform.tf'] },
+            }),
+            applicabilityPaths: ['README.md'],
+            requestedScope: 'full',
+        });
+
+        expect(prepared.command).toBeUndefined();
+        expect(prepared.syntheticStatus).toBe('inconclusive');
+        expect(prepared.syntheticReason).toBe('not-applicable: applicability-not-met');
+        expect(prepared.certification).toBe('project-declared');
+    });
 });
 
 // El bloqueo que esto arregla: `compatible-unverified` significa que la herramienta esta,

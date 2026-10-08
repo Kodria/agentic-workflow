@@ -470,7 +470,6 @@ describe('project-declared status and coverage (S3)', () => {
 
         const result = await computeSensorStatus(tmpDir);
 
-        expect(Object.keys(result.checks).length).toBeGreaterThan(0);
         expect(result.checks['iac-format']).toMatchObject({
             ok: true,
             certification: 'project-declared',
@@ -479,7 +478,7 @@ describe('project-declared status and coverage (S3)', () => {
         expect(result.overall).not.toBe('NOT_CONFIGURED');
         // Must not be empty Pack:none / DEGRADED with zero detail solely because pack is absent.
         expect(result.pack === null || result.pack === undefined).toBe(true);
-        expect(Object.keys(result.checks)).not.toEqual([]);
+        expect(Object.keys(result.checks)).toEqual(expect.arrayContaining(['iac-format']));
     });
 
     it('reports coverage as inconclusive / no pack-reference for only-project (RF-2.9)', async () => {

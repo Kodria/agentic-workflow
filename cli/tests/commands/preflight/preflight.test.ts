@@ -1004,6 +1004,8 @@ describe('preflight', () => {
             const remedy = check(await preflight(dir), 'manifest').remedy ?? '';
             const firstLine = remedy.split('\n')[0] ?? remedy;
             expect(firstLine).not.toMatch(/awm sensors init/i);
+            // RF-3.3 positive: first remedy names repair of the entry/field, not regen.
+            expect(firstLine).toMatch(/repair|entry|field/i);
         });
 
         it('uses an only-project-honest tools remedy when sensors are empty and pack is null', async () => {
@@ -1054,7 +1056,9 @@ describe('preflight', () => {
                 expect(manifestCheck.ok).toBe(true);
                 expect(manifestCheck.detail).not.toMatch(/sensor authority is unavailable/i);
                 expect(manifestCheck.detail).not.toMatch(/pack ['"]?generic['"]?/i);
-                expect(manifestCheck.detail).toMatch(/iac-format|project-declared|sensors enabled/i);
+                // only-project READY must say so — loose "sensors enabled" alone is pack wording.
+                expect(manifestCheck.detail).toMatch(/only-project/i);
+                expect(manifestCheck.detail).toMatch(/project-declared/i);
                 expect(check(report, 'tools').ok).toBe(true);
                 expect(report.mode).toBe('project-sensors');
             } finally {
