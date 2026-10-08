@@ -282,7 +282,12 @@ function softIsolatedChecks(
     for (const [name, sensor] of Object.entries(sensors)) {
         if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
             checks[name] = projectSensorCheck(sensor as ProjectDeclaredSensor, recovered.packageRoot);
+            continue;
         }
+        const packSensor = sensor as SensorManifestV2['sensors'][string];
+        checks[name] = packSensor.enabled === false
+            ? { ok: true, detail: 'disabled' }
+            : checkStructuredCommand(packSensor.command, recovered.packageRoot, packSensor.assets);
     }
     for (const entry of recovered.invalidEntries) {
         checks[entry.name] = { ok: false, detail: entry.reason };
