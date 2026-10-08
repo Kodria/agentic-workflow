@@ -127,7 +127,7 @@
     {
       "id": "S2",
       "title": "Prepare, exit-code formatter, run parity, provenance",
-      "requirements": ["RF-1.7", "RF-2.1", "RF-2.2", "RF-2.3", "RF-2.4", "RF-2.5", "RF-2.6", "RF-2.7"],
+      "requirements": ["RF-1.7", "RF-2.1", "RF-2.2", "RF-2.3", "RF-2.4", "RF-2.5", "RF-2.6", "RF-2.7", "RF-4.3"],
       "dependsOn": ["S1"],
       "sectionAnchor": "slice-s2",
       "sources": ["SRC-DESIGN", "SRC-PREPARE", "SRC-RESULT"],
