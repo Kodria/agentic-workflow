@@ -4,20 +4,59 @@ import path from 'path';
 /**
  * CMD-DOCS — RF-5.1 / RF-5.2 (project-declared sensors documentation).
  *
- * Requires a sibling checkout of awm-baseline-registry next to this repo.
- * Missing checkout fails loudly (no silent skip).
+ * Resolves awm-baseline-registry from (in order):
+ * 1. `AWM_BASELINE_REGISTRY_ROOT` (CI docs checkout)
+ * 2. nested `repoRoot/awm-baseline-registry` (CI support-matrix layout)
+ * 3. sibling `repoRoot/../awm-baseline-registry` (maintainer workspace)
+ *
+ * Prefer a checkout that already contains RF-5.1 (`## Project sensors vs packs`).
+ * Missing / too-old checkouts fail loudly (no silent skip).
  */
 
 const repoRoot = path.resolve(__dirname, '../../..');
 const cliReferencePath = path.join(repoRoot, 'docs', 'cli-reference.md');
-const setupSensorsPath = path.join(
-    repoRoot,
-    '..',
-    'awm-baseline-registry',
-    'skills',
-    'setup-sensors',
-    'SKILL.md',
-);
+const RF51_HEADING = '## Project sensors vs packs';
+
+function setupSensorsSkillPath(registryRoot: string): string {
+    return path.join(registryRoot, 'skills', 'setup-sensors', 'SKILL.md');
+}
+
+function resolveSetupSensorsPath(): string {
+    const envRoot = process.env.AWM_BASELINE_REGISTRY_ROOT?.trim();
+    // When CI/maintainer sets the override, that root is authoritative (no silent
+    // fallback to a nested immutable pin that lacks RF-5.1 prose).
+    const candidates = envRoot
+        ? [path.resolve(envRoot)]
+        : [
+            path.join(repoRoot, 'awm-baseline-registry'),
+            path.join(repoRoot, '..', 'awm-baseline-registry'),
+        ];
+
+    const existing = candidates
+        .map(root => ({ root, skill: setupSensorsSkillPath(root) }))
+        .filter(entry => fs.existsSync(entry.skill));
+
+    if (existing.length === 0) {
+        throw new Error(
+            'Baseline registry checkout missing for RF-5.1 docs contract. Tried:\n'
+            + candidates.map(root => `  - ${setupSensorsSkillPath(root)}`).join('\n')
+            + '\nClone awm-baseline-registry as a sibling, nest it under the CLI repo, '
+            + 'or set AWM_BASELINE_REGISTRY_ROOT to a checkout that includes setup-sensors RF-5.1.',
+        );
+    }
+
+    const withRf51 = existing.find(entry => fs.readFileSync(entry.skill, 'utf8').includes(RF51_HEADING));
+    if (!withRf51) {
+        throw new Error(
+            'Baseline registry checkout is present but too old for RF-5.1 '
+            + `(missing ${RF51_HEADING}). Checked:\n`
+            + existing.map(entry => `  - ${entry.skill}`).join('\n')
+            + '\nPoint AWM_BASELINE_REGISTRY_ROOT at a registry tip that documents project-declared sensors '
+            + '(coordinated awm-baseline-registry PR), without replacing the immutable v2.0.1 support-matrix pin.',
+        );
+    }
+    return withRf51.skill;
+}
 
 function sensorsSection(text: string): string {
     const start = text.indexOf('## Sensors (per-project computational checks)');
@@ -67,18 +106,12 @@ describe('project-declared sensors docs contract (CMD-DOCS)', () => {
     });
 
     it('setup-sensors skill documents project vs pack, JSON example, and non-gating provenance (RF-5.1)', () => {
-        if (!fs.existsSync(setupSensorsPath)) {
-            throw new Error(
-                `Sibling registry checkout missing: expected ${setupSensorsPath}. `
-                + 'Clone awm-baseline-registry next to agentic-workflow (same parent directory).',
-            );
-        }
-
+        const setupSensorsPath = resolveSetupSensorsPath();
         const skill = fs.readFileSync(setupSensorsPath, 'utf8');
         const body = skillBody(skill);
         // Scope when-to-use / project-vs-packs (and related RF-5.1 prose) to the
         // dedicated body section — frontmatter description must not satisfy these.
-        const projectVsPacks = skillSection(body, '## Project sensors vs packs');
+        const projectVsPacks = skillSection(body, RF51_HEADING);
 
         // Both guidance clauses are required — Prefer|Declare OR let either alone satisfy.
         expect(projectVsPacks).toMatch(/Prefer a \*\*pack\*\*/);
