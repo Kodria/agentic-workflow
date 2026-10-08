@@ -27,6 +27,24 @@ function sensorsSection(text: string): string {
     return nextH2 === -1 ? rest : rest.slice(0, nextH2);
 }
 
+/** Skill body after YAML frontmatter (content after the closing `---`). */
+function skillBody(skill: string): string {
+    const match = skill.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/);
+    if (!match) {
+        throw new Error('setup-sensors SKILL.md missing YAML frontmatter delimiters');
+    }
+    return match[1];
+}
+
+/** Named H2 section inside the skill body; fails if the heading is absent. */
+function skillSection(body: string, heading: string): string {
+    const start = body.indexOf(heading);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const rest = body.slice(start);
+    const nextH2 = rest.search(/\n## /);
+    return nextH2 === -1 ? rest : rest.slice(0, nextH2);
+}
+
 describe('project-declared sensors docs contract (CMD-DOCS)', () => {
     it('cli-reference sensors section documents project markers, provenance, exit-code, and non-gating (RF-5.2)', () => {
         const text = fs.readFileSync(cliReferencePath, 'utf8');
@@ -49,13 +67,17 @@ describe('project-declared sensors docs contract (CMD-DOCS)', () => {
         }
 
         const skill = fs.readFileSync(setupSensorsPath, 'utf8');
+        const body = skillBody(skill);
+        // Scope when-to-use / project-vs-packs (and related RF-5.1 prose) to the
+        // dedicated body section — frontmatter description must not satisfy these.
+        const projectVsPacks = skillSection(body, '## Project sensors vs packs');
 
-        // Prefer pack when the check is pack-covered; declare source:"project" for
-        // project-owned checks that packs do not (and should not) certify.
-        expect(skill).toMatch(/project sensors? vs\.?\s+packs|when to (?:use|declare) (?:a )?project sensor|project-declared sensor versus|versus when to use (?:or extend )?a pack/i);
-        expect(skill).toMatch(/"source"\s*:\s*"project"/);
-        expect(skill).toMatch(/```json[\s\S]*?"source"\s*:\s*"project"[\s\S]*?```/);
-        expect(skill).toMatch(
+        expect(projectVsPacks).toMatch(
+            /Prefer a \*\*pack\*\*|Declare a \*\*project sensor\*\*|when the check is project-owned/i,
+        );
+        expect(projectVsPacks).toMatch(/"source"\s*:\s*"project"/);
+        expect(projectVsPacks).toMatch(/```json[\s\S]*?"source"\s*:\s*"project"[\s\S]*?```/);
+        expect(projectVsPacks).toMatch(
             /project-declared[\s\S]{0,220}(?:does not|never)\s+(?:block|blocks)[\s\S]{0,100}unattended/i,
         );
     });
