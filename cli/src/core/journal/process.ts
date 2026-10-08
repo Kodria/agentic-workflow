@@ -443,12 +443,15 @@ export function descendantActivity(psTable: string, rootPid: number): string {
     const children = new Map<number, Array<{ pid: number; time: string }>>();
     let rows = 0;
     for (const line of psTable.split('\n')) {
-        const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+        // time may be empty on some Darwin samples for a just-spawned process;
+        // treat blank as "0" so the pid still joins the descendant tree (otherwise
+        // a healthy detached grandchild is invisible and activity reads as frozen).
+        const match = /^\s*(\d+)\s+(\d+)(?:\s+(\S+))?\s*$/.exec(line);
         if (match === null) continue;
         if (++rows > MAX_PS_ROWS) break;
         const pid = Number(match[1]); const ppid = Number(match[2]);
         const siblings = children.get(ppid) ?? [];
-        siblings.push({ pid, time: match[3] });
+        siblings.push({ pid, time: match[3] && match[3].length > 0 ? match[3] : '0' });
         children.set(ppid, siblings);
     }
     const seen = new Set<number>([rootPid]);
@@ -468,12 +471,23 @@ export function descendantActivity(psTable: string, rootPid: number): string {
 }
 
 function observeDescendants(rootPid: number): string {
-    try {
-        const table = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,time='], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
-        return descendantActivity(table, rootPid);
-    } catch {
-        return 'unknown';
+    // One transient `ps` failure under CI load used to freeze the snapshot at
+    // `unknown`, which made the Darwin integration test (and a real supervisor
+    // tick) treat a later concrete `0:none` as "activity changed" without ever
+    // seeing the grandchild. Retry once before degrading.
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const table = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,time='], {
+                encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
+            });
+            return descendantActivity(table, rootPid);
+        } catch (error) {
+            lastError = error;
+        }
     }
+    void lastError;
+    return 'unknown';
 }
 /** Llamada UNA VEZ POR TICK por el supervisor (ver superviseController en
  *  commands/watch/supervisor.ts) mientras un controlador este activo — el

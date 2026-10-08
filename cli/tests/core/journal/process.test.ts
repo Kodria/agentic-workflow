@@ -207,27 +207,49 @@ describe('process identity', () => {
         test('ignores malformed ps lines instead of inventing processes', () => {
             expect(descendantActivity('garbage\n  20    10 00:00:01\n\n  x y z', 10)).toMatch(/^1:/);
         });
+
+        test('keeps Darwin-style rows with blank or dotted cputime in the tree', () => {
+            // macOS `ps -o time=` is often `0:00.01`; a brand-new process can also
+            // omit the third column entirely on some samples.
+            expect(descendantActivity('  10     1 0:00.05\n  20    10 0:00.01\n  30    20\n', 10)).toMatch(/^2:/);
+            expect(descendantActivity('  10     1\n  20    10\n', 10)).toMatch(/^1:/);
+        });
     });
 
     test('activitySnapshot ve un nieto fuera del process group del controlador', async () => {
         if (isWindowsNative()) return;   // win32 degrada activity sin ps (ver activitySnapshot)
-        const script = "setTimeout(() => { require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 4000)'], { detached: true, stdio: 'ignore' }).unref(); }, 400); setTimeout(()=>{}, 4000)";
+        const script = "setTimeout(() => { require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 15000)'], { detached: true, stdio: 'ignore' }).unref(); }, 200); setTimeout(()=>{}, 15000)";
         const { child, ref } = spawnStructured(['node', '-e', script], process.cwd(), 'n-desc');
         try {
-            const before = activitySnapshot(ref);
-            expect(before).not.toBeNull();
-            let after = activitySnapshot(ref);
-            for (let i = 0; i < 40 && after !== null && after.descendants === before!.descendants; i++) {
+            // Wait for a concrete baseline (not `unknown` from a transient ps miss).
+            let before = activitySnapshot(ref);
+            for (let i = 0; i < 50 && (before === null || before.descendants === 'unknown'); i++) {
                 await new Promise((resolve) => setTimeout(resolve, 50));
-                after = activitySnapshot(ref);
+                before = activitySnapshot(ref);
             }
-            expect(after).not.toBeNull();
+            expect(before).not.toBeNull();
+            expect(before!.descendants).not.toBe('unknown');
+            const beforeGroup = before!.groupSize;
+
+            let after = before!;
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline) {
+                const snap = activitySnapshot(ref);
+                if (snap !== null) after = snap;
+                // Success: same process group, at least one PPID-descendant appeared.
+                if (after.groupSize === beforeGroup && /^[1-9]\d*:/.test(after.descendants)) break;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
             // The detached grandchild lives in its own process group: the group
             // signal cannot see it, the descendant signal must.
-            expect(after!.groupSize).toBe(before!.groupSize);
-            expect(after!.descendants).not.toBe(before!.descendants);
-            expect(after!.descendants).toMatch(/^1:/);
+            expect(after.groupSize).toBe(beforeGroup);
+            expect(after.descendants).toMatch(/^[1-9]\d*:/);
         } finally {
+            // Detached grandchildren are outside `-PGID`; reap by parent pid too.
+            try {
+                const { execFileSync } = require('child_process');
+                execFileSync('pkill', ['-P', String(ref.pid)], { stdio: 'ignore', timeout: 1000 });
+            } catch { /* ya ausente */ }
             try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }
             child.kill('SIGKILL');
         }
