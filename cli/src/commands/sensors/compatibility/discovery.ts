@@ -34,6 +34,23 @@ function safeFile(root: string, relative: string): boolean {
     try { const stat = fs.lstatSync(path.join(root, relative)); return stat.isFile() && !stat.isSymbolicLink(); } catch { return false; }
 }
 
+/**
+ * Present contained marker files under cwd — same `safeFile` rules pack discovery
+ * uses when evaluating applicability allFiles/anyFiles.
+ */
+export function discoverPresentMarkers(cwd: unknown, markers: readonly string[]): string[] {
+    if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
+    if (!Array.isArray(markers)) throw new Error('markers must be an array');
+    let root: string;
+    try {
+        root = fs.realpathSync(cwd);
+        if (!fs.statSync(root).isDirectory()) throw new Error();
+    } catch {
+        throw new Error(`cwd is not a readable project directory: ${cwd}`);
+    }
+    return [...new Set(markers.filter((marker): marker is string => typeof marker === 'string' && safeFile(root, marker)))].sort();
+}
+
 function safeParts(parts: string[]): boolean {
     return parts.length > 0 && parts.every(part => Boolean(part) && part !== '.' && part !== '..' && !part.includes('/') && !part.includes('\\'));
 }

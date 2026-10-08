@@ -17,12 +17,15 @@ import type { PackSource } from './compatibility/pack-source';
 import {
     isProjectDeclaredSensor,
     parseSensorManifestWithIssues,
+    type PackBoundManifestSensor,
     type ParsedSensorManifest,
     type ProjectDeclaredSensor,
     type SensorManifestInvalidEntry,
     type SensorManifestV3ProjectSensors,
     type V3ManifestSensor,
 } from './compatibility/manifest';
+import { discoverPresentMarkers } from './compatibility/discovery';
+import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
 import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
@@ -308,12 +311,20 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         } else if (projectEntry !== null) {
             const fast = projectEntry.fast ?? false;
             if (!shouldRun(fast, opts)) continue;
+            const markers = [
+                ...(projectEntry.applicability?.allFiles ?? []),
+                ...(projectEntry.applicability?.anyFiles ?? []),
+            ];
+            const applicabilityPaths = markers.length > 0
+                ? discoverPresentMarkers(projectCwd, markers)
+                : undefined;
             const execution = prepareV2Sensor({
                 name,
                 sensor: projectEntry,
                 requestedScope,
                 changed: changed ?? undefined,
                 projectTimeout: projectEntry.timeout,
+                applicabilityPaths,
             });
             prepared.push(projectEntry.enabled === false
                 ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
@@ -323,40 +334,54 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
 
         const liveSensor = parsed.kind !== 'legacy' ? live?.pack.sensors[name] : undefined;
         const liveState = parsed.kind !== 'legacy' ? live?.sensors[name] : undefined;
-        let packBoundSensor = entry as any;
+        let packBoundSensor: PackBoundManifestSensor | SensorManifest['sensors'][string] =
+            entry as PackBoundManifestSensor | SensorManifest['sensors'][string];
         if (collidedWithPack && liveSensor) {
             // Always reconstruct from live — never leave packBoundSensor as the project entry.
             const fallbackVariant = liveSensor.variants[0];
             if (!fallbackVariant) continue;
             const variantId = liveState?.variantId ?? fallbackVariant.id;
             const variant = liveSensor.variants.find(candidate => candidate.id === variantId) ?? fallbackVariant;
-            const packSyntheticCompatibility = {
-                state: 'compatible-unverified' as const,
+            const packSyntheticCompatibility: CompatibilityEvidence = {
+                state: 'compatible-unverified',
                 reason: 'collision-pack-fallback',
                 variantId,
                 toolVersion: null,
                 runtimeVersion: null,
                 certifiedRange: null,
-                evidence: [] as [],
+                evidence: [],
             };
-            packBoundSensor = {
+            const reconstructed: PackBoundManifestSensor = {
                 enabled: true,
                 ...(liveSensor.fast !== undefined ? { fast: liveSensor.fast } : {}),
                 ...(liveSensor.timeout !== undefined ? { timeout: liveSensor.timeout } : {}),
                 variantId,
-                command: variant.command,
+                command: variant.command as StructuredCommand,
                 initializedCompatibility: liveState ?? packSyntheticCompatibility,
             };
+            packBoundSensor = reconstructed;
         }
         const fast = parsed.kind !== 'legacy'
-            ? packBoundSensor.fast ?? liveSensor?.fast ?? false
+            ? (packBoundSensor as { fast?: boolean }).fast ?? liveSensor?.fast ?? false
             : (entry as { fast?: boolean }).fast ?? false;
         if (!shouldRun(fast, opts)) continue;
 
         const execution = parsed.kind !== 'legacy'
-            ? prepareV2Sensor({ name, sensor: packBoundSensor, liveSensor, liveState, requestedScope, changed: changed ?? undefined })
-            : prepareLegacySensor({ name, config: entry as any, requestedScope, changed: changed ?? undefined });
-        prepared.push(packBoundSensor.enabled === false
+            ? prepareV2Sensor({
+                name,
+                sensor: packBoundSensor as PackBoundManifestSensor,
+                liveSensor,
+                liveState,
+                requestedScope,
+                changed: changed ?? undefined,
+            })
+            : prepareLegacySensor({
+                name,
+                config: entry as SensorManifest['sensors'][string],
+                requestedScope,
+                changed: changed ?? undefined,
+            });
+        prepared.push((packBoundSensor as { enabled?: boolean }).enabled === false
             ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
             : execution);
     }

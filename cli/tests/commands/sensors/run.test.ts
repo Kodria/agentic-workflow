@@ -957,4 +957,44 @@ describe('runSensors project-declared parity (S2)', () => {
         ]);
         expect(mockRunStructuredCommand).not.toHaveBeenCalled();
     });
+
+    it('runs a project sensor when its allFiles marker exists', async () => {
+        writeManifest({
+            'iac-format': {
+                ...projectIac('process.exit(0)'),
+                applicability: { allFiles: ['package.json'] },
+            },
+        }, null);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({ name: 'iac-format', status: 'pass', certification: 'project-declared' }),
+        ]);
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
+
+    it('keeps a project sensor synthetic not-applicable when its allFiles marker is missing', async () => {
+        writeManifest({
+            'iac-format': {
+                ...projectIac('process.exit(0)'),
+                applicability: { allFiles: ['missing-stack.marker'] },
+            },
+        }, null);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({
+                name: 'iac-format',
+                status: 'inconclusive',
+                skipReason: 'not-applicable: applicability-not-met',
+                certification: 'project-declared',
+            }),
+        ]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
 });
