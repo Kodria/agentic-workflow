@@ -18,3 +18,9 @@ Esta es la guía de mantenimiento de este repo (el CLI de AWM) — no la funció
 - **Descubrimiento de contenido:** `contentRoots()` devuelve los paths bajo `~/.awm/registries/` según la config. No hay constante fija de `baseRoot` ni de `cliSource`.
 
 <!-- AWM:CONTEXT-KERNEL:END v1 -->
+
+## Lessons (merge-and-prune)
+
+- **Soft-recover / alternate parse paths must reuse the hard-path trust boundary.** When `run` soft-isolates invalid sensor entries after `resolveSensorProject` returns `invalid`, recovery MUST call the same regular-file + UTF-8 + `packageRoot` realpath-containment helpers as the configured path — never a second `path.resolve` + `existsSync` resolver. Confirmed #209 QA: soft-recover accepted a symlink `packageRoot` escape and symlink manifests that hard-parse rejected (blockers). Shared helpers live in `cli/src/commands/sensors/project.ts` (`softRecoverInvalidProject`, `resolveContainedPackageRoot`).
+- **Status and run must share collision and soft-isolation semantics.** Dual readiness surfaces (`status` checks vs `run` `invalidEntries` / prepare) that disagree on pack name collisions or sibling isolation are defects, not “static vs empirical” differences. RF-1.7 collision and soft-isolate checks belong on both paths (configured and softIsolatedChecks).
+- **Docs/contract asserts must scope to the body section they claim to protect.** A regex over the whole `SKILL.md` (including frontmatter `description`) is vacuous if deleting the section still passes — slice after frontmatter / extract `## Section` first. Same class as vacuous `assert.match` lessons already enforced in baseline-registry contracts.
