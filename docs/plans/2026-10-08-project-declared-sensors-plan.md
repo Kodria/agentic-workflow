@@ -68,7 +68,7 @@
     {
       "id": "SRC-INIT",
       "path": "cli/src/commands/sensors/init.ts",
-      "locator": "const existingSensors = existing?.sensors ?? {};",
+      "locator": "const existingSensors = (existing?.sensors ?? {}) as Record<string, Record<string, unknown>>;",
       "fact": "Per-field merge overlays pack defaults with existing sensors; must preserve source:project entries and allow pack-less manifests."
     },
     {
