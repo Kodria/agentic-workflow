@@ -422,6 +422,22 @@ describe('preflight', () => {
         expect(execution.remedy).not.toContain('named sensor');
     });
 
+    it('does not treat overall=pass as unconditional green when invalidEntries are present', async () => {
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        mockRunSensors.mockResolvedValue({
+            overall: 'pass',
+            sensors: [{ name: 'good', status: 'pass', errors: [] }],
+            invalidEntries: [{ name: 'broken', reason: 'sensors.broken.formatter is not a registered formatter id' }],
+        });
+
+        const report = await preflight(dir, { verifySensors: true });
+        const execution = check(report, 'sensors-execution');
+
+        expect(execution.ok).toBe(false);
+        expect(execution.detail).toMatch(/invalidEntries|broken/i);
+        expect(execution.detail).not.toBe('all selected sensors completed with pass');
+    });
+
     it('reports not_configured when no sensor manifest exists', async () => {
         // The team-rollout case: a developer clones the repo and never runs
         // `awm sensors init`. Today nothing notices until an unattended run is already

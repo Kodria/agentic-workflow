@@ -16,7 +16,6 @@ import { resolveSensorSource } from './compatibility/source';
 import type { PackSource } from './compatibility/pack-source';
 import {
     isProjectDeclaredSensor,
-    parseSensorManifestWithIssues,
     type PackBoundManifestSensor,
     type ParsedSensorManifest,
     type ProjectDeclaredSensor,
@@ -29,7 +28,7 @@ import type { CompatibilityEvidence, StructuredCommand } from './compatibility/t
 import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
-import { resolveSensorProject } from './project';
+import { resolveSensorProject, softRecoverInvalidProject } from './project';
 
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
@@ -198,34 +197,6 @@ function hasSelectedPack(manifest: SensorManifestV3ProjectSensors): boolean {
 }
 
 /**
- * Soft-recover a schemaVersion 3 project-sensors manifest when hard parse failed
- * on one entry: keep valid siblings executable and surface invalidEntries.
- */
-function softRecoverConfigured(
-    project: Extract<ReturnType<typeof resolveSensorProject>, { state: 'invalid' }>,
-): { projectRoot: string; manifestPath: string; packageRoot: string; manifest: ParsedSensorManifest; invalidEntries: SensorManifestInvalidEntry[] } | null {
-    try {
-        const text = fs.readFileSync(project.manifestPath, 'utf8');
-        const soft = parseSensorManifestWithIssues(JSON.parse(text), project.manifestPath);
-        if (soft.kind !== 'v3' || soft.pack.mode !== 'project-sensors') return null;
-        if (Object.keys(soft.pack.sensors).length === 0 && soft.invalidEntries.length === 0) return null;
-        const configuredPackageRoot = soft.pack.packageRoot;
-        const packageRoot = configuredPackageRoot ? path.resolve(project.projectRoot, configuredPackageRoot) : project.projectRoot;
-        if (!fs.existsSync(packageRoot) || !fs.statSync(packageRoot).isDirectory()) return null;
-        const { invalidEntries, ...manifest } = soft;
-        return {
-            projectRoot: project.projectRoot,
-            manifestPath: project.manifestPath,
-            packageRoot,
-            manifest,
-            invalidEntries,
-        };
-    } catch {
-        return null;
-    }
-}
-
-/**
  * One orchestration path for both manifest contracts. Preparation selects the
  * authorized command; execution, baseline handling, and verdict reduction are
  * deliberately format-agnostic.
@@ -244,7 +215,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     let invalidEntries: SensorManifestInvalidEntry[] = [];
     let configured: { projectRoot: string; manifestPath: string; packageRoot: string; manifest: ParsedSensorManifest };
     if (project.state === 'invalid') {
-        const recovered = softRecoverConfigured(project);
+        const recovered = softRecoverInvalidProject(project);
         if (!recovered) {
             const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
             return { sensors: [], overall: 'not_certified', mode: 'invalid', reason, projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'repair-sensor-manifest' };
@@ -299,15 +270,25 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
 
     const activeManifest = parsed.pack as unknown as SensorManifest;
     const sensorsMap = activeManifest.sensors ?? {};
+    const packSelected = projectSensorsManifest !== null && hasSelectedPack(projectSensorsManifest);
     for (const [name, sensor] of Object.entries(sensorsMap)) {
         const entry = sensor as V3ManifestSensor | SensorManifest['sensors'][string];
         const projectEntry = parsed.kind !== 'legacy' && isProjectDeclaredSensor(entry as V3ManifestSensor)
             ? entry as ProjectDeclaredSensor
             : null;
-        const collidedWithPack = projectEntry !== null && live?.pack.sensors[name] !== undefined;
+        // RF-1.7: collision when the live pack defines this id. When pack is selected
+        // but live cannot be resolved, fail closed — never run a project override that
+        // might be colliding with an unresolved pack sensor name.
+        const collidedWithPack = projectEntry !== null && (
+            packSelected && live === null
+                ? true
+                : live?.pack.sensors[name] !== undefined
+        );
         if (collidedWithPack) {
             invalidEntries.push({ name, reason: `project-sensor-name-collision: ${name}` });
-            // RF-1.7: keep the pack sensor — fall through to pack-bound prepare using live.
+            // RF-1.7: keep the pack sensor when live is available; otherwise skip.
+            if (live === null || live.pack.sensors[name] === undefined) continue;
+            // Fall through to pack-bound prepare using live.
         } else if (projectEntry !== null) {
             const fast = projectEntry.fast ?? false;
             if (!shouldRun(fast, opts)) continue;

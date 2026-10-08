@@ -997,4 +997,75 @@ describe('runSensors project-declared parity (S2)', () => {
         ]);
         expect(mockRunStructuredCommand).not.toHaveBeenCalled();
     });
+
+    it('does not soft-recover when packageRoot is a symlink escaping the project root', async () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-soft-escape-out-'));
+        try {
+            fs.symlinkSync(outside, path.join(project, 'pkg'));
+            const body = {
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                packageRoot: 'pkg',
+                sensors: {
+                    broken: {
+                        source: 'project',
+                        enabled: true,
+                        fast: true,
+                        command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                        formatter: 'not-a-formatter',
+                    },
+                    good: projectIac('process.exit(0)'),
+                },
+            };
+            fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(body));
+            mockRunStructuredCommand.mockResolvedValue(ok());
+            const { runSensors } = require('../../../src/commands/sensors/run');
+            const result = await runSensors({ cwd: project, all: true });
+            expect(result.overall).toBe('not_certified');
+            expect(result.mode).toBe('invalid');
+            expect(result.sensors).toEqual([]);
+            expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('does not soft-recover a symlinked sensors.json (non-regular-file authority)', async () => {
+        const realManifest = path.join(project, 'elsewhere-sensors.json');
+        fs.writeFileSync(realManifest, JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors: { good: projectIac('process.exit(0)') },
+        }));
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
+        fs.symlinkSync(realManifest, manifestPath);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.overall).toBe('not_certified');
+        expect(result.mode).toBe('invalid');
+        expect(result.sensors).toEqual([]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('fail-closes a project id collision when the live pack cannot be resolved (live null)', async () => {
+        writeManifest({ lint: projectIac('process.exit(0)') });
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'not-valid-json{');
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
+            }),
+        ]);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        if (lint) expect(lint.certification).not.toBe('project-declared');
+        expect(mockRunStructuredCommand).not.toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
 });

@@ -424,6 +424,15 @@ export async function checkSensorExecution(cwd: string): Promise<PreflightCheck>
     try {
         const output = await runSensors({ cwd, all: true });
         if (output.overall === 'pass') {
+            const invalid = output.invalidEntries ?? [];
+            if (invalid.length > 0) {
+                return {
+                    id: 'sensors-execution',
+                    ok: false,
+                    detail: `sensors passed but ${invalid.length} invalidEntries remain: ${invalid.map(entry => `${entry.name} (${entry.reason})`).join('; ')}`,
+                    remedy: 'repair the invalid sensor entries in .awm/sensors.json, then rerun `awm preflight --verify-sensors`',
+                };
+            }
             return { id: 'sensors-execution', ok: true, detail: 'all selected sensors completed with pass' };
         }
         return {

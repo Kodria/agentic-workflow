@@ -7,7 +7,7 @@ import { discoverProjectEvidence } from './compatibility/discovery';
 import { bindContainedRuntimeCommands } from './compatibility/live';
 import type { PackSource } from './compatibility/pack-source';
 import { resolveProjectCompatibility, resolveSensorCompatibility } from './compatibility/resolve';
-import { resolveSensorProject } from './project';
+import { resolveSensorProject, softRecoverInvalidProject } from './project';
 import { resolveSensorSource, type SensorSourceResolution } from './compatibility/source';
 import { listRegistries } from '../../core/registries';
 import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
@@ -235,6 +235,61 @@ function packBoundOnly(manifest: SensorManifestV2 | SensorManifestV3ProjectSenso
     return { schemaVersion: 2, pack, sensors };
 }
 
+/** Live pack sensor ids, or null when the pack cannot be resolved (fail closed). */
+function livePackSensorIds(source: PackSource): Set<string> | null {
+    try {
+        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+        if (parsed.kind !== 'v2') return null;
+        return new Set(Object.keys(parsed.pack.sensors));
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * RF-1.7 status: never label a colliding project id as project-declared READY.
+ * When pack is selected and live is unavailable, fail closed rather than claiming
+ * the project override is safe.
+ */
+function projectDeclaredOrCollisionCheck(
+    name: string,
+    sensor: ProjectDeclaredSensor,
+    packageRoot: string,
+    packSelected: boolean,
+    liveIds: Set<string> | null,
+): SensorCheck {
+    if (packSelected && (liveIds === null || liveIds.has(name))) {
+        return {
+            ok: false,
+            detail: liveIds === null
+                ? `project-sensor-name-collision: ${name} (live pack unavailable)`
+                : `project-sensor-name-collision: ${name}; pack sensor kept`,
+        };
+    }
+    return projectSensorCheck(sensor, packageRoot);
+}
+
+/** Soft-isolate valid siblings into checks while authority remains invalid (RF soft-parse). */
+function softIsolatedChecks(
+    project: Extract<ReturnType<typeof resolveSensorProject>, { state: 'invalid' }>,
+): Record<string, SensorCheck> {
+    const recovered = softRecoverInvalidProject(project);
+    if (!recovered) return {};
+    const checks: Record<string, SensorCheck> = {};
+    const sensors = recovered.manifest.kind === 'v3' && recovered.manifest.pack.mode === 'project-sensors'
+        ? recovered.manifest.pack.sensors
+        : {};
+    for (const [name, sensor] of Object.entries(sensors)) {
+        if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
+            checks[name] = projectSensorCheck(sensor as ProjectDeclaredSensor, recovered.packageRoot);
+        }
+    }
+    for (const entry of recovered.invalidEntries) {
+        checks[entry.name] = { ok: false, detail: entry.reason };
+    }
+    return checks;
+}
+
 export async function computeSensorStatus(cwd: string = process.cwd()): Promise<SensorStatusResult> {
     let project: ReturnType<typeof resolveSensorProject>;
     try {
@@ -271,7 +326,12 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
                 reason = 'manifest-malformed';
             }
         } catch { /* unreadable manifest stays malformed */ }
-        return invalidStatus(project, pack, reason, remedy);
+        // Soft-isolate valid siblings into checks (same WithIssues path as run) while
+        // keeping mode=invalid so preflight RF-4.1 still sees schema-invalid authority.
+        return {
+            ...invalidStatus(project, pack, reason, remedy),
+            checks: softIsolatedChecks(project),
+        };
     }
     const packageRoot = project.packageRoot;
     const parsed = project.manifest;
@@ -304,6 +364,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
     if (parsed.kind === 'v2' || parsed.kind === 'v3') {
         const parsedPack = parsed.pack as SensorManifestV2 | SensorManifestV3ProjectSensors;
         const packId = typeof parsedPack.pack === 'string' ? parsedPack.pack : null;
+        const packSelected = typeof parsedPack.pack === 'string' && parsedPack.pack.length > 0;
         let resolution: SensorSourceResolution;
         try {
             resolution = resolveSensorSource(parsed, { registries: listRegistries() });
@@ -312,6 +373,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         }
         if (!('source' in resolution)) return sourceFailure(project, packId ?? 'unknown', resolution);
         const sourceMeta = resolvedSourceMetadata(resolution);
+        const liveIds = livePackSensorIds(resolution.source);
         const packManifest = packBoundOnly(parsedPack);
         const checks: Record<string, SensorCheck> = {};
         let compatibility: Record<string, CompatibilityEvidence>;
@@ -321,7 +383,9 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
             for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
                 if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
-                    checks[name] = projectSensorCheck(sensor as ProjectDeclaredSensor, packageRoot);
+                    checks[name] = projectDeclaredOrCollisionCheck(
+                        name, sensor as ProjectDeclaredSensor, packageRoot, packSelected, liveIds,
+                    );
                 } else {
                     checks[name] = (sensor as SensorManifestV2['sensors'][string]).enabled === false
                         ? { ok: true, detail: 'disabled' }
@@ -332,7 +396,9 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         }
         for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
             if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
-                checks[name] = projectSensorCheck(sensor as ProjectDeclaredSensor, packageRoot);
+                checks[name] = projectDeclaredOrCollisionCheck(
+                    name, sensor as ProjectDeclaredSensor, packageRoot, packSelected, liveIds,
+                );
                 continue;
             }
             const packSensor = sensor as SensorManifestV2['sensors'][string];
