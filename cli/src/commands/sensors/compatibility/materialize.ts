@@ -5,6 +5,7 @@ import {
     isPackBoundManifestSensor,
     isProjectDeclaredSensor,
     parseSensorManifest,
+    parseSensorManifestWithIssues,
     serializeManifestV2,
     serializeManifestV3,
     type ProjectDeclaredSensor,
@@ -200,7 +201,8 @@ function priorProjectSensors(projectRoot: string): Record<string, ProjectDeclare
     try {
         const stat = fs.lstatSync(manifestPath, { bigint: true });
         if (!stat.isFile() || stat.isSymbolicLink()) return {};
-        const parsed = parseSensorManifest(
+        // Soft-parse so one invalid sibling does not drop every valid project entry.
+        const parsed = parseSensorManifestWithIssues(
             JSON.parse(readInspectedBoundedFile(manifestPath, stat, MAX_ASSET_BYTES, () => new Error('prior manifest unreadable')).toString('utf8')),
             manifestPath,
         );

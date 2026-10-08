@@ -291,11 +291,14 @@ async function checkTools(cwd: string, status: SensorStatusResult): Promise<Pref
     // already guards against; this defends the invariant independently rather than
     // relying solely on `checkManifest`'s gate to catch this exact manifest shape.
     if (Object.keys(status.checks).length === 0) {
+        const packId = typeof status.pack === 'string' && status.pack.length > 0 ? status.pack : null;
         return {
             id: 'tools',
             ok: false,
             detail: 'no sensors configured to check (0 sensor entries in the manifest)',
-            remedy: `registry has no pack for '${status.pack}': run \`awm update\` or add a registry that has it`,
+            remedy: packId === null
+                ? 'add source:"project" sensor entries to .awm/sensors.json, or declare a pack'
+                : `registry has no pack for '${packId}': run \`awm update\` or add a registry that has it`,
         };
     }
     const broken = Object.entries(status.checks).filter(([, c]) => !c.ok);

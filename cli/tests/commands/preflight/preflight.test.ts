@@ -990,6 +990,25 @@ describe('preflight', () => {
             expect(firstLine).not.toMatch(/awm sensors init/i);
         });
 
+        it('uses an only-project-honest tools remedy when sensors are empty and pack is null', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {},
+                },
+            });
+
+            const report = await preflight(dir);
+            const tools = check(report, 'tools');
+
+            expect(tools.ok).toBe(false);
+            expect(tools.remedy ?? '').not.toMatch(/['"]null['"]/);
+            expect(tools.remedy ?? '').not.toMatch(/awm update/i);
+            expect(tools.remedy ?? '').not.toMatch(/registry has no pack/i);
+            expect(tools.remedy ?? '').toMatch(/source:"project"|declare a pack/i);
+        });
+
         it('accepts only-project READY status without inventing a pack id (RF-2.8)', async () => {
             const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-only-project-path-'));
             const previousPath = process.env.PATH;
