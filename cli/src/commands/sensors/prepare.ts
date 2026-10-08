@@ -1,7 +1,12 @@
 import { changedScopeError, applyChangedCmd, filterByExtension, type ChangedFiles } from './changed';
 import { resolveTimeout } from './compatibility/timeout';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
-import type { SensorManifestV2 } from './compatibility/manifest';
+import {
+    isProjectDeclaredSensor,
+    type ProjectDeclaredSensor,
+    type SensorManifestV2,
+    type V3ManifestSensor,
+} from './compatibility/manifest';
 import type { PreparedSensorExecution, SensorConfig } from './types';
 
 export type PrepareRunOptions = {
@@ -33,13 +38,15 @@ export type PrepareLegacySensorInput = {
 
 export type PrepareV2SensorInput = {
     name: string;
-    sensor: SensorManifestV2['sensors'][string];
+    sensor: V3ManifestSensor | SensorManifestV2['sensors'][string];
     liveSensor?: SensorPackSensor;
     liveState?: CompatibilityEvidence;
     projectTimeout?: number;
     packTimeout?: number;
     requestedScope?: RequestedScope;
     changed?: ChangedFiles;
+    /** Project paths used to evaluate optional project-sensor applicability. */
+    applicabilityPaths?: string[];
 };
 
 export function validateRunOptions(opts: PrepareRunOptions): void {
@@ -129,12 +136,57 @@ function v2Synthetic(input: PrepareV2SensorInput, reason: string): PreparedSenso
     };
 }
 
+function projectApplicabilityMet(sensor: ProjectDeclaredSensor, paths: string[] | undefined): boolean {
+    const rule = sensor.applicability;
+    if (!rule) return true;
+    if (rule.kind === 'explicit-or-supported-language' || rule.kind === 'explicit-opt-in') {
+        // Project sensors do not receive pack-selection signals; treat these kinds
+        // as met when no path markers were declared.
+        if (!rule.allFiles?.length && !rule.anyFiles?.length) return true;
+    }
+    const present = new Set(paths ?? []);
+    return (!rule.allFiles || rule.allFiles.every(file => present.has(file)))
+        && (!rule.anyFiles || rule.anyFiles.some(file => present.has(file)));
+}
+
 /**
- * Prepare a v2 command from the freshly resolved pack. The manifest command is
- * deliberately never read: variantId is only a selector for live authority.
+ * Prepare a project-declared sensor from its manifest entry. No live pack variant
+ * re-resolution: the structured command on the entry is authoritative.
+ */
+function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecution {
+    const sensor = input.sensor as ProjectDeclaredSensor;
+    const requestedScope = resolveRequestedScope(input.requestedScope);
+    if (!projectApplicabilityMet(sensor, input.applicabilityPaths)) {
+        return {
+            name: input.name,
+            ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
+            requestedScope,
+            effectiveScope: 'full',
+            syntheticStatus: 'inconclusive',
+            syntheticReason: 'not-applicable: applicability-not-met',
+            certification: 'project-declared',
+        };
+    }
+    return {
+        name: input.name,
+        command: { kind: 'structured', value: sensor.command },
+        formatter: sensor.formatter || 'exit-code',
+        ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
+        requestedScope,
+        effectiveScope: 'full',
+        certification: 'project-declared',
+    };
+}
+
+/**
+ * Prepare a v2/v3 command. Pack-bound sensors re-resolve from the live pack
+ * (manifest command is never authority). Project-declared sensors use the
+ * entry command and carry `project-declared` provenance.
  */
 export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExecution {
     if (!input || typeof input !== 'object' || !input.sensor || typeof input.name !== 'string' || input.name === '') throw new Error('v2 preparation input is invalid');
+    if (isProjectDeclaredSensor(input.sensor as V3ManifestSensor)) return prepareProjectSensor(input);
+    const packSensor = input.sensor as SensorManifestV2['sensors'][string];
     const requestedScope = resolveRequestedScope(input.requestedScope);
     // Un sensor se ejecuta cuando la herramienta ESTA y funciona aca: `certified` es
     // la version exacta que el registry congelo, y `compatible-unverified` es una que
@@ -153,14 +205,14 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
     if (!input.liveState || (input.liveState.state !== 'certified' && input.liveState.state !== 'compatible-unverified')) {
         return v2Synthetic(input, input.liveState ? `${input.liveState.state}: ${input.liveState.reason}` : 'compatibility could not be revalidated');
     }
-    if (input.liveState.variantId !== input.sensor.variantId) return v2Synthetic(input, `variant-drift: manifest ${input.sensor.variantId}, live ${input.liveState.variantId ?? 'none'}; run \`awm sensors init\``);
-    const variant: SensorVariant | undefined = input.liveSensor?.variants.find(candidate => candidate.id === input.sensor.variantId);
+    if (input.liveState.variantId !== packSensor.variantId) return v2Synthetic(input, `variant-drift: manifest ${packSensor.variantId}, live ${input.liveState.variantId ?? 'none'}; run \`awm sensors init\``);
+    const variant: SensorVariant | undefined = input.liveSensor?.variants.find(candidate => candidate.id === packSensor.variantId);
     if (!variant) return v2Synthetic(input, 'variant-drift: selected live variant has no command; run `awm sensors init`');
     const common = {
         name: input.name,
         certification: input.liveState.state === 'certified' ? 'certified' as const : 'operational-unverified' as const,
         ...(variant.formatter ? { formatter: variant.formatter } : {}),
-        ...timeout(input.projectTimeout ?? input.sensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, input.sensor.fast ?? input.liveSensor?.fast ?? false),
+        ...timeout(input.projectTimeout ?? packSensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, packSensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,
     };
     if (requestedScope !== 'changed' || !input.changed) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full' };
