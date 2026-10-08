@@ -989,5 +989,44 @@ describe('preflight', () => {
             const firstLine = remedy.split('\n')[0] ?? remedy;
             expect(firstLine).not.toMatch(/awm sensors init/i);
         });
+
+        it('accepts only-project READY status without inventing a pack id (RF-2.8)', async () => {
+            const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-only-project-path-'));
+            const previousPath = process.env.PATH;
+            try {
+                fs.writeFileSync(path.join(pathDir, 'terraform'), '#!/bin/sh\nexit 0\n');
+                fs.chmodSync(path.join(pathDir, 'terraform'), 0o755);
+                process.env.PATH = pathDir;
+
+                const dir = make({
+                    manifest: {
+                        schemaVersion: 3,
+                        mode: 'project-sensors',
+                        sensors: {
+                            'iac-format': {
+                                source: 'project',
+                                enabled: true,
+                                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                                formatter: 'exit-code',
+                            },
+                        },
+                    },
+                });
+
+                const report = await preflight(dir);
+                const manifestCheck = check(report, 'manifest');
+
+                expect(manifestCheck.ok).toBe(true);
+                expect(manifestCheck.detail).not.toMatch(/sensor authority is unavailable/i);
+                expect(manifestCheck.detail).not.toMatch(/pack ['"]?generic['"]?/i);
+                expect(manifestCheck.detail).toMatch(/iac-format|project-declared|sensors enabled/i);
+                expect(check(report, 'tools').ok).toBe(true);
+                expect(report.mode).toBe('project-sensors');
+            } finally {
+                if (previousPath === undefined) delete process.env.PATH;
+                else process.env.PATH = previousPath;
+                fs.rmSync(pathDir, { recursive: true, force: true });
+            }
+        });
     });
 });
