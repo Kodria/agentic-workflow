@@ -324,16 +324,28 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         const liveSensor = parsed.kind !== 'legacy' ? live?.pack.sensors[name] : undefined;
         const liveState = parsed.kind !== 'legacy' ? live?.sensors[name] : undefined;
         let packBoundSensor = entry as any;
-        if (collidedWithPack && liveSensor && liveState?.variantId) {
-            const variant = liveSensor.variants.find(candidate => candidate.id === liveState.variantId)
-                ?? liveSensor.variants[0];
+        if (collidedWithPack && liveSensor) {
+            // Always reconstruct from live — never leave packBoundSensor as the project entry.
+            const fallbackVariant = liveSensor.variants[0];
+            if (!fallbackVariant) continue;
+            const variantId = liveState?.variantId ?? fallbackVariant.id;
+            const variant = liveSensor.variants.find(candidate => candidate.id === variantId) ?? fallbackVariant;
+            const packSyntheticCompatibility = {
+                state: 'compatible-unverified' as const,
+                reason: 'collision-pack-fallback',
+                variantId,
+                toolVersion: null,
+                runtimeVersion: null,
+                certifiedRange: null,
+                evidence: [] as [],
+            };
             packBoundSensor = {
                 enabled: true,
                 ...(liveSensor.fast !== undefined ? { fast: liveSensor.fast } : {}),
                 ...(liveSensor.timeout !== undefined ? { timeout: liveSensor.timeout } : {}),
-                variantId: liveState.variantId,
+                variantId,
                 command: variant.command,
-                initializedCompatibility: liveState,
+                initializedCompatibility: liveState ?? packSyntheticCompatibility,
             };
         }
         const fast = parsed.kind !== 'legacy'

@@ -916,6 +916,31 @@ describe('runSensors project-declared parity (S2)', () => {
         );
     });
 
+    it('on collision with null liveState.variantId still prepares pack (not project) for that id (RF-1.7)', async () => {
+        writeManifest({ lint: projectIac('process.exit(0)') });
+        // Remove the tool so live resolution yields missing-tool with variantId null,
+        // while the pack still defines the lint sensor.
+        fs.rmSync(path.join(project, 'node_modules', 'eslint'), { recursive: true, force: true });
+        fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' } }));
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
+            }),
+        ]);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        expect(lint).toBeDefined();
+        expect(lint.certification).not.toBe('project-declared');
+        // Pack prepare/synthetic outcome — never the project node command.
+        expect(mockRunStructuredCommand).not.toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
+
     it('carries project-declared provenance on a disabled/synthetic project sensor (RF-2.2)', async () => {
         writeManifest({
             'iac-format': { ...projectIac('process.exit(0)'), enabled: false },
