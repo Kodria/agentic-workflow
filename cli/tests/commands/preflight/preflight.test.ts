@@ -422,6 +422,22 @@ describe('preflight', () => {
         expect(execution.remedy).not.toContain('named sensor');
     });
 
+    it('does not treat overall=pass as unconditional green when invalidEntries are present', async () => {
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        mockRunSensors.mockResolvedValue({
+            overall: 'pass',
+            sensors: [{ name: 'good', status: 'pass', errors: [] }],
+            invalidEntries: [{ name: 'broken', reason: 'sensors.broken.formatter is not a registered formatter id' }],
+        });
+
+        const report = await preflight(dir, { verifySensors: true });
+        const execution = check(report, 'sensors-execution');
+
+        expect(execution.ok).toBe(false);
+        expect(execution.detail).toMatch(/invalidEntries|broken/i);
+        expect(execution.detail).not.toBe('all selected sensors completed with pass');
+    });
+
     it('reports not_configured when no sensor manifest exists', async () => {
         // The team-rollout case: a developer clones the repo and never runs
         // `awm sensors init`. Today nothing notices until an unattended run is already
@@ -933,5 +949,123 @@ describe('preflight', () => {
         });
         expect(check(report, 'manifest').detail).not.toContain('no .awm/sensors.json');
         expect(check(report, 'tools')).toBeUndefined();
+    });
+
+    describe('project-declared diagnostics (S3)', () => {
+        it('does not claim not-valid-JSON when JSON parses but a project field fails schema (RF-4.1/4.2)', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {
+                        broken: {
+                            source: 'project',
+                            enabled: true,
+                            command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                            formatter: 'not-a-formatter',
+                        },
+                    },
+                },
+            });
+
+            const report = await preflight(dir);
+            const manifestCheck = check(report, 'manifest');
+
+            expect(manifestCheck.ok).toBe(false);
+            expect(manifestCheck.detail).not.toBe('.awm/sensors.json is not valid JSON');
+            expect(manifestCheck.detail).not.toMatch(/not valid JSON/i);
+            expect(manifestCheck.detail).toMatch(/broken/);
+            expect(manifestCheck.detail).toMatch(/formatter/);
+            expect(report.reason).toMatch(/schema-invalid/i);
+        });
+
+        it('still reports not-valid-JSON for truly broken JSON (RF-4.1)', async () => {
+            const dir = make({ manifest: '{ not json' });
+            const report = await preflight(dir);
+            expect(check(report, 'manifest').detail).toContain('not valid JSON');
+        });
+
+        it('does not recommend awm sensors init as the first remedy for project schema invalidity (RF-3.3)', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {
+                        broken: {
+                            source: 'project',
+                            enabled: true,
+                            command: { executable: 'terraform', resolution: 'path', args: ['fmt'] },
+                            formatter: 'not-a-formatter',
+                        },
+                    },
+                },
+            });
+
+            const remedy = check(await preflight(dir), 'manifest').remedy ?? '';
+            const firstLine = remedy.split('\n')[0] ?? remedy;
+            expect(firstLine).not.toMatch(/awm sensors init/i);
+            // RF-3.3 positive: first remedy names repair of the entry/field, not regen.
+            expect(firstLine).toMatch(/repair|entry|field/i);
+        });
+
+        it('uses an only-project-honest tools remedy when sensors are empty and pack is null', async () => {
+            const dir = make({
+                manifest: {
+                    schemaVersion: 3,
+                    mode: 'project-sensors',
+                    sensors: {},
+                },
+            });
+
+            const report = await preflight(dir);
+            const tools = check(report, 'tools');
+
+            expect(tools.ok).toBe(false);
+            expect(tools.remedy ?? '').not.toMatch(/['"]null['"]/);
+            expect(tools.remedy ?? '').not.toMatch(/awm update/i);
+            expect(tools.remedy ?? '').not.toMatch(/registry has no pack/i);
+            expect(tools.remedy ?? '').toMatch(/source:"project"|declare a pack/i);
+        });
+
+        it('accepts only-project READY status without inventing a pack id (RF-2.8)', async () => {
+            const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-only-project-path-'));
+            const previousPath = process.env.PATH;
+            try {
+                fs.writeFileSync(path.join(pathDir, 'terraform'), '#!/bin/sh\nexit 0\n');
+                fs.chmodSync(path.join(pathDir, 'terraform'), 0o755);
+                process.env.PATH = pathDir;
+
+                const dir = make({
+                    manifest: {
+                        schemaVersion: 3,
+                        mode: 'project-sensors',
+                        sensors: {
+                            'iac-format': {
+                                source: 'project',
+                                enabled: true,
+                                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                                formatter: 'exit-code',
+                            },
+                        },
+                    },
+                });
+
+                const report = await preflight(dir);
+                const manifestCheck = check(report, 'manifest');
+
+                expect(manifestCheck.ok).toBe(true);
+                expect(manifestCheck.detail).not.toMatch(/sensor authority is unavailable/i);
+                expect(manifestCheck.detail).not.toMatch(/pack ['"]?generic['"]?/i);
+                // only-project READY must say so — loose "sensors enabled" alone is pack wording.
+                expect(manifestCheck.detail).toMatch(/only-project/i);
+                expect(manifestCheck.detail).toMatch(/project-declared/i);
+                expect(check(report, 'tools').ok).toBe(true);
+                expect(report.mode).toBe('project-sensors');
+            } finally {
+                if (previousPath === undefined) delete process.env.PATH;
+                else process.env.PATH = previousPath;
+                fs.rmSync(pathDir, { recursive: true, force: true });
+            }
+        });
     });
 });

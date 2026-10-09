@@ -7,11 +7,17 @@ import { discoverProjectEvidence } from './compatibility/discovery';
 import { bindContainedRuntimeCommands } from './compatibility/live';
 import type { PackSource } from './compatibility/pack-source';
 import { resolveProjectCompatibility, resolveSensorCompatibility } from './compatibility/resolve';
-import { resolveSensorProject } from './project';
+import { resolveSensorProject, softRecoverInvalidProject } from './project';
 import { resolveSensorSource, type SensorSourceResolution } from './compatibility/source';
 import { listRegistries } from '../../core/registries';
 import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
-import type { SensorManifestV2 } from './compatibility/manifest';
+import {
+    isProjectDeclaredSensor,
+    type ProjectDeclaredSensor,
+    type SensorManifestV2,
+    type SensorManifestV3ProjectSensors,
+    type V3ManifestSensor,
+} from './compatibility/manifest';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
 function npxTool(parts: string[]): string | undefined {
@@ -205,6 +211,108 @@ function invalidStatus(project: ReturnType<typeof resolveSensorProject>, pack: s
     };
 }
 
+function hasSelectedPack(manifest: SensorManifestV3ProjectSensors): boolean {
+    return typeof manifest.pack === 'string' && manifest.pack.length > 0;
+}
+
+function projectSensorCheck(sensor: ProjectDeclaredSensor, cwd: string): SensorCheck {
+    if (sensor.enabled === false) {
+        return { ok: true, detail: 'disabled (project-declared)', certification: 'project-declared' };
+    }
+    const check = checkStructuredCommand(sensor.command, cwd, sensor.assets);
+    return {
+        ok: check.ok,
+        detail: check.ok ? `project-declared: ${check.detail}` : `${check.detail} (project-declared)`,
+        certification: 'project-declared',
+    };
+}
+
+function packBoundOnly(manifest: SensorManifestV2 | SensorManifestV3ProjectSensors): SensorManifestV2 {
+    const sensors = Object.fromEntries(
+        Object.entries(manifest.sensors).filter(([, sensor]) => !isProjectDeclaredSensor(sensor as V3ManifestSensor)),
+    ) as SensorManifestV2['sensors'];
+    const pack = 'pack' in manifest && typeof manifest.pack === 'string' ? manifest.pack : '';
+    return { schemaVersion: 2, pack, sensors };
+}
+
+/** Live pack sensor ids, or null when the pack cannot be resolved (fail closed). */
+function livePackSensorIds(source: PackSource): Set<string> | null {
+    try {
+        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+        if (parsed.kind !== 'v2') return null;
+        return new Set(Object.keys(parsed.pack.sensors));
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * RF-1.7 status: never label a colliding project id as project-declared READY.
+ * When pack is selected and live is unavailable, fail closed rather than claiming
+ * the project override is safe.
+ */
+function projectDeclaredOrCollisionCheck(
+    name: string,
+    sensor: ProjectDeclaredSensor,
+    packageRoot: string,
+    packSelected: boolean,
+    liveIds: Set<string> | null,
+): SensorCheck {
+    if (packSelected && (liveIds === null || liveIds.has(name))) {
+        return {
+            ok: false,
+            detail: liveIds === null
+                ? `project-sensor-name-collision: ${name} (live pack unavailable)`
+                : `project-sensor-name-collision: ${name}; pack sensor kept`,
+        };
+    }
+    return projectSensorCheck(sensor, packageRoot);
+}
+
+/** Soft-isolate valid siblings into checks while authority remains invalid (RF soft-parse). */
+function softIsolatedChecks(
+    project: Extract<ReturnType<typeof resolveSensorProject>, { state: 'invalid' }>,
+): Record<string, SensorCheck> {
+    const recovered = softRecoverInvalidProject(project);
+    if (!recovered) return {};
+    const checks: Record<string, SensorCheck> = {};
+    const v3Project = recovered.manifest.kind === 'v3' && recovered.manifest.pack.mode === 'project-sensors'
+        ? recovered.manifest.pack
+        : null;
+    const sensors = v3Project?.sensors ?? {};
+    // RF-1.7: same collision path as configured status — live pack probe when pack is selected.
+    const packSelected = v3Project !== null && hasSelectedPack(v3Project);
+    let liveIds: Set<string> | null = null;
+    if (packSelected) {
+        try {
+            const resolution = resolveSensorSource(recovered.manifest, { registries: listRegistries() });
+            liveIds = 'source' in resolution ? livePackSensorIds(resolution.source) : null;
+        } catch {
+            liveIds = null;
+        }
+    }
+    for (const [name, sensor] of Object.entries(sensors)) {
+        if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
+            checks[name] = projectDeclaredOrCollisionCheck(
+                name,
+                sensor as ProjectDeclaredSensor,
+                recovered.packageRoot,
+                packSelected,
+                liveIds,
+            );
+            continue;
+        }
+        const packSensor = sensor as SensorManifestV2['sensors'][string];
+        checks[name] = packSensor.enabled === false
+            ? { ok: true, detail: 'disabled' }
+            : checkStructuredCommand(packSensor.command, recovered.packageRoot, packSensor.assets);
+    }
+    for (const entry of recovered.invalidEntries) {
+        checks[entry.name] = { ok: false, detail: entry.reason };
+    }
+    return checks;
+}
+
 export async function computeSensorStatus(cwd: string = process.cwd()): Promise<SensorStatusResult> {
     let project: ReturnType<typeof resolveSensorProject>;
     try {
@@ -218,14 +326,35 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
     }
     if (project.state === 'invalid') {
         let pack: string | null = null;
+        let reason = 'manifest-malformed';
+        let remedy = 'repair-sensor-manifest';
         try {
-            const raw: unknown = JSON.parse(fs.readFileSync(project.manifestPath, 'utf-8'));
-            if (raw && typeof raw === 'object' && !Array.isArray(raw) && !('schemaVersion' in raw) && typeof (raw as any).pack === 'string') {
-                pack = (raw as any).pack;
+            const text = fs.readFileSync(project.manifestPath, 'utf-8');
+            try {
+                const raw: unknown = JSON.parse(text);
+                if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                    const record = raw as Record<string, unknown>;
+                    if (!('schemaVersion' in record) && typeof record.pack === 'string') pack = record.pack;
+                    else if (typeof record.pack === 'string') pack = record.pack;
+                }
+                // JSON.parse succeeded — this is schema invalidity, not "not valid JSON" (RF-4.1).
+                if (project.reason.includes('unsupported manifest schemaVersion')) {
+                    reason = 'schema-unsupported';
+                } else {
+                    reason = `schema-invalid: ${project.reason}`;
+                    // Project-entry schema failures must not lead with `awm sensors init` (RF-3.3).
+                    remedy = 'repair-the-invalid-sensor-entry-in-sensors-json';
+                }
+            } catch {
+                reason = 'manifest-malformed';
             }
-        } catch { /* malformed JSON is not configured */ }
-        const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
-        return invalidStatus(project, pack, reason);
+        } catch { /* unreadable manifest stays malformed */ }
+        // Soft-isolate valid siblings into checks (same WithIssues path as run) while
+        // keeping mode=invalid so preflight RF-4.1 still sees schema-invalid authority.
+        return {
+            ...invalidStatus(project, pack, reason, remedy),
+            checks: softIsolatedChecks(project),
+        };
     }
     const packageRoot = project.packageRoot;
     const parsed = project.manifest;
@@ -236,34 +365,73 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         };
     }
 
+    if (parsed.kind === 'v3' && parsed.pack.mode === 'project-sensors' && !hasSelectedPack(parsed.pack)) {
+        // Only-project: no pack source to resolve. Report each project sensor with
+        // project-declared provenance rather than an empty Pack:none DEGRADED (RF-2.8).
+        const checks: Record<string, SensorCheck> = {};
+        for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
+            if (isProjectDeclaredSensor(sensor)) {
+                checks[name] = projectSensorCheck(sensor, packageRoot);
+            } else {
+                checks[name] = { ok: false, detail: 'pack-bound sensor requires a nonempty pack' };
+            }
+        }
+        return {
+            overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
+            pack: null,
+            checks,
+            ...projectMetadata(project, 'project-sensors', 'project-declared-only'),
+        };
+    }
+
     if (parsed.kind === 'v2' || parsed.kind === 'v3') {
-        const parsedPack = parsed.pack as SensorManifestV2;
+        const parsedPack = parsed.pack as SensorManifestV2 | SensorManifestV3ProjectSensors;
+        const packId = typeof parsedPack.pack === 'string' ? parsedPack.pack : null;
+        const packSelected = typeof parsedPack.pack === 'string' && parsedPack.pack.length > 0;
         let resolution: SensorSourceResolution;
         try {
             resolution = resolveSensorSource(parsed, { registries: listRegistries() });
         } catch {
-            return invalidStatus(project, parsedPack.pack, 'sensor-source-invalid', 'repair-or-run-awm-update');
+            return invalidStatus(project, packId, 'sensor-source-invalid', 'repair-or-run-awm-update');
         }
-        if (!('source' in resolution)) return sourceFailure(project, parsedPack.pack, resolution);
+        if (!('source' in resolution)) return sourceFailure(project, packId ?? 'unknown', resolution);
         const sourceMeta = resolvedSourceMetadata(resolution);
-        const manifest = parsedPack;
+        const liveIds = livePackSensorIds(resolution.source);
+        const packManifest = packBoundOnly(parsedPack);
         const checks: Record<string, SensorCheck> = {};
         let compatibility: Record<string, CompatibilityEvidence>;
         try {
-            compatibility = resolveStaticV2Compatibility(packageRoot, manifest, resolution.source);
+            compatibility = resolveStaticV2Compatibility(packageRoot, packManifest, resolution.source);
         } catch (error) {
             const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
-            for (const [name, sensor] of Object.entries(manifest.sensors)) checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' } : { ok: false, detail };
-            return { overall: 'DEGRADED', pack: manifest.pack, checks, ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }) };
+            for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
+                if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
+                    checks[name] = projectDeclaredOrCollisionCheck(
+                        name, sensor as ProjectDeclaredSensor, packageRoot, packSelected, liveIds,
+                    );
+                } else {
+                    checks[name] = (sensor as SensorManifestV2['sensors'][string]).enabled === false
+                        ? { ok: true, detail: 'disabled' }
+                        : { ok: false, detail };
+                }
+            }
+            return { overall: 'DEGRADED', pack: packId, checks, ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }) };
         }
-        for (const [name, sensor] of Object.entries(manifest.sensors)) {
-            checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' }
-                : staticCompatibilityCheck(sensor, compatibility[name]) ?? checkStructuredCommand(sensor.command, packageRoot, sensor.assets);
+        for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
+            if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
+                checks[name] = projectDeclaredOrCollisionCheck(
+                    name, sensor as ProjectDeclaredSensor, packageRoot, packSelected, liveIds,
+                );
+                continue;
+            }
+            const packSensor = sensor as SensorManifestV2['sensors'][string];
+            checks[name] = packSensor.enabled === false ? { ok: true, detail: 'disabled' }
+                : staticCompatibilityCheck(packSensor, compatibility[name]) ?? checkStructuredCommand(packSensor.command, packageRoot, packSensor.assets);
         }
-        const uninitialized = uninitializedSensors(manifest, compatibility);
+        const uninitialized = uninitializedSensors(packManifest, compatibility);
         return {
             overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
-            pack: manifest.pack, checks,
+            pack: packId, checks,
             ...(uninitialized ? { uninitialized } : {}),
             ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
         };

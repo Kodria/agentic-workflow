@@ -27,11 +27,12 @@ export type PreparedSensorExecution = {
     syntheticReason?: string;
     /**
      * Whether the tool version this will run is the one the registry froze
-     * (`certified`) or one the pack declares operational but never froze
-     * (`operational-unverified`). Both execute; the distinction travels with the
-     * result so a verdict never claims more evidence than it has.
+     * (`certified`), one the pack declares operational but never froze
+     * (`operational-unverified`), or a project-declared sensor outside pack
+     * certification (`project-declared`). Provenance travels with the result;
+     * it never gates overall reduction by itself.
      */
-    certification?: 'certified' | 'operational-unverified';
+    certification?: 'certified' | 'operational-unverified' | 'project-declared';
 };
 
 export type SensorConfig = {
@@ -122,12 +123,13 @@ export type SensorResult = {
     skipReason?: string;
     /**
      * Which tool version produced this verdict: the registry's frozen one
-     * (`certified`), or one inside the pack's operational range whose exact
-     * version the registry never froze (`operational-unverified`). The verdict
-     * itself is the sensor's real output either way — this says how much the
-     * registry vouches for the version that produced it.
+     * (`certified`), one inside the pack's operational range whose exact
+     * version the registry never froze (`operational-unverified`), or a
+     * project-declared sensor (`project-declared`). The verdict itself is the
+     * sensor's real output either way — this says how much the registry
+     * vouches for the version that produced it.
      */
-    certification?: 'certified' | 'operational-unverified';
+    certification?: 'certified' | 'operational-unverified' | 'project-declared';
     /**
      * The run was cut short (timeout, output cap) but the partial output still
      * yielded findings. The findings listed are real; their *absence* proves
@@ -154,6 +156,11 @@ export type RunOutput = {
     sensors: SensorResult[];
     overall: 'pass' | 'fail' | 'skipped' | 'not_certified';
     /**
+     * Schema-invalid sensor entries skipped at prepare time (soft isolation).
+     * Present when at least one entry failed validation or collided with a pack id.
+     */
+    invalidEntries?: Array<{ name: string; reason: string }>;
+    /**
      * Set when the committed manifest still sits on the `generic` fallback while the
      * tree has real stack indicators — the gate ran, but against almost nothing.
      * Advisory and non-mutating by design: `awm sensors run` reports the drift and
@@ -172,6 +179,8 @@ export type RunOutput = {
 export type SensorCheck = {
     ok: boolean;
     detail: string;
+    /** Present for project-declared sensors; never `certified`. */
+    certification?: 'project-declared';
 };
 
 export type SensorAuthority = {

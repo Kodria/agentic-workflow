@@ -207,8 +207,9 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         return;
     }
     if (staticReport.reason === 'no_reference') {
-        if (report.overall !== 'inconclusive' || !isNonBlankString(report.pack) || !isNonBlankString(report.registry)
-            || staticReport.classes.length !== 0) {
+        const packReferenced = isNonBlankString(report.pack) && isNonBlankString(report.registry);
+        const onlyProject = report.pack === null && report.registry === null;
+        if (report.overall !== 'inconclusive' || staticReport.classes.length !== 0 || (!packReferenced && !onlyProject)) {
             invalidReport(renderer);
         }
         if (report.empirical !== undefined) {
@@ -283,6 +284,11 @@ export function renderCoverageHuman(report: unknown): string {
         return ['Sensor coverage', 'Overall: inconclusive', 'Reason: sensors are not configured', 'Run: awm sensors init', ...(report.empirical ? [empiricalHuman(report)] : []), ''].join('\n');
     }
     if (report.static.reason === 'no_reference') {
+        if (report.pack === null && report.registry === null) {
+            return ['Sensor coverage', 'Pack: none', 'Overall: inconclusive',
+                'No pack coverage reference (project-declared sensors only)',
+                ...(report.empirical ? [empiricalHuman(report)] : []), ''].join('\n');
+        }
         return ['Sensor coverage', `Pack: ${safeHumanText(report.pack ?? 'unknown')}`, `Registry: ${safeHumanText(report.registry ?? 'unknown')}`,
             'Overall: inconclusive', `No coverage reference for pack '${safeHumanText(report.pack ?? 'unknown')}'`, ...(report.empirical ? [empiricalHuman(report)] : []), ''].join('\n');
     }

@@ -114,14 +114,26 @@ jobs:
           path: cli/prebuilds/${{ matrix.target }}/secure_fs.node
           if-no-files-found: error
 
+      # RF-5.1 docs contract (same tip as ci.yml; keep support-matrix pins elsewhere).
+      - name: Checkout baseline registry docs tip for RF-5.1 contract
+        uses: actions/checkout@v4
+        with:
+          repository: Kodria/awm-baseline-registry
+          ref: dc2e0f7128ed17242bbbb3077ac145e231c3abc5
+          path: awm-baseline-registry-docs
+
       - name: Tests
         if: matrix.target != 'win32-arm64'
         working-directory: cli
+        env:
+          AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
         run: npx jest --runInBand --bail
 
       - name: Tests (Windows ARM remainder)
         if: matrix.target == 'win32-arm64'
         working-directory: cli
+        env:
+          AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
         run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$'
 
   # This job tests only the two ARM bottlenecks. The matrix job remains the

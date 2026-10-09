@@ -739,6 +739,42 @@ Remove the version pin (the registry returns to the latest tag on the next `awm 
 
 Sensors are deterministic checks (tsc, ESLint, Semgrep, depcheck, …) whose output is LLM-readable. They are configured per repo in `.awm/sensors.json`.
 
+### Project-declared sensors
+
+A schemaVersion 3 `project-sensors` manifest may mix pack-bound sensors with
+project-owned checks marked `"source": "project"`. Pack may be omitted or set
+to `null` when every entry is project-declared. Project entries use a structured
+`command` (no `variantId` / `initializedCompatibility`); when `formatter` is
+omitted it defaults to `exit-code` (exit `0` → pass, any other completed exit →
+fail). Status and run JSON label these rows `project-declared`. That provenance
+does not block unattended gates — admission and overall reduction follow
+empirical pass/fail (and related) outcomes, the same as pack sensors.
+
+Diagnostics distinguish a file that is not valid JSON from a parseable file
+with schema-invalid sensor entries: the former is a document error; the latter
+names the sensor/field and still allows other valid selected sensors to run.
+
+```json
+{
+  "schemaVersion": 3,
+  "mode": "project-sensors",
+  "pack": null,
+  "sensors": {
+    "iac-format": {
+      "source": "project",
+      "enabled": true,
+      "fast": true,
+      "command": {
+        "executable": "terraform",
+        "resolution": "path",
+        "args": ["fmt", "-check", "-recursive"]
+      },
+      "formatter": "exit-code"
+    }
+  }
+}
+```
+
 ### `awm sensors init`
 
 Compatibility alias for creating a portable `project-sensors` declaration. It

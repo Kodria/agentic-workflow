@@ -1,6 +1,17 @@
 import fs from 'fs';
 import path from 'path';
-import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
+import {
+    asPackBoundProjectSensors,
+    isPackBoundManifestSensor,
+    isProjectDeclaredSensor,
+    parseSensorManifest,
+    parseSensorManifestWithIssues,
+    serializeManifestV2,
+    serializeManifestV3,
+    type ProjectDeclaredSensor,
+    type SensorManifestV2,
+    type SensorManifestV3ProjectSensors,
+} from './manifest';
 import { resolveSemgrepPolicy } from './contract';
 import { readInspectedBoundedFile, readInspectedBoundedFileWithIdentity, removeObservedProjectFile, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './safe-file';
 import { PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE } from '../../../core/secure-fs/native-bridge';
@@ -184,6 +195,26 @@ function priorAssets(projectRoot: string): string[] {
     return [];
 }
 
+/** Existing `"source": "project"` entries to keep when regenerating pack sensors (RF-3.1). */
+function priorProjectSensors(projectRoot: string): Record<string, ProjectDeclaredSensor> {
+    const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
+    try {
+        const stat = fs.lstatSync(manifestPath, { bigint: true });
+        if (!stat.isFile() || stat.isSymbolicLink()) return {};
+        // Soft-parse so one invalid sibling does not drop every valid project entry.
+        const parsed = parseSensorManifestWithIssues(
+            JSON.parse(readInspectedBoundedFile(manifestPath, stat, MAX_ASSET_BYTES, () => new Error('prior manifest unreadable')).toString('utf8')),
+            manifestPath,
+        );
+        if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') return {};
+        return Object.fromEntries(
+            Object.entries(parsed.pack.sensors).filter(([, sensor]) => isProjectDeclaredSensor(sensor)),
+        ) as Record<string, ProjectDeclaredSensor>;
+    } catch {
+        return {};
+    }
+}
+
 /** Materialize a previously selected logical registry source into a portable v3 manifest. */
 export function materializePortableSensors(input: PortableMaterializeInput): PortableMaterializeResult {
     if (!input || typeof input !== 'object') throw new Error('materialization input is required');
@@ -201,17 +232,24 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     };
     const parsed = parseSensorManifest(candidate, 'portable materialized manifest');
     if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') throw new Error('portable materialized manifest must be v3 project-sensors');
-    const manifest = parsed.pack;
-    for (const [name, sensor] of Object.entries(manifest.sensors)) {
-        if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
+    const packBound = asPackBoundProjectSensors(parsed.pack);
+    for (const [name, sensor] of Object.entries(packBound.sensors)) {
+        if (isPackBoundManifestSensor(sensor) && sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
     }
-    const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
+    const priorProject = priorProjectSensors(projectRoot);
+    // Project entries win on name collision so regen never drops them (RF-3.1).
+    const manifest: SensorManifestV3ProjectSensors = {
+        ...packBound,
+        sensors: { ...packBound.sensors, ...priorProject },
+    };
+    const selected = [...new Set(Object.values(packBound.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     // Establish every registry authority and read every selected byte before the
     // first project mutation. A bad later asset must not strand an earlier one.
     const publications = input.configure === false ? [] : selected.map(asset => {
         const selectedSource = selectedRegistryAsset(packRoot, asset);
         return { asset, content: readSelectedRegistryAsset(packRoot, selectedSource, asset) };
     });
+    const manifestExists = fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json'));
     return withProjectLease(projectRoot, () => {
         const configRoot = manifest.packageRoot ? containedPackageRoot(projectRoot, manifest.packageRoot) : projectRoot;
         const prior = priorAssets(projectRoot);
@@ -233,7 +271,8 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
                     } else preserved.push(publication.asset);
                 }
             }
-            atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);
+            // Replace when regenerating over an existing manifest so project entries can be re-merged.
+            atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), !manifestExists);
         } catch (error) {
             for (const entry of created.reverse()) {
                 try { removeObservedProjectFile(projectRoot, entry.destination, entry.identity); }

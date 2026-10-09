@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
-import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
+import { asPackBoundProjectSensors, parseSensorManifest, serializeManifestV3, type SensorManifestV2, type PackBoundProjectSensorsManifest } from './compatibility/manifest';
 import { readInspectedBoundedFileWithIdentity, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './compatibility/safe-file';
 import type { SensorSourceResolution } from './compatibility/source';
 
@@ -13,7 +13,7 @@ type SourceBearingSensorResolution = Extract<SensorSourceResolution, { source: u
 export type V2MigrationSource = SourceBearingSensorResolution & { kind: 'logical' | 'legacy-rebound' };
 
 export type V2MigrationPlan = {
-    candidate: SensorManifestV3ProjectSensors;
+    candidate: PackBoundProjectSensorsManifest;
     equivalent: true;
     equivalence: VerifiedEquivalence;
 };
@@ -41,13 +41,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function sameSensorField(v2: SensorManifestV2, v3: SensorManifestV3ProjectSensors, pick: (sensor: SensorManifestV2['sensors'][string]) => unknown): boolean {
+function sameSensorField(v2: SensorManifestV2, v3: PackBoundProjectSensorsManifest, pick: (sensor: SensorManifestV2['sensors'][string]) => unknown): boolean {
     const names = Object.keys(v2.sensors);
     return names.length === Object.keys(v3.sensors).length
         && names.every(name => name in v3.sensors && JSON.stringify(pick(v2.sensors[name])) === JSON.stringify(pick(v3.sensors[name])));
 }
 
-function compareV2Semantics(v2: SensorManifestV2, v3: SensorManifestV3ProjectSensors, registry: string): V2MigrationEquivalenceReport {
+function compareV2Semantics(v2: SensorManifestV2, v3: PackBoundProjectSensorsManifest, registry: string): V2MigrationEquivalenceReport {
     return Object.freeze({
         pack: v2.pack === v3.pack && v2.packSelection === v3.packSelection,
         enabledDisabled: sameSensorField(v2, v3, sensor => sensor.enabled),
@@ -113,7 +113,7 @@ function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'],
     }
 }
 
-function assertSourceCompatibleWithCandidate(source: V2MigrationSource['source'], candidate: SensorManifestV3ProjectSensors): void {
+function assertSourceCompatibleWithCandidate(source: V2MigrationSource['source'], candidate: PackBoundProjectSensorsManifest): void {
     let parsedSource;
     try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('legacy migration source exact v2 pack is invalid'); }
@@ -184,9 +184,10 @@ export function planV2Migration(input: { manifest: unknown; source: unknown }): 
     if (validated.kind !== 'v3' || validated.pack.mode !== 'project-sensors') {
         throw new Error('v2 migration candidate semantic mismatch');
     }
-    const equivalence = compareV2Semantics(parsed.pack, validated.pack, source.registry.name);
+    const packBound = asPackBoundProjectSensors(validated.pack);
+    const equivalence = compareV2Semantics(parsed.pack, packBound, source.registry.name);
     if (!allEquivalent(equivalence)) throw new Error('v2 migration candidate semantic mismatch');
-    return { candidate: validated.pack, equivalent: true, equivalence };
+    return { candidate: packBound, equivalent: true, equivalence };
 }
 
 /** Validate the old and new durable contracts, then atomically replace only the manifest. */
@@ -213,17 +214,18 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     if (before.kind !== 'v2' || after.kind !== 'v3' || after.pack.mode !== 'project-sensors') {
         throw new Error('v2 migration candidate semantic mismatch');
     }
+    const afterPack = asPackBoundProjectSensors(after.pack);
     const logicalSource = exactLogicalSource(source, before.pack.pack);
     assertSourceCompatibleWithManifest(logicalSource, before.pack);
-    if (after.pack.source.registry !== logicalSource.registry.name) {
+    if (afterPack.source.registry !== logicalSource.registry.name) {
         throw new Error('v2 migration candidate semantic mismatch');
     }
     if (hasPhysicalSensorPath(before.pack.sensors, [before.pack.registryRoot, logicalSource.registry.contentRoot])
-        || hasPhysicalSensorPath(after.pack.sensors, [before.pack.registryRoot, logicalSource.registry.contentRoot])
-        || hasPhysicalSensorPath(before.pack.packageRoot, []) || hasPhysicalSensorPath(after.pack.packageRoot, [])) {
+        || hasPhysicalSensorPath(afterPack.sensors, [before.pack.registryRoot, logicalSource.registry.contentRoot])
+        || hasPhysicalSensorPath(before.pack.packageRoot, []) || hasPhysicalSensorPath(afterPack.packageRoot, [])) {
         throw new Error('v2 migration candidate contains a physical path');
     }
-    if (!allEquivalent(compareV2Semantics(before.pack, after.pack, logicalSource.registry.name))) {
+    if (!allEquivalent(compareV2Semantics(before.pack, afterPack, logicalSource.registry.name))) {
         throw new Error('v2 migration candidate semantic mismatch');
     }
     // The native implementation reopens every ancestor without following links,
@@ -263,10 +265,11 @@ export function replaceLegacyManifestWithV3(manifestPath: unknown, candidate: un
         if (before.kind !== 'legacy' || after.kind !== 'v3' || after.pack.mode !== 'project-sensors') {
             throw new Error('legacy migration candidate semantic mismatch');
         }
-        const logicalSource = exactLogicalSource({ kind: 'logical', source }, after.pack.pack);
-        assertSourceCompatibleWithCandidate(logicalSource, after.pack);
-        if (after.pack.source.registry !== logicalSource.registry.name || hasPhysicalSensorPath(after.pack.sensors, [logicalSource.registry.contentRoot])
-            || hasPhysicalSensorPath(after.pack.packageRoot, [])) {
+        const afterPack = asPackBoundProjectSensors(after.pack);
+        const logicalSource = exactLogicalSource({ kind: 'logical', source }, afterPack.pack);
+        assertSourceCompatibleWithCandidate(logicalSource, afterPack);
+        if (afterPack.source.registry !== logicalSource.registry.name || hasPhysicalSensorPath(afterPack.sensors, [logicalSource.registry.contentRoot])
+            || hasPhysicalSensorPath(afterPack.packageRoot, [])) {
             throw new Error('legacy migration candidate contains an unsafe source or physical path');
         }
         assertManifestUnchanged(manifestPath, inspected);

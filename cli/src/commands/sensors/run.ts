@@ -14,10 +14,21 @@ import { resolveParsedPackCompatibility } from './compatibility/live';
 import { parseSensorPack } from './compatibility/contract';
 import { resolveSensorSource } from './compatibility/source';
 import type { PackSource } from './compatibility/pack-source';
+import {
+    isProjectDeclaredSensor,
+    type PackBoundManifestSensor,
+    type ParsedSensorManifest,
+    type ProjectDeclaredSensor,
+    type SensorManifestInvalidEntry,
+    type SensorManifestV3ProjectSensors,
+    type V3ManifestSensor,
+} from './compatibility/manifest';
+import { discoverPresentMarkers } from './compatibility/discovery';
+import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
 import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
-import { resolveSensorProject } from './project';
+import { resolveSensorProject, softRecoverInvalidProject } from './project';
 
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
@@ -177,6 +188,14 @@ async function pooled<T>(tasks: Array<() => Promise<T>>, limit: number): Promise
 }
 
 
+function v3ProjectSensors(parsed: ParsedSensorManifest): SensorManifestV3ProjectSensors | null {
+    return parsed.kind === 'v3' && parsed.pack.mode === 'project-sensors' ? parsed.pack : null;
+}
+
+function hasSelectedPack(manifest: SensorManifestV3ProjectSensors): boolean {
+    return typeof manifest.pack === 'string' && manifest.pack.length > 0;
+}
+
 /**
  * One orchestration path for both manifest contracts. Preparation selects the
  * authorized command; execution, baseline handling, and verdict reduction are
@@ -193,24 +212,35 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     if (project.state === 'missing') {
         return { sensors: [], overall: 'not_certified', mode: 'missing', reason: 'manifest-absent', projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'run-awm-sensors-bootstrap' };
     }
+    let invalidEntries: SensorManifestInvalidEntry[] = [];
+    let configured: { projectRoot: string; manifestPath: string; packageRoot: string; manifest: ParsedSensorManifest };
     if (project.state === 'invalid') {
-        const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
-        return { sensors: [], overall: 'not_certified', mode: 'invalid', reason, projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'repair-sensor-manifest' };
+        const recovered = softRecoverInvalidProject(project);
+        if (!recovered) {
+            const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
+            return { sensors: [], overall: 'not_certified', mode: 'invalid', reason, projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'repair-sensor-manifest' };
+        }
+        invalidEntries = recovered.invalidEntries;
+        configured = recovered;
+    } else {
+        configured = project;
     }
 
-    const manifestDir = project.projectRoot;
+    const manifestDir = configured.projectRoot;
     const beforeReadOnly = opts.readOnly ? filesystemSnapshot(manifestDir) : undefined;
     if (opts.readOnly && beforeReadOnly === null) {
-        return { sensors: [], overall: 'not_certified', projectRoot: project.projectRoot, manifestPath: project.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: 'run admission from a readable git worktree' };
+        return { sensors: [], overall: 'not_certified', projectRoot: configured.projectRoot, manifestPath: configured.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: 'run admission from a readable git worktree' };
     }
-    const parsed = project.manifest;
-    const authority = { projectRoot: project.projectRoot, manifestPath: project.manifestPath };
+    const parsed = configured.manifest;
+    const authority = { projectRoot: configured.projectRoot, manifestPath: configured.manifestPath };
     if (parsed.kind === 'v3' && (parsed.pack.mode === 'native-gate' || parsed.pack.mode === 'opt-out')) {
         return { sensors: [], overall: 'not_certified', ...authority, mode: parsed.pack.mode, reason: `${parsed.pack.mode}-declared`, declarationReason: parsed.pack.reason };
     }
+    const projectSensorsManifest = v3ProjectSensors(parsed);
+    const onlyProject = projectSensorsManifest !== null && !hasSelectedPack(projectSensorsManifest);
     let resolvedSource: ReturnType<typeof resolveSensorSource> | undefined;
-    if (parsed.kind === 'v2' || parsed.kind === 'v3') {
-        try { resolvedSource = resolveSensorSource(parsed, { registries: listRegistries() }); }
+    if (parsed.kind === 'v2' || (parsed.kind === 'v3' && projectSensorsManifest && hasSelectedPack(projectSensorsManifest))) {
+        try { resolvedSource = resolveSensorSource(parsed as Parameters<typeof resolveSensorSource>[0], { registries: listRegistries() }); }
         catch { return { sensors: [], overall: 'not_certified', ...authority, mode: 'invalid', reason: 'sensor-source-invalid', remedy: 'repair-or-run-awm-update' }; }
         if (resolvedSource.kind === 'source-unavailable' || resolvedSource.kind === 'source-ambiguous') {
             return { sensors: [], overall: 'not_certified', ...authority, mode: resolvedSource.kind, reason: resolvedSource.reason, remedy: resolvedSource.remedy, source: { kind: resolvedSource.kind, candidates: resolvedSource.kind === 'source-ambiguous' ? resolvedSource.candidates : undefined } };
@@ -230,26 +260,109 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     // manifest itself stays discoverable at the repo root via findManifestDir.
     // Legacy manifests never carry this field — manifestDir is always correct
     // for them, unchanged.
-    const projectCwd = project.packageRoot;
+    const projectCwd = configured.packageRoot;
     const live = parsed.kind !== 'legacy' && resolvedSource && 'source' in resolvedSource
-        ? await resolveLiveFromSource(projectCwd, resolvedSource.source, 'packSelection' in parsed.pack ? parsed.pack.packSelection : undefined)
+        ? await resolveLiveFromSource(projectCwd, resolvedSource.source, projectSensorsManifest && 'packSelection' in projectSensorsManifest ? projectSensorsManifest.packSelection : undefined)
         : null;
     const drift = parsed.kind === 'legacy' ? detectPackDrift(manifestDir, parsed.pack) : undefined;
     const requestedScope = opts.changed ? 'changed' as const : 'full' as const;
     const prepared: PreparedSensorExecution[] = [];
 
     const activeManifest = parsed.pack as unknown as SensorManifest;
-    for (const [name, sensor] of Object.entries(activeManifest.sensors)) {
+    const sensorsMap = activeManifest.sensors ?? {};
+    const packSelected = projectSensorsManifest !== null && hasSelectedPack(projectSensorsManifest);
+    for (const [name, sensor] of Object.entries(sensorsMap)) {
+        const entry = sensor as V3ManifestSensor | SensorManifest['sensors'][string];
+        const projectEntry = parsed.kind !== 'legacy' && isProjectDeclaredSensor(entry as V3ManifestSensor)
+            ? entry as ProjectDeclaredSensor
+            : null;
+        // RF-1.7: collision when the live pack defines this id. When pack is selected
+        // but live cannot be resolved, fail closed — never run a project override that
+        // might be colliding with an unresolved pack sensor name.
+        const collidedWithPack = projectEntry !== null && (
+            packSelected && live === null
+                ? true
+                : live?.pack.sensors[name] !== undefined
+        );
+        if (collidedWithPack) {
+            invalidEntries.push({ name, reason: `project-sensor-name-collision: ${name}` });
+            // RF-1.7: keep the pack sensor when live is available; otherwise skip.
+            if (live === null || live.pack.sensors[name] === undefined) continue;
+            // Fall through to pack-bound prepare using live.
+        } else if (projectEntry !== null) {
+            const fast = projectEntry.fast ?? false;
+            if (!shouldRun(fast, opts)) continue;
+            const markers = [
+                ...(projectEntry.applicability?.allFiles ?? []),
+                ...(projectEntry.applicability?.anyFiles ?? []),
+            ];
+            const applicabilityPaths = markers.length > 0
+                ? discoverPresentMarkers(projectCwd, markers)
+                : undefined;
+            const execution = prepareV2Sensor({
+                name,
+                sensor: projectEntry,
+                requestedScope,
+                changed: changed ?? undefined,
+                projectTimeout: projectEntry.timeout,
+                applicabilityPaths,
+            });
+            prepared.push(projectEntry.enabled === false
+                ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
+                : execution);
+            continue;
+        }
+
         const liveSensor = parsed.kind !== 'legacy' ? live?.pack.sensors[name] : undefined;
+        const liveState = parsed.kind !== 'legacy' ? live?.sensors[name] : undefined;
+        let packBoundSensor: PackBoundManifestSensor | SensorManifest['sensors'][string] =
+            entry as PackBoundManifestSensor | SensorManifest['sensors'][string];
+        if (collidedWithPack && liveSensor) {
+            // Always reconstruct from live — never leave packBoundSensor as the project entry.
+            const fallbackVariant = liveSensor.variants[0];
+            if (!fallbackVariant) continue;
+            const variantId = liveState?.variantId ?? fallbackVariant.id;
+            const variant = liveSensor.variants.find(candidate => candidate.id === variantId) ?? fallbackVariant;
+            const packSyntheticCompatibility: CompatibilityEvidence = {
+                state: 'compatible-unverified',
+                reason: 'collision-pack-fallback',
+                variantId,
+                toolVersion: null,
+                runtimeVersion: null,
+                certifiedRange: null,
+                evidence: [],
+            };
+            const reconstructed: PackBoundManifestSensor = {
+                enabled: true,
+                ...(liveSensor.fast !== undefined ? { fast: liveSensor.fast } : {}),
+                ...(liveSensor.timeout !== undefined ? { timeout: liveSensor.timeout } : {}),
+                variantId,
+                command: variant.command as StructuredCommand,
+                initializedCompatibility: liveState ?? packSyntheticCompatibility,
+            };
+            packBoundSensor = reconstructed;
+        }
         const fast = parsed.kind !== 'legacy'
-            ? sensor.fast ?? liveSensor?.fast ?? false
-            : sensor.fast ?? false;
+            ? (packBoundSensor as { fast?: boolean }).fast ?? liveSensor?.fast ?? false
+            : (entry as { fast?: boolean }).fast ?? false;
         if (!shouldRun(fast, opts)) continue;
 
         const execution = parsed.kind !== 'legacy'
-            ? prepareV2Sensor({ name, sensor: sensor as any, liveSensor, liveState: live?.sensors[name], requestedScope, changed: changed ?? undefined })
-            : prepareLegacySensor({ name, config: sensor, requestedScope, changed: changed ?? undefined });
-        prepared.push(sensor.enabled === false
+            ? prepareV2Sensor({
+                name,
+                sensor: packBoundSensor as PackBoundManifestSensor,
+                liveSensor,
+                liveState,
+                requestedScope,
+                changed: changed ?? undefined,
+            })
+            : prepareLegacySensor({
+                name,
+                config: entry as SensorManifest['sensors'][string],
+                requestedScope,
+                changed: changed ?? undefined,
+            });
+        prepared.push((packBoundSensor as { enabled?: boolean }).enabled === false
             ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
             : execution);
     }
@@ -270,9 +383,14 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         overall,
         ...authority,
         mode: 'project-sensors',
-        reason: parsed.kind === 'legacy' ? 'legacy-v1' : resolvedSource?.kind === 'logical' ? 'configured-v3' : resolvedSource?.kind,
+        reason: parsed.kind === 'legacy'
+            ? 'legacy-v1'
+            : onlyProject
+                ? 'configured-v3'
+                : resolvedSource?.kind === 'logical' ? 'configured-v3' : resolvedSource?.kind,
         ...(parsed.kind !== 'legacy' && resolvedSource && 'source' in resolvedSource
             ? { source: { kind: resolvedSource.kind, registry: resolvedSource.source.registry.name } } : {}),
+        ...(invalidEntries.length > 0 ? { invalidEntries } : {}),
         ...(drift?.drift ? { packDrift: drift.drift } : {}),
         ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };

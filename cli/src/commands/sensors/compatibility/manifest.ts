@@ -1,5 +1,5 @@
 import type { SensorConfig, SensorManifest } from '../types';
-import type { CompatibilityEvidence, StructuredCommand } from './types';
+import type { CompatibilityEvidence, SensorPackSensor, StructuredCommand } from './types';
 import { parseStructuredCommand } from './contract';
 import { positiveTimeout } from './timeout';
 import semver from 'semver';
@@ -24,16 +24,66 @@ export type SensorManifestV2 = {
     concurrency?: number;
 };
 
+/** Registered CLI formatter ids plus exit-code (default for project-declared sensors). */
+const PROJECT_FORMATTERS = new Set([
+    'tsc', 'eslint-llm', 'semgrep', 'test', 'mypy', 'ruff', 'shellcheck', 'generic', 'exit-code',
+]);
+
+export type PackBoundManifestSensor = SensorManifestV2['sensors'][string];
+
+export type ProjectDeclaredSensor = {
+    source: 'project';
+    enabled: boolean;
+    command: StructuredCommand;
+    formatter: string;
+    fast?: boolean;
+    timeout?: number;
+    assets?: string[];
+    applicability?: SensorPackSensor['applicability'];
+    description?: string;
+};
+
+export type V3ManifestSensor = PackBoundManifestSensor | ProjectDeclaredSensor;
+
 export type SensorManifestV3ProjectSensors = {
     schemaVersion: 3;
     mode: 'project-sensors';
-    pack: string;
+    pack?: string | null;
     packSelection?: 'explicit';
-    source: { registry: string };
+    /** Required only when pack is a nonempty string. */
+    source?: { registry: string };
     packageRoot?: string;
-    sensors: SensorManifestV2['sensors'];
+    sensors: Record<string, V3ManifestSensor>;
     concurrency?: number;
 };
+
+/** Pack-bound v3 project-sensors (non-null pack + registry source; no project entries). */
+export type PackBoundProjectSensorsManifest = SensorManifestV3ProjectSensors & {
+    pack: string;
+    source: { registry: string };
+    sensors: Record<string, PackBoundManifestSensor>;
+};
+
+export function isProjectDeclaredSensor(sensor: V3ManifestSensor): sensor is ProjectDeclaredSensor {
+    return 'source' in sensor && (sensor as ProjectDeclaredSensor).source === 'project';
+}
+
+export function isPackBoundManifestSensor(sensor: V3ManifestSensor): sensor is PackBoundManifestSensor {
+    return !isProjectDeclaredSensor(sensor);
+}
+
+/** Narrow a parsed v3 manifest to the pack-bound shape expected by migrate/materialize. */
+export function asPackBoundProjectSensors(manifest: SensorManifestV3ProjectSensors): PackBoundProjectSensorsManifest {
+    if (typeof manifest.pack !== 'string' || manifest.pack.length === 0 || !manifest.source) {
+        throw new Error('project-sensors manifest requires a nonempty pack and source.registry');
+    }
+    for (const [name, sensor] of Object.entries(manifest.sensors)) {
+        if (isProjectDeclaredSensor(sensor)) {
+            throw new Error(`sensors.${name} is project-declared; pack-bound operation required`);
+        }
+    }
+    return manifest as PackBoundProjectSensorsManifest;
+}
 
 export type SensorManifestV3NativeGate = { schemaVersion: 3; mode: 'native-gate'; reason: string };
 export type SensorManifestV3OptOut = { schemaVersion: 3; mode: 'opt-out'; reason: string };
@@ -130,6 +180,9 @@ export function legacyCompatibility(reason = 'legacy manifest without schemaVers
 function parseLegacySensor(input: unknown, source: unknown, location: string): SensorConfig {
     if (typeof input === 'string') return { cmd: text(input, source, `${location}.cmd`) };
     const value = record(input, source, location);
+    if (value.source === 'project') {
+        invalid(source, `${location}.source "project" requires schemaVersion 3; migrate-to-v3`);
+    }
     fields(value, ['cmd', 'fast', 'enabled', 'timeout', 'changedCmd', 'changedExtensions', 'formatter'], source, location);
     const sensor: SensorConfig = {};
     if ('cmd' in value) sensor.cmd = text(value.cmd, source, `${location}.cmd`);
@@ -165,13 +218,84 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
     return manifest;
 }
 
+function parseApplicability(input: unknown, source: unknown, location: string): SensorPackSensor['applicability'] {
+    const applicabilityInput = record(input, source, location);
+    fields(applicabilityInput, ['allFiles', 'anyFiles', 'kind'], source, location);
+    const applicability: SensorPackSensor['applicability'] = {};
+    if ('allFiles' in applicabilityInput) {
+        applicability.allFiles = stringArray(applicabilityInput.allFiles, source, `${location}.allFiles`, false)
+            .map((file, index) => asset(file, source, `${location}.allFiles[${index}]`));
+    }
+    if ('anyFiles' in applicabilityInput) {
+        applicability.anyFiles = stringArray(applicabilityInput.anyFiles, source, `${location}.anyFiles`, false)
+            .map((file, index) => asset(file, source, `${location}.anyFiles[${index}]`));
+    }
+    if ('kind' in applicabilityInput) {
+        const kind = text(applicabilityInput.kind, source, `${location}.kind`);
+        if (kind !== 'explicit-or-supported-language' && kind !== 'explicit-opt-in') {
+            invalid(source, `${location}.kind must be a supported applicability kind`);
+        }
+        applicability.kind = kind;
+    }
+    if (Object.keys(applicability).length === 0) invalid(source, `${location} must declare a condition`);
+    return applicability;
+}
+
+function parseProjectSensor(input: unknown, source: unknown, location: string): ProjectDeclaredSensor {
+    const value = record(input, source, location);
+    if ('variantId' in value) invalid(source, `${location}.variantId is forbidden on source:"project" entries`);
+    if ('initializedCompatibility' in value) invalid(source, `${location}.initializedCompatibility is forbidden on source:"project" entries`);
+    fields(value, ['source', 'enabled', 'command', 'formatter', 'fast', 'timeout', 'assets', 'applicability', 'description'], source, location);
+    if (value.source !== 'project') invalid(source, `${location}.source must be "project"`);
+    if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
+    const sensor: ProjectDeclaredSensor = {
+        source: 'project',
+        enabled: value.enabled,
+        command: parseStructuredCommand(value.command, source, `${location}.command`),
+        formatter: 'exit-code',
+    };
+    if ('formatter' in value) {
+        const formatter = text(value.formatter, source, `${location}.formatter`);
+        if (!PROJECT_FORMATTERS.has(formatter)) invalid(source, `${location}.formatter is not a registered formatter id`);
+        sensor.formatter = formatter;
+    }
+    if ('assets' in value) {
+        sensor.assets = stringArray(value.assets, source, `${location}.assets`, true)
+            .map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    }
+    if ('applicability' in value) sensor.applicability = parseApplicability(value.applicability, source, `${location}.applicability`);
+    if ('description' in value) sensor.description = text(value.description, source, `${location}.description`);
+    if ('fast' in value) {
+        if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
+        sensor.fast = value.fast;
+    }
+    if ('timeout' in value) {
+        try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
+        catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
+    }
+    return sensor;
+}
+
+function parseV3SensorEntry(input: unknown, source: unknown, location: string): SensorManifestV3ProjectSensors['sensors'][string] {
+    const value = record(input, source, location);
+    if (value.source === 'project') return parseProjectSensor(value, source, location);
+    const unmarkedCustom = !('variantId' in value) && !('initializedCompatibility' in value) && 'command' in value;
+    if (unmarkedCustom) {
+        invalid(source, `${location}.source is required for project-declared sensors; add source:"project"`);
+    }
+    return parseV2Sensor(input, source, location);
+}
+
 function parseV2Sensor(input: unknown, source: unknown, location: string): SensorManifestV2['sensors'][string] {
     const value = record(input, source, location);
+    if (value.source === 'project') {
+        invalid(source, `${location}.source "project" requires schemaVersion 3; migrate-to-v3`);
+    }
     fields(value, ['enabled', 'fast', 'timeout', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
-        command: parseStructuredCommand(value.command, source),
+        command: parseStructuredCommand(value.command, source, `${location}.command`),
         initializedCompatibility: parseCompatibilityEvidence(value.initializedCompatibility, source, `${location}.initializedCompatibility`),
     };
     if (sensor.initializedCompatibility.variantId !== null && sensor.initializedCompatibility.variantId !== sensor.variantId) invalid(source, `${location}.initializedCompatibility.variantId must match variantId`);
@@ -238,22 +362,25 @@ function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV
     return manifest;
 }
 
-function parseV3ProjectManifest(value: UnknownRecord, source: unknown): SensorManifestV3ProjectSensors {
+function parseV3ProjectManifestRoot(value: UnknownRecord, source: unknown): Omit<SensorManifestV3ProjectSensors, 'sensors'> {
     fields(value, ['schemaVersion', 'mode', 'pack', 'packSelection', 'source', 'packageRoot', 'sensors', 'concurrency'], source, 'root');
-    const sourceValue = record(value.source, source, 'source');
-    fields(sourceValue, ['registry'], source, 'source');
-    const sensorsInput = record(value.sensors, source, 'sensors');
-    const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
-    for (const name of Object.keys(sensorsInput)) sensors[id(name, source, 'sensor id')] = parseV2Sensor(sensorsInput[name], source, `sensors.${name}`);
-    const manifest: SensorManifestV3ProjectSensors = {
+    const hasPackKey = 'pack' in value;
+    const pack = !hasPackKey ? undefined : value.pack === null ? null : id(value.pack, source, 'pack');
+    const manifest: Omit<SensorManifestV3ProjectSensors, 'sensors'> = {
         schemaVersion: 3,
         mode: 'project-sensors',
-        pack: id(value.pack, source, 'pack'),
-        source: { registry: id(sourceValue.registry, source, 'source.registry') },
-        sensors,
+        ...(hasPackKey ? { pack } : {}),
     };
+    if (typeof pack === 'string' && pack.length > 0) {
+        const sourceValue = record(value.source, source, 'source');
+        fields(sourceValue, ['registry'], source, 'source');
+        manifest.source = { registry: id(sourceValue.registry, source, 'source.registry') };
+    } else if ('source' in value) {
+        invalid(source, 'source requires a nonempty pack id');
+    }
     if ('packSelection' in value) {
         if (value.packSelection !== 'explicit') invalid(source, 'packSelection must be "explicit" when present');
+        if (typeof pack !== 'string' || pack.length === 0) invalid(source, 'packSelection requires a nonempty pack id');
         manifest.packSelection = 'explicit';
     }
     if ('packageRoot' in value) manifest.packageRoot = asset(value.packageRoot, source, 'packageRoot');
@@ -264,20 +391,72 @@ function parseV3ProjectManifest(value: UnknownRecord, source: unknown): SensorMa
     return manifest;
 }
 
+function parseV3ProjectSensorsMap(
+    sensorsInput: UnknownRecord,
+    source: unknown,
+    soft: boolean,
+): { sensors: SensorManifestV3ProjectSensors['sensors']; invalidEntries: SensorManifestInvalidEntry[] } {
+    const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
+    const invalidEntries: SensorManifestInvalidEntry[] = [];
+    for (const name of Object.keys(sensorsInput)) {
+        const sensorName = id(name, source, 'sensor id');
+        try {
+            sensors[sensorName] = parseV3SensorEntry(sensorsInput[name], source, `sensors.${sensorName}`);
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            if (!soft) throw error instanceof Error ? error : new Error(reason);
+            invalidEntries.push({ name: sensorName, reason });
+        }
+    }
+    return { sensors, invalidEntries };
+}
+
+function parseV3ProjectManifest(value: UnknownRecord, source: unknown, soft: boolean): {
+    pack: SensorManifestV3ProjectSensors;
+    invalidEntries: SensorManifestInvalidEntry[];
+} {
+    const root = parseV3ProjectManifestRoot(value, source);
+    const sensorsInput = record(value.sensors, source, 'sensors');
+    const { sensors, invalidEntries } = parseV3ProjectSensorsMap(sensorsInput, source, soft);
+    return { pack: { ...root, sensors }, invalidEntries };
+}
+
 function parseV3Manifest(value: UnknownRecord, source: unknown): SensorManifestV3 {
     if (value.schemaVersion !== 3) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2, 3; upgrade or migrate the manifest`);
-    if (value.mode === 'project-sensors') return parseV3ProjectManifest(value, source);
+    if (value.mode === 'project-sensors') return parseV3ProjectManifest(value, source, false).pack;
     if (value.mode !== 'native-gate' && value.mode !== 'opt-out') invalid(source, 'schemaVersion 3 mode must be "project-sensors", "native-gate", or "opt-out"');
     fields(value, ['schemaVersion', 'mode', 'reason'], source, 'root');
     return { schemaVersion: 3, mode: value.mode, reason: text(value.reason, source, 'reason') };
 }
 
-export function parseSensorManifest(input: unknown, source: unknown): ParsedSensorManifest {
+export type SensorManifestInvalidEntry = { name: string; reason: string };
+
+export type ParsedSensorManifestWithIssues = ParsedSensorManifest & {
+    invalidEntries: SensorManifestInvalidEntry[];
+};
+
+/** Soft per-entry parse for v3 project-sensors; document-level errors still throw. */
+export function parseSensorManifestWithIssues(input: unknown, source: unknown): ParsedSensorManifestWithIssues {
     const value = record(input, source, 'root');
-    if (!('schemaVersion' in value)) return { kind: 'legacy', pack: parseLegacyManifest(value, source) };
-    if (value.schemaVersion === 2) return { kind: 'v2', pack: parseV2Manifest(value, source) };
-    if (value.schemaVersion === 3) return { kind: 'v3', pack: parseV3Manifest(value, source) };
+    if (!('schemaVersion' in value)) return { kind: 'legacy', pack: parseLegacyManifest(value, source), invalidEntries: [] };
+    if (value.schemaVersion === 2) return { kind: 'v2', pack: parseV2Manifest(value, source), invalidEntries: [] };
+    if (value.schemaVersion === 3) {
+        if (value.mode === 'project-sensors') {
+            const parsed = parseV3ProjectManifest(value, source, true);
+            return { kind: 'v3', pack: parsed.pack, invalidEntries: parsed.invalidEntries };
+        }
+        return { kind: 'v3', pack: parseV3Manifest(value, source), invalidEntries: [] };
+    }
     invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2, 3; upgrade or migrate the manifest`);
+}
+
+export function parseSensorManifest(input: unknown, source: unknown): ParsedSensorManifest {
+    const withIssues = parseSensorManifestWithIssues(input, source);
+    if (withIssues.invalidEntries.length > 0) {
+        throw new Error(withIssues.invalidEntries[0]!.reason);
+    }
+    const { invalidEntries: _invalidEntries, ...parsed } = withIssues;
+    return parsed;
 }
 
 export function serializeManifestV2(input: unknown): string {

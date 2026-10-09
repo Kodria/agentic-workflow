@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
+import { runCoverage } from '../../../src/commands/sensors/coverage';
 
 jest.mock('../../../src/commands/sensors/exec', () => ({
     runCommand: jest.fn(),
@@ -425,5 +426,223 @@ describe('computeSensorStatus', () => {
             else process.env.AWM_HOME = previousHome;
             fs.rmSync(home, { recursive: true, force: true });
         }
+    });
+});
+
+describe('project-declared status and coverage (S3)', () => {
+    let tmpDir: string;
+    let pathDir: string;
+    let originalPath: string | undefined;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-s3-'));
+        pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-s3-path-'));
+        originalPath = process.env.PATH;
+        process.env.PATH = pathDir;
+        fs.writeFileSync(path.join(pathDir, 'terraform'), '#!/bin/sh\nexit 0\n');
+        fs.chmodSync(path.join(pathDir, 'terraform'), 0o755);
+    });
+    afterEach(() => {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(pathDir, { recursive: true, force: true });
+    });
+
+    function writeOnlyProject(sensors: Record<string, unknown>) {
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors,
+        }));
+    }
+
+    it('lists each only-project sensor with project-declared provenance (RF-2.8)', async () => {
+        writeOnlyProject({
+            'iac-format': {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+            },
+        });
+
+        const result = await computeSensorStatus(tmpDir);
+
+        expect(result.checks['iac-format']).toMatchObject({
+            ok: true,
+            certification: 'project-declared',
+        });
+        expect(result.checks['iac-format'].detail).toMatch(/project-declared/i);
+        expect(result.overall).not.toBe('NOT_CONFIGURED');
+        // Must not be empty Pack:none / DEGRADED with zero detail solely because pack is absent.
+        expect(result.pack === null || result.pack === undefined).toBe(true);
+        expect(Object.keys(result.checks)).toEqual(expect.arrayContaining(['iac-format']));
+    });
+
+    it('reports coverage as inconclusive / no pack-reference for only-project (RF-2.9)', async () => {
+        writeOnlyProject({
+            'iac-format': {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+            },
+        });
+
+        const coverage = await runCoverage(tmpDir);
+
+        expect(coverage.overall).toBe('inconclusive');
+        expect(coverage.static.status).toBe('inconclusive');
+        expect(coverage.static.reason).toBe('no_reference');
+        expect(coverage.static.classes).toEqual([]);
+        expect(coverage.overall).not.toBe('covered');
+        expect(JSON.stringify(coverage)).not.toMatch(/"certification"\s*:\s*"certified"/);
+    });
+
+    it('soft-isolates valid siblings when one project entry is schema-invalid (status vs run)', async () => {
+        writeOnlyProject({
+            good: {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'exit-code',
+            },
+            bad: {
+                source: 'project',
+                enabled: true,
+                command: { executable: 'terraform', resolution: 'path', args: ['fmt', '-check'] },
+                formatter: 'not-a-formatter',
+            },
+        });
+
+        const result = await computeSensorStatus(tmpDir);
+
+        expect(Object.keys(result.checks).length).toBeGreaterThan(0);
+        expect(result.checks['good']).toMatchObject({
+            ok: true,
+            certification: 'project-declared',
+        });
+        expect(result.checks['bad']).toMatchObject({ ok: false });
+        expect(result.checks['bad'].detail).toMatch(/formatter|invalid/i);
+        expect(result.overall).toBe('DEGRADED');
+    });
+});
+
+describe('project-declared status pack collision (S3 RF-1.7)', () => {
+    let project: string;
+    let home: string;
+    let pathDir: string;
+    let originalPath: string | undefined;
+    let originalHome: string | undefined;
+    const version = '10.0.0';
+
+    beforeEach(() => {
+        project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-collision-'));
+        home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-collision-home-'));
+        pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-collision-path-'));
+        originalPath = process.env.PATH;
+        originalHome = process.env.AWM_HOME;
+        process.env.PATH = pathDir;
+        process.env.AWM_HOME = home;
+        fs.writeFileSync(path.join(pathDir, 'node'), '#!/bin/sh\nexit 0\n');
+        fs.chmodSync(path.join(pathDir, 'node'), 0o755);
+        const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+        fs.mkdirSync(registry, { recursive: true });
+        fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
+        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+        fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
+        fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version }));
+        fs.mkdirSync(path.join(project, 'node_modules', '.bin'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'node_modules', '.bin', 'eslint'), '');
+        fs.writeFileSync(path.join(registry, 'pack.json'), JSON.stringify({
+            schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+            coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+            sensors: {
+                lint: {
+                    fast: true,
+                    applicability: { allFiles: ['package.json'] },
+                    variants: [{
+                        id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                        requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                        assets: ['eslint.config.awm.mjs'], formatter: 'generic',
+                        probe: { kind: 'package-script-present', script: 'lint' },
+                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                    }],
+                },
+            },
+        }));
+        fs.mkdirSync(path.join(project, '.awm'));
+        fs.writeFileSync(path.join(project, 'eslint.config.awm.mjs'), 'export default []');
+    });
+
+    afterEach(() => {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        if (originalHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalHome;
+        fs.rmSync(project, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+        fs.rmSync(pathDir, { recursive: true, force: true });
+    });
+
+    it('does not label a colliding project id as project-declared READY (RF-1.7 status)', async () => {
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'exit-code',
+                },
+            },
+        }));
+
+        const result = await computeSensorStatus(project);
+
+        expect(result.checks['lint']).toBeDefined();
+        expect(result.checks['lint'].certification).not.toBe('project-declared');
+        expect(result.checks['lint'].detail).toMatch(/project-sensor-name-collision|pack (sensor )?kept/i);
+        expect(result.overall).not.toBe('READY');
+    });
+
+    it('soft-isolate + pack + colliding project id does not certify project-declared READY (RF-1.7)', async () => {
+        // Invalid sibling forces softIsolatedChecks; lint collides with live pack id.
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'exit-code',
+                },
+                bad: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'not-a-formatter',
+                },
+            },
+        }));
+
+        const result = await computeSensorStatus(project);
+
+        expect(result.mode).toBe('invalid');
+        expect(result.checks['bad']).toMatchObject({ ok: false });
+        expect(result.checks['lint']).toBeDefined();
+        expect(result.checks['lint'].ok).toBe(false);
+        expect(result.checks['lint'].certification).not.toBe('project-declared');
+        expect(result.checks['lint'].detail).toMatch(/project-sensor-name-collision|pack (sensor )?kept/i);
+        expect(result.overall).not.toBe('READY');
     });
 });

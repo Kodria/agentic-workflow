@@ -12,6 +12,15 @@ import type { PreparedSensorExecution, SensorError, SensorResult } from './types
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
+/** Exit-code sensors signal solely via process status — never invent per-file findings. */
+function parseExitCodeOutput(_raw: string): SensorError[] {
+    return [];
+}
+
+function truncateEvidence(raw: string, max = 200): string {
+    return raw.length <= max ? raw : raw.slice(0, max);
+}
+
 function formatterFor(name: string, formatter?: string): (raw: string) => SensorError[] {
     if (formatter !== undefined) {
         switch (formatter) {
@@ -23,6 +32,7 @@ function formatterFor(name: string, formatter?: string): (raw: string) => Sensor
             case 'ruff': return parseRuffOutput;
             case 'shellcheck': return parseShellcheckOutput;
             case 'generic': return parseGenericOutput;
+            case 'exit-code': return parseExitCodeOutput;
             default: return parseGenericOutput;
         }
     }
@@ -82,12 +92,19 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
         return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: reason });
     }
     if (raw.code === 0) {
-        if (format === parseGenericOutput) return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
+        if (format === parseGenericOutput || format === parseExitCodeOutput) {
+            return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
+        }
         const errors = format(raw.stdout);
         return withEvidence({ name: prepared.name, status: errors.length ? 'fail' : 'pass', errors });
     }
 
     const output = raw.stdout + raw.stderr;
+    if (prepared.formatter === 'exit-code' || format === parseExitCodeOutput) {
+        const combined = output.trim();
+        const evidence = truncateEvidence(combined.length > 0 ? combined : `exit ${raw.code}`);
+        return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: evidence }] });
+    }
     const errors = format(output);
     if (errors.length > 0) return withEvidence({ name: prepared.name, status: 'fail', errors });
     const lower = output.toLowerCase();
@@ -96,9 +113,9 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
         || lower.includes('is not recognized as an internal or external command')
         || lower.includes('enoent')
         || lower.includes('could not determine executable');
-    if (toolMissing) return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `sensor tool not available: ${output.slice(0, 200)}` }] });
+    if (toolMissing) return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `sensor tool not available: ${truncateEvidence(output)}` }] });
     if (prepared.name === 'test') return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `SENSOR[${prepared.name}] failed (exit ${raw.code})` }] });
-    return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: `exit ${raw.code}: ${output.slice(0, 200)}` });
+    return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: `exit ${raw.code}: ${truncateEvidence(output)}` });
 }
 
 /** Execute a validated prepared command, or render its deliberate synthetic result. */
@@ -111,6 +128,7 @@ export async function executePrepared(prepared: PreparedSensorExecution, cwd = p
             status,
             errors: [],
             ...(prepared.syntheticReason ? { skipReason: prepared.syntheticReason } : {}),
+            ...(prepared.certification ? { certification: prepared.certification } : {}),
             execution: executionEvidence(prepared, 0),
         }, prepared);
     }

@@ -713,3 +713,359 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
         }
     });
 });
+
+describe('runSensors project-declared parity (S2)', () => {
+    let project: string;
+    let home: string;
+    const version = '10.0.0';
+
+    const packBoundLint = () => ({
+        enabled: true,
+        fast: true,
+        variantId: 'eslint-10',
+        command: { executable: 'stale-eslint', resolution: 'node-modules-bin', args: ['.'] },
+        assets: ['eslint.config.awm.mjs'],
+        initializedCompatibility: {
+            state: 'certified' as const,
+            reason: 'range-and-probe',
+            variantId: 'eslint-10',
+            toolVersion: version,
+            runtimeVersion: process.versions.node,
+            certifiedRange: '>=10 <11',
+            evidence: [],
+        },
+    });
+
+    const projectIac = (exitScript = 'process.exit(0)') => ({
+        source: 'project' as const,
+        enabled: true,
+        fast: true,
+        command: { executable: 'node', resolution: 'path' as const, args: ['-e', exitScript] },
+        formatter: 'exit-code',
+    });
+
+    beforeEach(() => {
+        jest.resetModules();
+        project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-v3-project-run-'));
+        home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-v3-project-home-'));
+        process.env.AWM_HOME = home;
+        const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+        fs.mkdirSync(registry, { recursive: true });
+        fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
+        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+        fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
+        fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version }));
+        fs.writeFileSync(path.join(registry, 'pack.json'), JSON.stringify({
+            schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+            coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+            sensors: {
+                lint: {
+                    fast: true,
+                    applicability: { allFiles: ['package.json'] },
+                    variants: [{
+                        id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                        requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                        assets: ['eslint.config.awm.mjs'], formatter: 'generic',
+                        probe: { kind: 'package-script-present', script: 'lint' },
+                        command: { executable: 'live-eslint', resolution: 'node-modules-bin', args: ['.'] },
+                    }],
+                },
+                typecheck: {
+                    fast: true,
+                    applicability: { allFiles: ['package.json'] },
+                    variants: [{
+                        id: 'tsc-5', priority: 1, certifiedRange: '>=5 <6',
+                        requirements: { tool: 'tsc', toolRange: '>=5 <6', runtime: 'node', runtimeRange: '>=0' },
+                        assets: [], formatter: 'tsc',
+                        probe: { kind: 'version' },
+                        command: { executable: 'tsc', resolution: 'node-modules-bin', args: ['--noEmit'] },
+                    }],
+                },
+            },
+        }));
+        fs.mkdirSync(path.join(project, '.awm'));
+        mockRunStructuredCommand.mockReset();
+        mockRunCommand.mockReset();
+    });
+
+    afterEach(() => {
+        delete process.env.AWM_HOME;
+        fs.rmSync(project, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    function writeManifest(sensors: Record<string, unknown>, pack: string | null | undefined = 'js-ts') {
+        const body: Record<string, unknown> = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors,
+        };
+        if (pack !== undefined) {
+            body.pack = pack;
+            if (typeof pack === 'string' && pack.length > 0) body.source = { registry: 'baseline' };
+        }
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(body));
+    }
+
+    it('runs pack lint and project iac-format together with project-declared provenance and overall pass (RF-2.1/2.2/2.3)', async () => {
+        writeManifest({ lint: packBoundLint(), 'iac-format': projectIac('process.exit(0)') });
+        mockRunStructuredCommand.mockImplementation(async (command: { executable?: string }) => {
+            if (command.executable === 'live-eslint') return ok();
+            if (command.executable === 'node') return ok();
+            return ok();
+        });
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+        expect(result.sensors.map((s: { name: string }) => s.name).sort()).toEqual(['iac-format', 'lint']);
+        const projectRow = result.sensors.find((s: { name: string }) => s.name === 'iac-format');
+        expect(projectRow).toMatchObject({ status: 'pass', certification: 'project-declared' });
+        expect(projectRow.certification).not.toBe('certified');
+        expect(result.overall).toBe('pass');
+        expect(result.invalidEntries ?? []).toEqual([]);
+    });
+
+    it('fails overall when the project sensor exits non-zero (RF-2.5)', async () => {
+        writeManifest({ lint: packBoundLint(), 'iac-format': projectIac('process.exit(1)') });
+        mockRunStructuredCommand.mockImplementation(async (command: { executable?: string }) => {
+            if (command.executable === 'live-eslint') return ok();
+            if (command.executable === 'node') return exited(1, 'fmt drift\n');
+            return ok();
+        });
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+        expect(result.sensors.find((s: { name: string }) => s.name === 'iac-format')).toMatchObject({ status: 'fail' });
+        expect(result.overall).toBe('fail');
+    });
+
+    it('skips a schema-invalid project sibling, still runs pack, and lists the invalid entry (RF-2.6)', async () => {
+        writeManifest({
+            lint: packBoundLint(),
+            broken: {
+                source: 'project',
+                enabled: true,
+                fast: true,
+                command: { executable: 'node', resolution: 'path', args: ['.'] },
+                formatter: 'not-a-formatter',
+            },
+        });
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+        expect(result.sensors.some((s: { name: string }) => s.name === 'lint')).toBe(true);
+        expect(result.sensors.some((s: { name: string }) => s.name === 'broken')).toBe(false);
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'broken',
+                reason: expect.stringMatching(/sensors\.broken\.formatter|not a registered formatter/i),
+            }),
+        ]);
+        expect(result.reason).not.toBe('manifest-malformed');
+        expect(result.sensors.length).toBeGreaterThan(0);
+    });
+
+    it('suppresses a baselined project exit-code failure as sensor-level debt (RF-2.7)', async () => {
+        writeManifest({ 'iac-format': projectIac('process.exit(1)') }, null);
+        mockRunStructuredCommand.mockResolvedValue(exited(1, 'fmt drift\n'));
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const { buildBaseline, writeBaseline } = require('../../../src/commands/sensors/baseline');
+
+        const first = await runSensors({ cwd: project, all: true });
+        expect(first.overall).toBe('fail');
+        const row = first.sensors.find((s: { name: string }) => s.name === 'iac-format');
+        expect(row.status).toBe('fail');
+        writeBaseline(project, buildBaseline(first.sensors.map((s: { name: string; errors: unknown[] }) => ({ name: s.name, errors: s.errors }))));
+
+        mockRunStructuredCommand.mockResolvedValue(exited(1, 'fmt drift\n'));
+        const second = await runSensors({ cwd: project, all: true });
+        const suppressed = second.sensors.find((s: { name: string }) => s.name === 'iac-format');
+        expect(suppressed).toMatchObject({ status: 'pass', baselineCount: 1 });
+        expect(second.overall).toBe('pass');
+    });
+
+    it('yields overall pass for a passing project-only run (RF-2.3 provenance never gates)', async () => {
+        writeManifest({ 'iac-format': projectIac('process.exit(0)') }, null);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({ name: 'iac-format', status: 'pass', certification: 'project-declared' }),
+        ]);
+        expect(result.overall).toBe('pass');
+    });
+
+    it('marks a colliding project entry invalid and still prepares/runs the pack sensor for that id (RF-1.7)', async () => {
+        // Project entry reuses pack id `lint` — invalid, but pack lint must remain executable.
+        writeManifest({ lint: projectIac('process.exit(0)') });
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
+            }),
+        ]);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        expect(lint).toBeDefined();
+        expect(lint.certification).not.toBe('project-declared');
+        expect(lint.status).toBe('pass');
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'live-eslint' }),
+            expect.any(Object),
+        );
+    });
+
+    it('on collision with null liveState.variantId still prepares pack (not project) for that id (RF-1.7)', async () => {
+        writeManifest({ lint: projectIac('process.exit(0)') });
+        // Remove the tool so live resolution yields missing-tool with variantId null,
+        // while the pack still defines the lint sensor.
+        fs.rmSync(path.join(project, 'node_modules', 'eslint'), { recursive: true, force: true });
+        fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' } }));
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
+            }),
+        ]);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        expect(lint).toBeDefined();
+        expect(lint.certification).not.toBe('project-declared');
+        // Pack prepare/synthetic outcome — never the project node command.
+        expect(mockRunStructuredCommand).not.toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
+
+    it('carries project-declared provenance on a disabled/synthetic project sensor (RF-2.2)', async () => {
+        writeManifest({
+            'iac-format': { ...projectIac('process.exit(0)'), enabled: false },
+        }, null);
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({
+                name: 'iac-format',
+                status: 'skipped',
+                skipReason: 'disabled',
+                certification: 'project-declared',
+            }),
+        ]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('runs a project sensor when its allFiles marker exists', async () => {
+        writeManifest({
+            'iac-format': {
+                ...projectIac('process.exit(0)'),
+                applicability: { allFiles: ['package.json'] },
+            },
+        }, null);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({ name: 'iac-format', status: 'pass', certification: 'project-declared' }),
+        ]);
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
+
+    it('keeps a project sensor synthetic not-applicable when its allFiles marker is missing', async () => {
+        writeManifest({
+            'iac-format': {
+                ...projectIac('process.exit(0)'),
+                applicability: { allFiles: ['missing-stack.marker'] },
+            },
+        }, null);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.sensors).toEqual([
+            expect.objectContaining({
+                name: 'iac-format',
+                status: 'inconclusive',
+                skipReason: 'not-applicable: applicability-not-met',
+                certification: 'project-declared',
+            }),
+        ]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('does not soft-recover when packageRoot is a symlink escaping the project root', async () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-soft-escape-out-'));
+        try {
+            fs.symlinkSync(outside, path.join(project, 'pkg'));
+            const body = {
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                packageRoot: 'pkg',
+                sensors: {
+                    broken: {
+                        source: 'project',
+                        enabled: true,
+                        fast: true,
+                        command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                        formatter: 'not-a-formatter',
+                    },
+                    good: projectIac('process.exit(0)'),
+                },
+            };
+            fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(body));
+            mockRunStructuredCommand.mockResolvedValue(ok());
+            const { runSensors } = require('../../../src/commands/sensors/run');
+            const result = await runSensors({ cwd: project, all: true });
+            expect(result.overall).toBe('not_certified');
+            expect(result.mode).toBe('invalid');
+            expect(result.sensors).toEqual([]);
+            expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('does not soft-recover a symlinked sensors.json (non-regular-file authority)', async () => {
+        const realManifest = path.join(project, 'elsewhere-sensors.json');
+        fs.writeFileSync(realManifest, JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors: { good: projectIac('process.exit(0)') },
+        }));
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
+        fs.symlinkSync(realManifest, manifestPath);
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.overall).toBe('not_certified');
+        expect(result.mode).toBe('invalid');
+        expect(result.sensors).toEqual([]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('fail-closes a project id collision when the live pack cannot be resolved (live null)', async () => {
+        writeManifest({ lint: projectIac('process.exit(0)') });
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'not-valid-json{');
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, all: true });
+        expect(result.invalidEntries).toEqual([
+            expect.objectContaining({
+                name: 'lint',
+                reason: expect.stringMatching(/project-sensor-name-collision:\s*lint/),
+            }),
+        ]);
+        const lint = result.sensors.find((s: { name: string }) => s.name === 'lint');
+        if (lint) expect(lint.certification).not.toBe('project-declared');
+        expect(mockRunStructuredCommand).not.toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'node' }),
+            expect.any(Object),
+        );
+    });
+});

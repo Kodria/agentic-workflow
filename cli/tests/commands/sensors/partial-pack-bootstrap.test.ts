@@ -62,7 +62,7 @@ describe('project-sensors bootstrap with a partially resolvable pack', () => {
         const manifest = created.manifest as Extract<typeof created.manifest, { mode: 'project-sensors' }>;
         // The manifest contents are the assertion, not the exit code.
         expect(Object.keys(manifest.sensors)).toEqual(['lint']);
-        expect(manifest.sensors.lint.variantId).toBe('eslint-10');
+        expect(manifest.sensors.lint).toMatchObject({ variantId: 'eslint-10' });
         expect(created.unresolved).toEqual([{ sensor: 'security', state: 'missing-tool', reason: 'tool-not-found' }]);
         // Nothing is invented for the skipped sensor: no entry, and none of its assets.
         expect(created.changes.map(change => change.path)).toEqual(['.awm/sensors.json']);

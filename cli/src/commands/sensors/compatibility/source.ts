@@ -53,10 +53,11 @@ export function resolveSensorSource(manifest: ParsedSensorManifest | V3Manifest,
             || !v3.source || typeof v3.source.registry !== 'string') {
             throw new Error('sensor source resolution requires a valid project-sensors manifest');
         }
-        if (!/^[a-z][a-z0-9-]*$/.test(v3.source.registry)) {
+        const registryName = v3.source.registry;
+        if (!/^[a-z][a-z0-9-]*$/.test(registryName)) {
             throw new Error('sensor source registry must be a stable lowercase id');
         }
-        const matches = registries.filter(entry => entry?.name === v3.source.registry);
+        const matches = registries.filter(entry => entry?.name === registryName);
         if (matches.length !== 1) return unavailable('registry-not-installed');
         const source = listPackSources(v3.pack, { registries: matches })[0];
         return source ? { kind: 'logical', source } : unavailable('no-compatible-registry');

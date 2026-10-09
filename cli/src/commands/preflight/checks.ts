@@ -155,12 +155,21 @@ function checkContextKernel(cwd: string): PreflightCheck | null {
     };
 }
 
-function manifestView(status: SensorStatusResult): SensorManifest | null {
-    if (!status.pack) return null;
+/** Preflight's read-model of sensor authority. `pack` may be null for only-project. */
+type ManifestView = { pack: string | null; sensors: SensorManifest['sensors'] };
+
+function isDisabledCheckDetail(detail: string): boolean {
+    return detail === 'disabled' || detail.startsWith('disabled ');
+}
+
+function manifestView(status: SensorStatusResult): ManifestView | null {
+    // Only-project READY has pack null but non-empty checks — still a valid view (RF-2.8).
+    // Do not invent a fake pack id; keep pack null and surface sensors from status.checks.
+    if (status.mode !== 'project-sensors' && status.mode !== 'legacy-v1') return null;
     const sensors = Object.fromEntries(Object.entries(status.checks).map(([name, check]) => [name, {
-        enabled: check.detail !== 'disabled',
+        enabled: !isDisabledCheckDetail(check.detail),
     }]));
-    return { pack: status.pack, sensors } as SensorManifest;
+    return { pack: status.pack ?? null, sensors };
 }
 
 /**
@@ -171,7 +180,7 @@ function manifestView(status: SensorStatusResult): SensorManifest | null {
  * guarding a malformed sensor entry) would silently NOT apply to the other unless
  * someone remembered to edit both. One function, two callers, one place to harden.
  */
-function countEnabledSensors(manifest: SensorManifest): { total: number; enabled: number } {
+function countEnabledSensors(manifest: ManifestView | SensorManifest): { total: number; enabled: number } {
     const entries = Object.values(manifest.sensors ?? {});
     return { total: entries.length, enabled: entries.filter(s => s.enabled !== false).length };
 }
@@ -195,12 +204,32 @@ function checkManifest(status: SensorStatusResult): PreflightCheck {
         };
     }
     if (status.mode === 'invalid') {
+        if (status.reason === 'schema-unsupported') {
+            return {
+                id: 'manifest',
+                ok: false,
+                detail: '.awm/sensors.json uses an unsupported schema',
+                remedy: 'fix or regenerate it with `awm sensors init`',
+            };
+        }
+        // JSON.parse succeeded but schema/entry validation failed (RF-4.1/4.2).
+        // Never claim "not valid JSON"; name the sensor/field from status.reason.
+        if (typeof status.reason === 'string' && (status.reason.startsWith('schema-invalid') || status.reason.includes('Invalid sensor manifest'))) {
+            const detail = status.reason.startsWith('schema-invalid:')
+                ? status.reason.slice('schema-invalid:'.length).trim()
+                : status.reason;
+            // RF-3.3: project schema invalidity must not lead with `awm sensors init`.
+            return {
+                id: 'manifest',
+                ok: false,
+                detail,
+                remedy: 'repair the invalid sensor entry in .awm/sensors.json',
+            };
+        }
         return {
             id: 'manifest',
             ok: false,
-            detail: status.reason === 'schema-unsupported'
-                ? '.awm/sensors.json uses an unsupported schema'
-                : '.awm/sensors.json is not valid JSON',
+            detail: '.awm/sensors.json is not valid JSON',
             remedy: 'fix or regenerate it with `awm sensors init`',
         };
     }
@@ -218,6 +247,14 @@ function checkManifest(status: SensorStatusResult): PreflightCheck {
     // for the detected stack, so `awm sensors init` built an honest, empty manifest
     // rather than inventing defaults. That must not read as "all sensors disabled".
     if (total === 0) {
+        if (manifest.pack === null) {
+            return {
+                id: 'manifest',
+                ok: false,
+                detail: 'only-project manifest has no sensors',
+                remedy: 'add source:"project" sensor entries to .awm/sensors.json, or declare a pack',
+            };
+        }
         return {
             id: 'manifest',
             ok: false,
@@ -232,12 +269,14 @@ function checkManifest(status: SensorStatusResult): PreflightCheck {
     // gap is one missing tool could then configure sensors and still never pass.
     const uninitialized = Object.keys(status.uninitialized ?? {});
     const gap = uninitialized.length === 0 ? '' : `; ${uninitialized.length} applicable sensor(s) not initialized: ${uninitialized.join(', ')}`;
-    return {
-        id: 'manifest',
-        ok: true,
-        detail: (enabled === 0 ? `pack ${manifest.pack}, all ${total} sensors disabled (deliberate opt-out)`
-            : `pack ${manifest.pack}, ${enabled}/${total} sensors enabled`) + gap,
-    };
+    const summary = manifest.pack === null
+        ? (enabled === 0
+            ? `only-project, all ${total} sensors disabled (deliberate opt-out)`
+            : `only-project, ${enabled}/${total} project-declared sensors enabled`)
+        : (enabled === 0
+            ? `pack ${manifest.pack}, all ${total} sensors disabled (deliberate opt-out)`
+            : `pack ${manifest.pack}, ${enabled}/${total} sensors enabled`);
+    return { id: 'manifest', ok: true, detail: summary + gap };
 }
 
 /** Every enabled sensor's command must resolve. This is the check nothing was calling. */
@@ -252,11 +291,14 @@ async function checkTools(cwd: string, status: SensorStatusResult): Promise<Pref
     // already guards against; this defends the invariant independently rather than
     // relying solely on `checkManifest`'s gate to catch this exact manifest shape.
     if (Object.keys(status.checks).length === 0) {
+        const packId = typeof status.pack === 'string' && status.pack.length > 0 ? status.pack : null;
         return {
             id: 'tools',
             ok: false,
             detail: 'no sensors configured to check (0 sensor entries in the manifest)',
-            remedy: `registry has no pack for '${status.pack}': run \`awm update\` or add a registry that has it`,
+            remedy: packId === null
+                ? 'add source:"project" sensor entries to .awm/sensors.json, or declare a pack'
+                : `registry has no pack for '${packId}': run \`awm update\` or add a registry that has it`,
         };
     }
     const broken = Object.entries(status.checks).filter(([, c]) => !c.ok);
@@ -281,6 +323,9 @@ async function checkTools(cwd: string, status: SensorStatusResult): Promise<Pref
 function checkPack(cwd: string, status: SensorStatusResult): PreflightCheck {
     const manifest = manifestView(status);
     if (!manifest) return { id: 'pack', ok: true, detail: 'skipped (no manifest)' };
+    if (manifest.pack === null) {
+        return { id: 'pack', ok: true, detail: 'no pack (project-declared sensors only)' };
+    }
     const detection = detectStack(cwd);
     if (manifest.pack === 'generic' && detection.pack !== 'generic') {
         return {
@@ -379,6 +424,15 @@ export async function checkSensorExecution(cwd: string): Promise<PreflightCheck>
     try {
         const output = await runSensors({ cwd, all: true });
         if (output.overall === 'pass') {
+            const invalid = output.invalidEntries ?? [];
+            if (invalid.length > 0) {
+                return {
+                    id: 'sensors-execution',
+                    ok: false,
+                    detail: `sensors passed but ${invalid.length} invalidEntries remain: ${invalid.map(entry => `${entry.name} (${entry.reason})`).join('; ')}`,
+                    remedy: 'repair the invalid sensor entries in .awm/sensors.json, then rerun `awm preflight --verify-sensors`',
+                };
+            }
             return { id: 'sensors-execution', ok: true, detail: 'all selected sensors completed with pass' };
         }
         return {

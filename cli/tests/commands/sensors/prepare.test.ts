@@ -1,4 +1,5 @@
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions, type PrepareV2SensorInput } from '../../../src/commands/sensors/prepare';
+import type { ProjectDeclaredSensor } from '../../../src/commands/sensors/compatibility/manifest';
 import type { SensorVariant } from '../../../src/commands/sensors/compatibility/types';
 
 const fullCommand = { executable: 'manifest-eslint', resolution: 'path' as const, args: ['.'] };
@@ -103,6 +104,75 @@ describe('validateRunOptions', () => {
     test('rejects changed baseline capture before any scope preparation (R4.6)', () => {
         expect(() => validateRunOptions({ changed: true, ignoreBaseline: true }))
             .toThrow(/refusing to combine --changed with a baseline capture/);
+    });
+});
+
+describe('prepareV2Sensor: project-declared entries (S2)', () => {
+    const projectSensor = (overrides: Partial<ProjectDeclaredSensor> = {}): ProjectDeclaredSensor => ({
+        source: 'project',
+        enabled: true,
+        command: { executable: 'node', resolution: 'path', args: ['scripts/iac-format.js'] },
+        formatter: 'exit-code',
+        timeout: 45_000,
+        ...overrides,
+    });
+
+    test('uses the manifest command, default exit-code formatter, project timeout, and project-declared provenance', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor(),
+            requestedScope: 'full',
+        });
+
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'node', resolution: 'path', args: ['scripts/iac-format.js'] },
+        });
+        expect(prepared.formatter).toBe('exit-code');
+        expect(prepared.timeoutMs).toBe(45_000);
+        expect(prepared.timeoutSource).toBe('project');
+        expect(prepared.certification).toBe('project-declared');
+        expect(prepared.certification).not.toBe('certified');
+        expect(prepared.syntheticStatus).toBeUndefined();
+    });
+
+    test('skips live variant re-resolution for project entries', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor(),
+            liveState: {
+                state: 'missing-tool',
+                reason: 'tool-not-found',
+                variantId: null,
+                toolVersion: null,
+                runtimeVersion: null,
+                certifiedRange: null,
+                evidence: [],
+            },
+            requestedScope: 'full',
+        });
+
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'node', resolution: 'path', args: ['scripts/iac-format.js'] },
+        });
+        expect(prepared.certification).toBe('project-declared');
+    });
+
+    test('returns synthetic not-applicable when project applicabilityPaths are not met', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor({
+                applicability: { allFiles: ['terraform.tf'] },
+            }),
+            applicabilityPaths: ['README.md'],
+            requestedScope: 'full',
+        });
+
+        expect(prepared.command).toBeUndefined();
+        expect(prepared.syntheticStatus).toBe('inconclusive');
+        expect(prepared.syntheticReason).toBe('not-applicable: applicability-not-met');
+        expect(prepared.certification).toBe('project-declared');
     });
 });
 

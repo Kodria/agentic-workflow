@@ -1,4 +1,4 @@
-import { legacyCompatibility, parseSensorManifest, serializeManifestV2, serializeManifestV3 } from '../../../../src/commands/sensors/compatibility/manifest';
+import { legacyCompatibility, parseSensorManifest, parseSensorManifestWithIssues, serializeManifestV2, serializeManifestV3 } from '../../../../src/commands/sensors/compatibility/manifest';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,6 +12,28 @@ function validV2Manifest() {
                 command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--format', 'json'] },
                 initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] },
             },
+        },
+    };
+}
+
+function projectSensor(overrides: Record<string, unknown> = {}) {
+    return {
+        source: 'project' as const,
+        enabled: true,
+        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+        ...overrides,
+    };
+}
+
+function v3WithPackAndProject(projectOverrides: Record<string, unknown> = {}) {
+    return {
+        schemaVersion: 3,
+        mode: 'project-sensors' as const,
+        pack: 'js-ts',
+        source: { registry: 'baseline' },
+        sensors: {
+            lint: validV2Manifest().sensors.lint,
+            custom: projectSensor(projectOverrides),
         },
     };
 }
@@ -211,5 +233,221 @@ describe('sensor manifest contract', () => {
         [{ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'path', args: [] } } } }, 'enabled'],
     ])('rejects malformed manifest %j', (input, message) => {
         expect(() => parseSensorManifest(input, 'sensors.json')).toThrow(message);
+    });
+
+    describe('project-declared sensors (S1)', () => {
+        it('accepts a source:project entry alongside a pack-bound lint sensor', () => {
+            const manifest = v3WithPackAndProject();
+            const parsed = parseSensorManifest(manifest, 'sensors.json');
+            expect(parsed).toMatchObject({
+                kind: 'v3',
+                pack: {
+                    mode: 'project-sensors',
+                    pack: 'js-ts',
+                    sensors: {
+                        lint: { variantId: 'eslint-9', enabled: true },
+                        custom: {
+                            source: 'project',
+                            enabled: true,
+                            command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                            formatter: 'exit-code',
+                        },
+                    },
+                },
+            });
+            expect(parsed.kind === 'v3' && parsed.pack.mode === 'project-sensors' && 'variantId' in parsed.pack.sensors.custom).toBe(false);
+            expect(parsed.kind === 'v3' && parsed.pack.mode === 'project-sensors' && 'initializedCompatibility' in parsed.pack.sensors.custom).toBe(false);
+        });
+
+        it('accepts an only-project manifest with pack omitted or null', () => {
+            const base = {
+                schemaVersion: 3,
+                mode: 'project-sensors' as const,
+                sensors: { custom: projectSensor() },
+            };
+            for (const manifest of [base, { ...base, pack: null }]) {
+                const parsed = parseSensorManifest(manifest, 'sensors.json');
+                expect(parsed).toMatchObject({
+                    kind: 'v3',
+                    pack: {
+                        mode: 'project-sensors',
+                        sensors: { custom: { source: 'project', formatter: 'exit-code' } },
+                    },
+                });
+                if (parsed.kind === 'v3' && parsed.pack.mode === 'project-sensors') {
+                    expect(parsed.pack.pack === undefined || parsed.pack.pack === null).toBe(true);
+                    expect(parsed.pack.source).toBeUndefined();
+                }
+            }
+        });
+
+        it('accepts an empty only-project sensors map', () => {
+            expect(parseSensorManifest({
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                sensors: {},
+            }, 'sensors.json')).toMatchObject({
+                kind: 'v3',
+                pack: { mode: 'project-sensors', sensors: {} },
+            });
+        });
+
+        it.each(['variantId', 'initializedCompatibility'] as const)(
+            'rejects a project entry that declares forbidden pack field %s',
+            field => {
+                const value = field === 'variantId'
+                    ? 'eslint-9'
+                    : { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] };
+                const soft = parseSensorManifestWithIssues(v3WithPackAndProject({ [field]: value }), 'sensors.json');
+                expect(soft.invalidEntries).toEqual([
+                    expect.objectContaining({
+                        name: 'custom',
+                        reason: expect.stringMatching(new RegExp(`sensors\\.custom\\.${field}`)),
+                    }),
+                ]);
+                expect(soft).toMatchObject({
+                    kind: 'v3',
+                    pack: { sensors: { lint: { variantId: 'eslint-9' } } },
+                });
+                expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+            },
+        );
+
+        it('soft-rejects an invalid project command with sensors.<name>.command in the reason (RF-1.12)', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({
+                    command: { executable: 'bash', resolution: 'path', args: ['-c', 'true'] },
+                }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toHaveLength(1);
+            expect(soft.invalidEntries[0]?.reason).toMatch(/sensors\.custom\.command/);
+            expect(soft).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { lint: { variantId: 'eslint-9' } } },
+            });
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+        });
+
+        it('soft-rejects an unmarked custom command as missing source (RF-1.2)', () => {
+            const soft = parseSensorManifestWithIssues({
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                pack: 'js-ts',
+                source: { registry: 'baseline' },
+                sensors: {
+                    lint: validV2Manifest().sensors.lint,
+                    custom: {
+                        enabled: true,
+                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                    },
+                },
+            }, 'sensors.json');
+            expect(soft.invalidEntries).toEqual([
+                expect.objectContaining({
+                    name: 'custom',
+                    reason: expect.stringMatching(/sensors\.custom\.source/),
+                }),
+            ]);
+            expect(soft.invalidEntries[0]?.reason).toMatch(/source/);
+            expect(soft).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { lint: { variantId: 'eslint-9' } } },
+            });
+            // Soft-isolation: unmarked custom must be dropped, pack sibling kept.
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+        });
+
+        it('rejects unknown formatter and defaults omitted formatter to exit-code', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({ formatter: 'not-a-formatter' }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toEqual([
+                expect.objectContaining({
+                    name: 'custom',
+                    reason: expect.stringMatching(/sensors\.custom\.formatter/),
+                }),
+            ]);
+
+            const ok = parseSensorManifest(v3WithPackAndProject(), 'sensors.json');
+            expect(ok).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { custom: { formatter: 'exit-code' } } },
+            });
+        });
+
+        it('treats omitted applicability as always applicable and rejects invalid shapes', () => {
+            const ok = parseSensorManifest(v3WithPackAndProject(), 'sensors.json');
+            expect(ok.kind === 'v3' && ok.pack.mode === 'project-sensors' && !('applicability' in ok.pack.sensors.custom)).toBe(true);
+
+            const withApplicability = parseSensorManifest(
+                v3WithPackAndProject({ applicability: { allFiles: ['package.json'] } }),
+                'sensors.json',
+            );
+            expect(withApplicability).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { custom: { applicability: { allFiles: ['package.json'] } } } },
+            });
+
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({ applicability: {} }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toEqual([
+                expect.objectContaining({
+                    name: 'custom',
+                    reason: expect.stringMatching(/sensors\.custom\.applicability/),
+                }),
+            ]);
+        });
+
+        it('rejects schemaVersion 2 and legacy manifests that use source:project with migrate-to-v3', () => {
+            const v2 = {
+                schemaVersion: 2,
+                pack: 'js-ts',
+                sensors: {
+                    custom: {
+                        source: 'project',
+                        enabled: true,
+                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                    },
+                },
+            };
+            expect(() => parseSensorManifest(v2, 'sensors.json')).toThrow(/migrate-to-v3|migrate to v3/i);
+
+            const legacy = {
+                pack: 'js-ts',
+                sensors: {
+                    custom: {
+                        source: 'project',
+                        enabled: true,
+                        cmd: 'npm run lint',
+                    },
+                },
+            };
+            expect(() => parseSensorManifest(legacy, 'sensors.json')).toThrow(/migrate-to-v3|migrate to v3/i);
+        });
+
+        it('soft-isolates one invalid project entry while keeping a valid pack sensor', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({ formatter: 'not-a-formatter' }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toHaveLength(1);
+            expect(soft.invalidEntries[0]).toMatchObject({
+                name: 'custom',
+                reason: expect.stringMatching(/sensors\.custom\.formatter/),
+            });
+            expect(soft).toMatchObject({
+                kind: 'v3',
+                pack: {
+                    mode: 'project-sensors',
+                    sensors: { lint: { enabled: true, variantId: 'eslint-9' } },
+                },
+            });
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+            expect(soft.invalidEntries.some(entry => /not valid JSON|valid JSON/i.test(entry.reason))).toBe(false);
+        });
     });
 });
