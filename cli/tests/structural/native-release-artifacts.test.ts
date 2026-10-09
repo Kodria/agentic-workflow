@@ -16,8 +16,14 @@ function assertArmPartition(source: string): void {
     expect(rest).toBeDefined();
     const hotJob = rest.split(/^  [a-z][\w-]*:\s*$/m)[0];
 
-    expect(matrixJob).toMatch(/- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n        working-directory: cli\n        run: npx jest --runInBand --bail\n/);
-    const remainder = matrixJob.match(/- name: Tests? \(Windows ARM remainder\)\n        if: matrix\.target == 'win32-arm64'\n        working-directory: cli\n        run: ([^\n]+)/)?.[1];
+    // Optional env: (e.g. AWM_BASELINE_REGISTRY_ROOT for RF-5.1 docs contract) may
+    // sit between working-directory and run; release.yml still omits it.
+    expect(matrixJob).toMatch(
+        /- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n        working-directory: cli\n(?:        env:\n(?:          [^\n]+\n)+)?        run: npx jest --runInBand --bail\n/,
+    );
+    const remainder = matrixJob.match(
+        /- name: Tests? \(Windows ARM remainder\)\n        if: matrix\.target == 'win32-arm64'\n        working-directory: cli\n(?:        env:\n(?:          [^\n]+\n)+)?        run: ([^\n]+)/,
+    )?.[1];
     expect(remainder).toMatch(/^npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'$/);
     const ignorePattern = remainder?.match(/--testPathIgnorePatterns='([^']+)'/)?.[1];
     expect(ignorePattern).toBe(String.raw`node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$`);
