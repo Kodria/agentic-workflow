@@ -1,3 +1,8 @@
+## v9.17.0 - 2026-10-09
+
+### Features
+- **sensors:** project-declared sensors (#209) (#212)
+
 ## v9.16.1 - 2026-10-08
 
 ### Fixes
