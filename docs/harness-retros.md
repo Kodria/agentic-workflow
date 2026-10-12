@@ -10,7 +10,7 @@
 - **Recomendaciones (sin aplicar):** (1) optional structural test that `findOrphanNeeds`/`writeFact` reject every `Object.prototype` key; (2) consider installing the js-ts security sensor pack when owners want Semgrep coverage for store parse paths; (3) document that Cursor `url.insteadOf` token rewrite makes `git remote get-url` diverge from configured registry remotes — admit `--require-current` needs a clean origin URL (config value already clean; transport rewrite is the trap).
 - **Descartes (modo desatendido):** all 31 findings — closed in-branch by QA fix loop with focused RED/GREEN (95 closure tests pass); no additional harness rule authorized. Wins reinforced only in this log (Track A/B clean revalidation, closureCommands green).
 - **Journal:** `awm watch journal-status` — no durable journal (proveedor-nativo desatendido, `journal: not-required`); archive uses manual/native QA evidence path.
-- **Estado del retro:** triage + log; ledger archive + `awm-retro-complete` follow.
+- **Estado del retro:** triage + log; ledger archived; `awm-retro-complete` on plan.
 
 ## 2026-09-15 — Issue #126: bootstrap compact-only, QA y cierre de entorno
 
