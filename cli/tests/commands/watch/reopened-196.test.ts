@@ -866,9 +866,15 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             }
             expect(stdout).toContain('supervisor activo');
             child.kill('SIGINT');
-            const exit = await new Promise<number | null>(resolve => child.once('close', code => resolve(code)));
-            expect(exit).toBe(130);
+            const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
+                child.once('exit', (code, signal) => resolve({ code, signal }));
+            });
+            // Truthful interrupt report is the contract; exit 130 is the CLI's
+            // intentional status (process.exit(130) after "detenido"). Accepting
+            // null+SIGINT alone would hide a regression that dropped the message.
             expect(stdout).toMatch(/detenido; ciclo IN_PROGRESS/);
+            expect(exit.code).toBe(130);
+            expect(exit.signal).toBeNull();
             expect(stdout).not.toContain('COMPLETE');
             expect(stderr).not.toContain('Error');
         } finally {
