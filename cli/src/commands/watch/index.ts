@@ -159,10 +159,7 @@ export function registerWatchCommand(program: Command): void {
                 process.stdout.write(`awm watch: ${outcome === 'stopped' ? 'detenido' : 'track congelado'}; ciclo ${final.cycleState ?? final.state} — sin certificacion de cierre\n`);
                 // exitCode only — never process.exit here: in-process tests call parseAsync
                 // inside Jest; a hard exit kills the worker (CI exit 130 on every OS).
-<<<<<<< HEAD
                 // exitCode=130 is intentional Darwin CI flake harden (reopened-196), not operator-environments scope.
-=======
->>>>>>> origin/main
                 if (outcome === 'stopped') process.exitCode = 130;
                 else if (outcome === 'complete' || final.state !== 'present') process.exitCode = 1;
             }
