@@ -12,7 +12,7 @@ import { regenerateGlobalContext } from '../../core/context/regenerate';
 import { addRegistry } from './add';
 import { removeRegistry } from './remove';
 import { canDiscoverRegistryContent, overrideStatus } from './status';
-import { doctorRegistry } from './doctor';
+import { doctorExitCode, doctorRegistry } from './doctor';
 import { getPreferences } from '../../utils/config';
 import { findProjectRoot } from '../../core/profile';
 import { AGENT_TARGETS, AgentTarget } from '../../providers';
@@ -205,6 +205,6 @@ export function registerRegistryCommand(program: Command): void {
             } else if (report.structural.length === 0) {
                 console.log(pc.green(`Registry doctor: ok with ${report.advisories.length} advisory(ies)`));
             }
-            process.exit(report.structural.length ? 1 : 0);
+            process.exit(doctorExitCode(report));
         });
 }

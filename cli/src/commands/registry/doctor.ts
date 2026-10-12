@@ -12,6 +12,11 @@ export interface DoctorReport {
     advisories: string[];
 }
 
+/** Exit code for CLI: structural failures → 1; advisories alone → 0. */
+export function doctorExitCode(report: DoctorReport): 0 | 1 {
+    return report.structural.length ? 1 : 0;
+}
+
 /** Capability ids the doctor understands in v1; others are advisory (forward-compatible). */
 const KNOWN_CAPABILITY_IDS = new Set(['facts']);
 
@@ -19,12 +24,13 @@ const CAPABILITIES_HEADER_RE = /^\|\s*id\s*\|\s*status\s*\|\s*notes\s*\|$/i;
 const HOME_PATH_RE = /(^|[^\w])~(\/|\\)/;
 const USERS_PATH_RE = /\/Users\/[^/\s]+/;
 const ADVISORY_CAP = 50;
+const STORE_BASENAMES = new Set(['values.json', 'meta.json']);
 
 function isMissing(error: unknown): boolean {
     return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
 }
 
-function walkFiles(root: string, visit: (abs: string, rel: string) => void): void {
+function walkRegularFiles(root: string, visit: (abs: string, rel: string) => void): void {
     const stack: string[] = [root];
     while (stack.length > 0) {
         const dir = stack.pop()!;
@@ -85,8 +91,7 @@ function parseCapabilitiesIndex(markdown: string): CapabilitiesIndex {
     const errors: string[] = [];
     const seen = new Set<string>();
     for (let i = headerIdx + 1; i < lines.length; i++) {
-        const raw = lines[i];
-        const line = raw.trim();
+        const line = lines[i].trim();
         if (line === '') continue;
         if (/^##\s+/.test(line)) break;
         if (!line.startsWith('|')) continue;
@@ -115,53 +120,126 @@ function parseCapabilitiesIndex(markdown: string): CapabilitiesIndex {
     return { rows, errors };
 }
 
-function collectSkillMdPaths(root: string): string[] {
+/** Collect readable regular SKILL.md paths; symlink / non-regular / unreadable → structural. */
+function collectSkillMdPaths(root: string, structural: string[]): string[] {
     const skillsRoot = path.join(root, 'skills');
     const out: string[] = [];
     if (!fs.existsSync(skillsRoot)) return out;
     let entries: fs.Dirent[];
     try {
         entries = fs.readdirSync(skillsRoot, { withFileTypes: true });
-    } catch {
+    } catch (e) {
+        structural.push(
+            `Cannot read skills/: ${e instanceof Error ? e.message : String(e)}`,
+        );
         return out;
     }
     for (const entry of entries) {
-        if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-        const skillMd = path.join(skillsRoot, entry.name, 'SKILL.md');
+        const skillDir = path.join(skillsRoot, entry.name);
+        const relDir = path.relative(root, skillDir);
+        let dirStat: fs.Stats;
         try {
-            const stat = fs.lstatSync(skillMd);
-            if (stat.isFile() && !stat.isSymbolicLink()) out.push(skillMd);
-        } catch {
-            // unreadable → fail closed as structural when needs are required elsewhere
+            dirStat = fs.lstatSync(skillDir);
+        } catch (e) {
+            structural.push(
+                `Cannot inspect skill path ${relDir}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+            continue;
         }
+        if (dirStat.isSymbolicLink()) {
+            structural.push(`Skill path ${relDir} must not be a symbolic link (fail closed)`);
+            continue;
+        }
+        if (!dirStat.isDirectory()) {
+            structural.push(`Skill path ${relDir} must be a regular directory (fail closed)`);
+            continue;
+        }
+        const skillMd = path.join(skillDir, 'SKILL.md');
+        const relMd = path.relative(root, skillMd);
+        let mdStat: fs.Stats;
+        try {
+            mdStat = fs.lstatSync(skillMd);
+        } catch (error) {
+            if (isMissing(error)) continue;
+            structural.push(
+                `Cannot inspect ${relMd}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            continue;
+        }
+        if (mdStat.isSymbolicLink()) {
+            structural.push(`${relMd} must not be a symbolic link (fail closed)`);
+            continue;
+        }
+        if (!mdStat.isFile()) {
+            structural.push(`${relMd} must be a regular file (fail closed)`);
+            continue;
+        }
+        try {
+            fs.accessSync(skillMd, fs.constants.R_OK);
+        } catch (e) {
+            structural.push(
+                `Unreadable ${relMd}: ${e instanceof Error ? e.message : String(e)} (fail closed)`,
+            );
+            continue;
+        }
+        out.push(skillMd);
     }
     return out;
 }
 
+/**
+ * RF-4.5: store files under the registry tree are structural.
+ * Symlink entries named `environments`, or basename `values.json`/`meta.json`, are structural
+ * even when the walk does not follow the link.
+ */
 function scanEnvStoreInTree(root: string, structural: string[]): void {
-    walkFiles(root, (abs, rel) => {
-        const parts = rel.split(/[/\\]/);
-        const envIdx = parts.findIndex((p) => p === 'environments');
-        const base = path.basename(abs);
-        if (envIdx !== -1 && (base === 'values.json' || base === 'meta.json')) {
-            structural.push(
-                `Environment store file must not live in the registry tree: ${rel} (RF-4.5)`,
-            );
-            return;
+    const stack: string[] = [root];
+    while (stack.length > 0) {
+        const dir = stack.pop()!;
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+            continue;
         }
-        // Copied ~/.awm/environments layout without the segment being under a clear env dir name
-        if (base === 'values.json' && parts.includes('environments')) {
-            structural.push(
-                `Environment store file must not live in the registry tree: ${rel} (RF-4.5)`,
-            );
+        for (const entry of entries) {
+            if (entry.name === '.git' || entry.name === 'node_modules') continue;
+            const abs = path.join(dir, entry.name);
+            const rel = path.relative(root, abs);
+            let stat: fs.Stats;
+            try {
+                stat = fs.lstatSync(abs);
+            } catch {
+                continue;
+            }
+            if (stat.isSymbolicLink()) {
+                if (entry.name === 'environments' || STORE_BASENAMES.has(entry.name)) {
+                    structural.push(
+                        `Environment store symlink must not live in the registry tree: ${rel} (RF-4.5)`,
+                    );
+                }
+                continue;
+            }
+            if (stat.isDirectory()) {
+                stack.push(abs);
+                continue;
+            }
+            if (stat.isFile()) {
+                const parts = rel.split(/[/\\]/);
+                if (parts.includes('environments') && STORE_BASENAMES.has(entry.name)) {
+                    structural.push(
+                        `Environment store file must not live in the registry tree: ${rel} (RF-4.5)`,
+                    );
+                }
+            }
         }
-    });
+    }
 }
 
 function scanProsePathHints(root: string, advisories: string[]): void {
     const skillsRoot = path.join(root, 'skills');
     if (!fs.existsSync(skillsRoot)) return;
-    walkFiles(skillsRoot, (abs, rel) => {
+    walkRegularFiles(skillsRoot, (abs, rel) => {
         if (!abs.endsWith('.md')) return;
         if (advisories.length >= ADVISORY_CAP) return;
         let text: string;
@@ -273,16 +351,29 @@ export function doctorRegistry(root: string): DoctorReport {
     const factsPath = path.join(resolvedRoot, 'facts.json');
     let catalog: FactsCatalog | null = null;
     let factsPresent = false;
-    if (fs.existsSync(factsPath)) {
+    try {
+        const factsStat = fs.lstatSync(factsPath);
         factsPresent = true;
-        try {
-            catalog = parseFactsCatalog(factsPath);
-        } catch (e) {
-            structural.push(`facts.json invalid: ${e instanceof Error ? e.message : String(e)}`);
+        if (factsStat.isSymbolicLink()) {
+            structural.push('facts.json must not be a symbolic link (regular-file guard)');
+        } else if (!factsStat.isFile()) {
+            structural.push('facts.json must be a regular file');
+        } else {
+            try {
+                catalog = parseFactsCatalog(factsPath);
+            } catch (e) {
+                structural.push(`facts.json invalid: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+    } catch (error) {
+        if (!isMissing(error)) {
+            structural.push(
+                `Cannot inspect facts.json: ${error instanceof Error ? error.message : String(error)}`,
+            );
         }
     }
 
-    const skillPaths = collectSkillMdPaths(resolvedRoot);
+    const skillPaths = collectSkillMdPaths(resolvedRoot, structural);
     let anyNeeds = false;
     for (const skillMd of skillPaths) {
         let needs: string[];

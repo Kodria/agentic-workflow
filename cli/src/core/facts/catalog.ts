@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { assertRegularRegistryFile } from '../registries';
 import {
     FACT_ID_RE,
     FactDefinition,
@@ -107,6 +108,16 @@ function parseObject(raw: unknown): FactsCatalog {
  */
 export function parseFactsCatalog(rawOrPath: unknown): FactsCatalog {
     if (typeof rawOrPath === 'string') {
+        try {
+            if (!assertRegularRegistryFile(rawOrPath)) {
+                throw new FactsCatalogError(`facts catalog not found at ${rawOrPath}`);
+            }
+        } catch (e) {
+            if (e instanceof FactsCatalogError) throw e;
+            throw new FactsCatalogError(
+                e instanceof Error ? e.message : `Cannot inspect facts catalog at ${rawOrPath}: ${String(e)}`,
+            );
+        }
         let text: string;
         try {
             text = fs.readFileSync(rawOrPath, 'utf-8');

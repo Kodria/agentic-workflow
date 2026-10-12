@@ -132,6 +132,20 @@ describe('parseFactsCatalog (RF-1.1)', () => {
         }
     });
 
+    it('rejects symlink facts.json (regular-file guard)', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-facts-'));
+        try {
+            const real = path.join(dir, 'real-facts.json');
+            fs.writeFileSync(real, JSON.stringify(validRepos));
+            const link = path.join(dir, 'facts.json');
+            fs.symlinkSync(real, link);
+            expect(() => parseFactsCatalog(link)).toThrow(FactsCatalogError);
+            expect(() => parseFactsCatalog(link)).toThrow(/symbolic link|regular file/i);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('requires enum values[] when valueType is enum', () => {
         expect(() =>
             parseFactsCatalog({

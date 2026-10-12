@@ -117,19 +117,44 @@ describe('doctorRegistry (RF-4.4–4.8, RF-5.1)', () => {
         expect(report.structural.some((m) => /environments/i.test(m) || /values\.json/i.test(m))).toBe(true);
     });
 
-    it('treats unknown capability id widgets as advisory only and exits 0 when alone (RF-4.4/4.6)', () => {
+    it('reports environments symlink into external store as structural (RF-4.5)', () => {
+        const root = path.join(tmp, 'store-symlink');
+        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+        const external = path.join(tmp, 'external-env');
+        writeJson(path.join(external, 'default', 'values.json'), {
+            'repos.root': { value: '/x', status: 'fresh', updatedAt: '2026-01-01T00:00:00Z' },
+        });
+        fs.symlinkSync(external, path.join(root, 'environments'));
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        expect(report.structural.some((m) => /environments/i.test(m) && /symlink|RF-4\.5/i.test(m))).toBe(true);
+    });
+
+    it('reports values.json / meta.json symlinks under environments as structural (RF-4.5)', () => {
+        const root = path.join(tmp, 'store-file-symlink');
+        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+        const external = path.join(tmp, 'external-values.json');
+        fs.writeFileSync(external, '{"x":1}\n');
+        fs.mkdirSync(path.join(root, 'environments', 'default'), { recursive: true });
+        fs.symlinkSync(external, path.join(root, 'environments', 'default', 'values.json'));
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        expect(report.structural.some((m) => /values\.json/i.test(m))).toBe(true);
+    });
+
+    it('treats unknown capability id widgets as advisory only; doctorExitCode is 0 (RF-4.4/4.6)', () => {
         const root = path.join(tmp, 'widgets');
         scaffoldBare(root, {
             withBundle: false,
             minCliVersion: FACTS_MIN_CLI_VERSION,
             handbook: handbook(['widgets | planned | future']),
         });
-        const { doctorRegistry } = loadDoctor();
+        const { doctorRegistry, doctorExitCode } = loadDoctor();
         const report = doctorRegistry(root);
         expect(report.structural).toEqual([]);
         expect(report.advisories.some((m) => /widgets/i.test(m))).toBe(true);
-        const exitCode = report.structural.length ? 1 : 0;
-        expect(exitCode).toBe(0);
+        expect(doctorExitCode(report)).toBe(0);
+        expect(doctorExitCode({ structural: ['x'], advisories: [] })).toBe(1);
     });
 
     it('fails structurally when facts present and minCliVersion below FACTS_MIN_CLI_VERSION (RF-4.8)', () => {
@@ -179,6 +204,58 @@ describe('doctorRegistry (RF-4.4–4.8, RF-5.1)', () => {
         expect(report.structural.some((m) => /ghost\.fact|orphan/i.test(m))).toBe(true);
     });
 
+    it('reports needs without facts.json as structural (fail closed)', () => {
+        const root = path.join(tmp, 'needs-no-catalog');
+        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+        const skillDir = path.join(root, 'skills', 'demo');
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(skillDir, 'SKILL.md'),
+            `---\nname: demo\ndescription: d\nneeds:\n  - repos.root\n---\n# Demo\n`,
+        );
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        expect(report.structural.some((m) => /needs/i.test(m) && /facts\.json/i.test(m))).toBe(true);
+    });
+
+    it('reports symlink skill dirs and non-regular SKILL.md as structural (fail closed)', () => {
+        const root = path.join(tmp, 'skill-symlink');
+        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+
+        const externalSkill = path.join(tmp, 'external-skill');
+        fs.mkdirSync(externalSkill, { recursive: true });
+        fs.writeFileSync(path.join(externalSkill, 'SKILL.md'), '---\nname: linked\ndescription: d\n---\n');
+        fs.symlinkSync(externalSkill, path.join(root, 'skills', 'linked'));
+
+        const regular = path.join(root, 'skills', 'regular');
+        fs.mkdirSync(regular, { recursive: true });
+        const externalMd = path.join(tmp, 'external-SKILL.md');
+        fs.writeFileSync(externalMd, '---\nname: regular\ndescription: d\n---\n');
+        fs.symlinkSync(externalMd, path.join(regular, 'SKILL.md'));
+
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        expect(report.structural.some((m) => /linked/i.test(m) && /symlink|skill/i.test(m))).toBe(true);
+        expect(report.structural.some((m) => /regular/i.test(m) && /SKILL\.md|symlink|regular file/i.test(m))).toBe(true);
+    });
+
+    it('reports unreadable SKILL.md as structural (fail closed)', () => {
+        const root = path.join(tmp, 'skill-unreadable');
+        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+        const skillDir = path.join(root, 'skills', 'locked');
+        fs.mkdirSync(skillDir, { recursive: true });
+        const skillMd = path.join(skillDir, 'SKILL.md');
+        fs.writeFileSync(skillMd, '---\nname: locked\ndescription: d\n---\n');
+        fs.chmodSync(skillMd, 0);
+        try {
+            const { doctorRegistry } = loadDoctor();
+            const report = doctorRegistry(root);
+            expect(report.structural.some((m) => /locked|SKILL\.md|Cannot read|unreadable/i.test(m))).toBe(true);
+        } finally {
+            fs.chmodSync(skillMd, 0o644);
+        }
+    });
+
     it('does not require facts chapter beyond Capabilities when no facts.json and no needs', () => {
         const root = path.join(tmp, 'legacy');
         scaffoldBare(root, {
@@ -200,12 +277,13 @@ describe('doctorRegistry (RF-4.4–4.8, RF-5.1)', () => {
         expect(source).not.toMatch(/writeSkill|writeFileSync.*SKILL/);
     });
 
-    it('wires awm registry doctor [name|path] with structural exit code', () => {
+    it('wires awm registry doctor [name|path] via doctorExitCode', () => {
         const indexSource = fs.readFileSync(
             path.resolve(__dirname, '../../../src/commands/registry/index.ts'),
             'utf8',
         );
-        expect(indexSource).toMatch(/doctor/);
-        expect(indexSource).toMatch(/structural\.length\s*\?\s*1\s*:\s*0|process\.exit\(.*structural/);
+        expect(indexSource).toMatch(/doctorRegistry/);
+        expect(indexSource).toMatch(/doctorExitCode/);
+        expect(indexSource).toMatch(/process\.exit\(doctorExitCode\(/);
     });
 });
