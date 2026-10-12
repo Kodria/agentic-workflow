@@ -3,7 +3,8 @@ import fs from 'fs';
 import { Command } from 'commander';
 import { intro, outro, confirm, isCancel, spinner, multiselect, select } from '@clack/prompts';
 import pc from 'picocolors';
-import { listRegistries, contentRoots } from '../../core/registries';
+import path from 'path';
+import { listRegistries, contentRoots, registryContentRoot } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { createBundleDiagnosticReporter, discoverAllBundles } from '../../core/bundles';
 import { reconcileAllSkillLinks } from '../../core/skill-integrity';
@@ -11,10 +12,22 @@ import { regenerateGlobalContext } from '../../core/context/regenerate';
 import { addRegistry } from './add';
 import { removeRegistry } from './remove';
 import { canDiscoverRegistryContent, overrideStatus } from './status';
+import { doctorRegistry } from './doctor';
 import { getPreferences } from '../../utils/config';
 import { findProjectRoot } from '../../core/profile';
 import { AGENT_TARGETS, AgentTarget } from '../../providers';
 import { bundlesInRegistry, installBundlesFromRegistry } from './install-bundles';
+
+function resolveDoctorTarget(nameOrPath?: string): string {
+    if (!nameOrPath) {
+        throw new Error('Specify a registry name or path: awm registry doctor <name|path>');
+    }
+    const asPath = path.resolve(nameOrPath);
+    if (fs.existsSync(asPath) && fs.statSync(asPath).isDirectory()) {
+        return asPath;
+    }
+    return registryContentRoot(nameOrPath);
+}
 
 export function registerRegistryCommand(program: Command): void {
     const reg = program.command('registry').description('manage additional content registries (team/personal)');
@@ -167,5 +180,31 @@ export function registerRegistryCommand(program: Command): void {
                 // reconciliation must not abort a successful remove
             }
             outro(`✅ Registry ${pc.cyan(name)} removed.`);
+        });
+
+    reg.command('doctor [nameOrPath]')
+        .description('audit a registry tree (structural failures vs advisories)')
+        .action((nameOrPath?: string) => {
+            let root: string;
+            try {
+                root = resolveDoctorTarget(nameOrPath);
+            } catch (e) {
+                console.error(pc.red(e instanceof Error ? e.message : String(e)));
+                process.exit(1);
+                return;
+            }
+            const report = doctorRegistry(root);
+            for (const msg of report.structural) {
+                console.error(pc.red(`structural: ${msg}`));
+            }
+            for (const msg of report.advisories) {
+                console.warn(pc.yellow(`advisory: ${msg}`));
+            }
+            if (report.structural.length === 0 && report.advisories.length === 0) {
+                console.log(pc.green(`Registry doctor: ok (${root})`));
+            } else if (report.structural.length === 0) {
+                console.log(pc.green(`Registry doctor: ok with ${report.advisories.length} advisory(ies)`));
+            }
+            process.exit(report.structural.length ? 1 : 0);
         });
 }
