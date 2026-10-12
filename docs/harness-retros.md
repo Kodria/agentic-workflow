@@ -1,5 +1,17 @@
 # Harness Retros
 
+
+## 2026-10-12 — Issue #148: operator environments (facts/env/scaffold/doctor)
+
+- **Class:** logic / security / structural (QA Track A+B on env store + doctor + scaffold).
+- **Occurrences (ledger count):** 31 findings, 18 wins; one convergent cluster (`active-env-unvalidated-meta`, count 9) spanning store naming, RNF-1 empty roots, volatile ttl/expiry, and writeFact active-env mismatch. Exact signature recurrence (`--min 2`) was empty — cluster is same-cycle convergence, not cross-release repeats.
+- **Rule:** none applied to CONSTITUTION/AGENTS (desatendido: no new harness authority). Remedies landed as product code + regression tests in this branch (`Object.hasOwn` catalog membership, volatile fail-closed freshness, reserved env names casefold, catalog-merge durability, `awm env inject`, doctor invalid-vs-missing, scaffold empty-target write).
+- **Sensor:** `awm sensors run` overall pass (lint/typecheck/depcheck). `awm sensors coverage --json` overall `gaps` (security/test sensors missing-tool — pre-existing pack gaps, not introduced by #148).
+- **Recomendaciones (sin aplicar):** (1) optional structural test that `findOrphanNeeds`/`writeFact` reject every `Object.prototype` key; (2) consider installing the js-ts security sensor pack when owners want Semgrep coverage for store parse paths; (3) document that Cursor `url.insteadOf` token rewrite makes `git remote get-url` diverge from configured registry remotes — admit `--require-current` needs a clean origin URL (config value already clean; transport rewrite is the trap).
+- **Descartes (modo desatendido):** all 31 findings — closed in-branch by QA fix loop with focused RED/GREEN (95 closure tests pass); no additional harness rule authorized. Wins reinforced only in this log (Track A/B clean revalidation, closureCommands green).
+- **Journal:** `awm watch journal-status` — no durable journal (proveedor-nativo desatendido, `journal: not-required`); archive uses manual/native QA evidence path.
+- **Estado del retro:** triage + log; ledger archived; `awm-retro-complete` on plan.
+
 ## 2026-09-15 — Issue #126: bootstrap compact-only, QA y cierre de entorno
 
 - **Clase:** robustez, seguridad de lectura, testing y proceso. El ledger activo registra 62 entradas: 13 hallazgos y 49 wins. Los grupos de recurrencia son convergentes dentro de este ciclo, no 47 defectos independientes ni evidencia de repetición entre releases.

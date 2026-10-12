@@ -194,7 +194,7 @@ content or unrelated working-tree changes.
 ## Team registries
 
 A team registry is a Git repository that distributes skills, bundles, sensor
-packs, and related content. A registry needs at least one content directory:
+packs, facts catalogs, and related content. A registry needs at least one content directory:
 `skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
 bundle-oriented example; `catalog.json` is required only when the registry
 publishes bundles:
@@ -206,8 +206,44 @@ publishes bundles:
 └── catalog.json
 ```
 
-Create the repository, add the relevant content (and catalog entries when it
-publishes bundles), commit it, and give teammates its Git remote. Register it
+The canonical create path is `awm registry scaffold` (see
+`docs/plans/2026-10-12-operator-environments-design.md`):
+
+```bash
+awm registry scaffold <dir>
+awm registry doctor <dir>
+```
+
+Scaffold writes a minimal layout that already passes structural doctor:
+`awm-registry.json` (with a valid `minCliVersion`), empty `catalog.json`,
+`skills/`, empty `facts.json`, and `REGISTRY.md` with a Capabilities index
+and a facts chapter. Audit with `awm registry doctor` before publishing.
+
+This delivery does **not** modify `awm-cenco-infra-registry` (RF-5.2 —
+out of scope). Existing or externally authored registries are covered by
+doctor, not by rewriting foreign trees.
+
+### Operator environments (machine-local facts)
+
+Registries may declare a `facts.json` catalog and skill frontmatter `needs`.
+Fact **values** are machine-local under `AWM_HOME/environments/<name>/` (default
+active name: `default`) — never committed inside the registry tree.
+
+```bash
+awm env status
+awm env set <factId> --value <text>    # TTY may omit --value and prompt
+awm env edit                           # prints values.json path
+awm env refresh <factId> --value <text>
+awm env inject                         # default: reference (path + ids)
+awm env use <name>
+```
+
+`awm env inject --mode context` may inline fresh context-eligible values within
+a fixed budget; otherwise it stays on reference. Audit registries with
+`awm registry doctor` (store files inside the tree are a structural failure).
+
+After scaffold (or hand-authoring), add skills and catalog entries when the
+registry publishes bundles, commit, and publish a Git remote. Register it
 locally without silently installing every available bundle:
 
 ```bash

@@ -1,4 +1,7 @@
 # Operator Environments & Registry Lifecycle Implementation Plan
+<!-- awm-qa-complete: 2026-10-12 -->
+<!-- awm-docs-complete: 2026-10-12 -->
+<!-- awm-retro-complete: 2026-10-12 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
@@ -10,7 +13,15 @@
 
 **Tech Stack:** TypeScript CLI (`cli/`), Jest, Commander, existing `registries.ts` / `bundles.ts` / `frontmatter.ts` / `cli-version.ts`.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
+> Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
+> entre tareas, ni de confirmación entre fases (development-process rutea
+> automáticamente y subagent-driven-development no pregunta si continuar con
+> el cierre). harness-retro triagea con criterio propio del agente (solo valor
+> real, recurrente o sistémico — descarta el resto sin preguntar).
+> post-implementation-qa corrige TODOS los hallazgos que surjan, no solo algunos.
+> finishing-a-development-branch crea el PR directamente (opción "push + PR"),
+> sin presentar el menú de 4 opciones.
 
 **Modo de despacho:** proveedor-nativo
 
@@ -187,7 +198,7 @@ Grouping: one schema + audit boundary; no env store writes in this slice. RNF-1 
    - If `facts.json` exists: parse; for each `skills/*/SKILL.md`, resolve needs; orphans → structural.
    - Version coherence: for each `readCatalog` entry with string `version`, compare to `bundle.json` `version` when file exists; mismatch → structural.
    - If facts.json exists OR any needs non-empty: require `minCliVersion` present and `compareSemver(min, FACTS_MIN_CLI_VERSION) >= 0`.
-   - Scan registry tree for path segments `environments` + `values.json` / filenames matching env store → structural (RNF-1).
+   - Scan registry tree for path segments `environments` + `values.json` / filenames matching env store → structural (RF-4.5).
    - Advisory: lines matching `/(^|[^\w])~(\/|\\)/` or `/Users\/[^/\s]+/` in `skills/**/*.md` (cap report length).
    - Return `{ structural: string[]; advisories: string[] }`; CLI exit `structural.length ? 1 : 0`.
 5. Wire commander; commit. GREEN CMD-FACTS-DOCTOR + CMD-TYPECHECK.
@@ -307,18 +318,17 @@ If docs-only drift: amend docs contract tests to assert specific RF-4.2 version 
 | RF-4.2 | S3 template files | `scaffold.test.ts` |
 | RF-4.3 | S3 atomic fail | `scaffold.test.ts` |
 | RF-4.4 | S1 advisory exit | `doctor.test.ts` |
-| RF-4.5 | S1 store-in-tree | `doctor.test.ts` |
+| RF-4.5 | S1 store-in-tree audit | `doctor.test.ts` |
 | RF-4.6 | S1 unknown capability | `doctor.test.ts` |
 | RF-4.7 | S1 version skew | `doctor.test.ts` |
 | RF-4.8 | S1 minCli gate | `doctor.test.ts` |
 | RF-5.1 | S1 path-only doctor | `doctor.test.ts` API surface |
 | RF-5.2 | S3 docs contract | `operator-environments-docs-contract.test.ts` |
 | RNF-1 | S2 write guard | `store.test.ts` refuses registry-tree targets |
-| RF-4.5 | S1 store-in-tree audit | `doctor.test.ts` |
 | RNF-2 | S2 default reference | `resolve.test.ts` |
 
 ## Self-review notes
 - Placeholder scan: none intended.
-- RNF-1 split: detection S1, writes S2 — matrix lists both.
+- RF-4.5 owns audit of store-in-tree; RNF-1 owns CLI write refusal — unique owners.
 - RF-3.3 catalog rejection in S1; runtime no-shell reinforced in S2.
 - No UI screens; no baseline `writing-skills` edits in this plan (accelerator deferred; RF-5.1 satisfied without them).

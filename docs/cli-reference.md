@@ -701,6 +701,22 @@ when the system `zip` binary is available (folder-only fallback otherwise).
 
 Additional registries let a team or individual distribute their own skills, bundles, and packs alongside the baseline. Each registry is a git repo cloned under `~/.awm/registries/<name>/`.
 
+### `awm registry scaffold <dir>`
+
+Create a minimal registry layout at `<dir>`: `awm-registry.json` (valid `minCliVersion`), `catalog.json` with `version: 1` and `bundles: []`, `skills/`, empty `facts.json` (`schemaVersion: 1`), and `REGISTRY.md` with a Capabilities index (`facts | active`) plus a `## Capability: facts` chapter. Refuses a non-empty existing directory; if the command created the directory and a write fails mid-way, the directory is removed (atomic scaffold). On success the tree passes structural `awm registry doctor`.
+
+```
+awm registry scaffold <dir>
+```
+
+### `awm registry doctor [name|path]`
+
+Audit a registry tree (installed name under `~/.awm/registries/` or a local path). Structural failures exit non-zero; advisories alone exit 0.
+
+```
+awm registry doctor [name|path]
+```
+
 ### `awm registry add <remote>`
 
 Clone an additional registry (git URL or local path) and register it in the machine config.
@@ -732,6 +748,75 @@ Pin a registry (`baseline` or an additional registry name) to a version tag, e.g
 ### `awm unpin <registry>`
 
 Remove the version pin (the registry returns to the latest tag on the next `awm update`).
+
+---
+
+## Env (operator facts store)
+
+Machine-local fact values for registry-declared catalogs. Stores live under `AWM_HOME/environments/<name>/` — never inside a registry git tree. One active environment per machine.
+
+### `awm env status`
+
+Show the active environment and each catalog fact status (`fresh` / `missing` / `stale`).
+
+```
+awm env status
+```
+
+### `awm env set <factId>`
+
+Set a fact value in the active environment. Resolution is prompt / editable store / `--value` only — never a registry-declared command. On a TTY, omitting `--value` prompts interactively; non-interactive runs require `--value`.
+
+```
+awm env set <factId> --value <text>
+```
+
+| Flag | Description |
+|---|---|
+| `--value <text>` | Fact value (required when stdin is not a TTY). |
+
+### `awm env edit`
+
+Print the absolute path of the active environment `values.json` for manual editing.
+
+```
+awm env edit
+```
+
+### `awm env refresh [factId]`
+
+Re-set a fact value with the same resolution surface as `set` (prompt / `--value` only). `--all` refreshes every fact id already present in the store via interactive prompts (TTY only).
+
+```
+awm env refresh <factId> --value <text>
+awm env refresh --all
+```
+
+| Flag | Description |
+|---|---|
+| `--value <text>` | New value (required non-interactive when a `factId` is given). |
+| `--all` | Refresh every stored fact via interactive prompts (TTY). |
+
+### `awm env inject`
+
+Print a JSON injection payload for the active environment. Default mode is `reference` (store path + fact ids, no values). `context` includes fresh `inject: context` values only within a fixed character budget; over budget degrades to `reference` with a warning.
+
+```
+awm env inject
+awm env inject --mode reference|context
+```
+
+| Flag | Description |
+|---|---|
+| `--mode <mode>` | `reference` (default) or `context`. |
+
+### `awm env use <name>`
+
+Switch the active environment name.
+
+```
+awm env use <name>
+```
 
 ---
 
