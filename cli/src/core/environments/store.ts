@@ -71,7 +71,8 @@ function assertEnvName(name: string): void {
     if (name.includes('\0')) {
         throw new EnvironmentStoreError(`Invalid environment name ${JSON.stringify(name)}: NUL byte`);
     }
-    if (name === META_FILE || name === VALUES_FILE) {
+    const lower = name.toLowerCase();
+    if (lower === META_FILE.toLowerCase() || lower === VALUES_FILE.toLowerCase()) {
         throw new EnvironmentStoreError(
             `Invalid environment name ${JSON.stringify(name)}: reserved store filename`,
         );
@@ -158,8 +159,13 @@ export function readValues(name: string): EnvironmentValues {
     if (!isRecord(raw)) {
         throw new EnvironmentStoreError(`values.json at ${file} must be a JSON object`);
     }
-    const out: EnvironmentValues = {};
+    const out: EnvironmentValues = Object.create(null) as EnvironmentValues;
     for (const [id, entry] of Object.entries(raw)) {
+        if (id === '__proto__' || id === 'constructor' || id === 'prototype') {
+            throw new EnvironmentStoreError(
+                `values.json at ${file}: forbidden fact id ${JSON.stringify(id)}`,
+            );
+        }
         out[id] = parseStoredEntry(id, entry);
     }
     return out;

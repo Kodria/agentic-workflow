@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
-import { registerEnvCommand, type EnvCommandDeps } from '../../../src/commands/env';
+import { mergeFactDefinitions, registerEnvCommand, type EnvCommandDeps } from '../../../src/commands/env';
 import {
     getActiveEnvironmentName,
     readValues,
@@ -272,5 +272,27 @@ describe('awm env commands (RF-2, RF-3.3)', () => {
         const parsed = JSON.parse(out.trim());
         expect(parsed.mode).toBe('context');
         expect(parsed.values).toEqual({ 'team.color': 'blue' });
+    });
+
+    it('mergeFactDefinitions refuses to weaken volatile → durable (secret revive)', () => {
+        const into: FactsCatalog['facts'] = {
+            'aws.token': {
+                valueType: 'string',
+                resolution: 'prompt',
+                durability: 'volatile',
+                inject: 'context',
+                ttl: 60,
+            },
+        };
+        mergeFactDefinitions(into, {
+            'aws.token': {
+                valueType: 'string',
+                resolution: 'prompt',
+                durability: 'durable',
+                inject: 'context',
+            },
+        });
+        expect(into['aws.token'].durability).toBe('volatile');
+        expect(into['aws.token'].ttl).toBe(60);
     });
 });

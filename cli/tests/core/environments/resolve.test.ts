@@ -368,4 +368,15 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
         expect(result.values).not.toHaveProperty('team.nick');
         expect(JSON.stringify(result)).not.toContain('stale-nick');
     });
+
+    it('buildInjection rejects non-array factIds (string must not spread to chars)', () => {
+        expect(() =>
+            buildInjection({
+                catalog: durableCatalog,
+                store: {},
+                storePath: '/store/values.json',
+                factIds: 'repos.root' as unknown as string[],
+            }),
+        ).toThrow(/factIds/i);
+    });
 });

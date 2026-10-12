@@ -28,13 +28,38 @@ export interface EnvCommandDeps {
     promptValue?: (question: string) => string | Promise<string>;
 }
 
+/**
+ * Merge facts catalogs from installed registry roots.
+ * Later roots may refine a fact, but must not weaken durability: volatile wins
+ * over durable so an expired secret cannot be revived by a durable override.
+ */
+export function mergeFactDefinitions(
+    into: FactsCatalog['facts'],
+    from: FactsCatalog['facts'],
+): void {
+    for (const [id, next] of Object.entries(from)) {
+        const prev = Object.hasOwn(into, id) ? into[id] : undefined;
+        if (!prev) {
+            into[id] = next;
+            continue;
+        }
+        if (prev.durability === 'volatile' && next.durability === 'durable') {
+            const kept = { ...next, durability: 'volatile' as const };
+            if (prev.ttl !== undefined) kept.ttl = prev.ttl;
+            into[id] = kept;
+            continue;
+        }
+        into[id] = next;
+    }
+}
+
 function loadCatalogFromInstalledRoots(): FactsCatalog {
     const merged: FactsCatalog = { schemaVersion: 1, facts: {} };
     for (const root of contentRoots()) {
         const factsPath = path.join(root, 'facts.json');
         if (!fs.existsSync(factsPath)) continue;
         const catalog = parseFactsCatalog(factsPath);
-        Object.assign(merged.facts, catalog.facts);
+        mergeFactDefinitions(merged.facts, catalog.facts);
     }
     return merged;
 }

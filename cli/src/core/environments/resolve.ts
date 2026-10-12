@@ -107,6 +107,11 @@ export function buildInjection(opts: BuildInjectionOptions): InjectionResult {
     }
     const now = opts.now ?? new Date();
     assertValidNow(now);
+    if (opts.factIds !== undefined) {
+        if (!Array.isArray(opts.factIds) || opts.factIds.some((id) => typeof id !== 'string' || id === '')) {
+            throw new Error('buildInjection: factIds must be an array of non-empty strings');
+        }
+    }
     const factIds = opts.factIds ?? Object.keys(opts.catalog.facts);
     const statuses = statusFor(opts.catalog, opts.store, now);
 

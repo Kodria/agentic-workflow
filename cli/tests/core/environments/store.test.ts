@@ -233,7 +233,7 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
         expect(readValues('default')).toEqual({});
     });
 
-    it('assertEnvName rejects NUL, meta.json, values.json', () => {
+    it('assertEnvName rejects NUL, meta.json, values.json (case-insensitive)', () => {
         expect(() =>
             writeFact('meta.json', 'repos.root', {
                 value: '/x',
@@ -241,6 +241,20 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
                 updatedAt: '2026-10-12T00:00:00.000Z',
             }),
         ).toThrow(EnvironmentStoreError);
+        expect(() =>
+            writeFact('META.JSON', 'repos.root', {
+                value: '/x',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            }),
+        ).toThrow(/reserved/i);
+        expect(() =>
+            writeFact('Values.json', 'repos.root', {
+                value: '/x',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            }),
+        ).toThrow(/reserved/i);
         expect(() =>
             writeFact('values.json', 'repos.root', {
                 value: '/x',
@@ -256,6 +270,17 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
             }),
         ).toThrow(EnvironmentStoreError);
         expect(() => setActiveEnvironmentName('   ')).toThrow(EnvironmentStoreError);
+    });
+
+    it('readValues rejects __proto__ fact id (prototype pollution)', () => {
+        const file = valuesPath('default');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        // Raw JSON — object-literal __proto__ would set [[Prototype]], not an own key.
+        fs.writeFileSync(
+            file,
+            '{"__proto__":{"value":"x","status":"fresh","updatedAt":"2026-10-12T00:00:00.000Z"}}\n',
+        );
+        expect(() => readValues('default')).toThrow(/forbidden|__proto__/i);
     });
 
     it('getActiveEnvironmentName asserts active from meta (corrupt → throw)', () => {
