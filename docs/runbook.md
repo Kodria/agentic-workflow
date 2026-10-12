@@ -194,8 +194,8 @@ content or unrelated working-tree changes.
 ## Team registries
 
 A team registry is a Git repository that distributes skills, bundles, sensor
-packs, facts catalogs, and related content. A registry needs at least one content
-directory: `skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
+packs, facts catalogs, and related content. A registry needs at least one content directory:
+`skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
 bundle-oriented example; `catalog.json` is required only when the registry
 publishes bundles:
 
