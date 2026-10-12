@@ -131,7 +131,42 @@ describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
 
         expect(result.ok).toBe(false);
         if (result.ok) return;
-        expect(result.error).toMatch(/injected write failure|failed/i);
+        expect(result.error).toContain('injected write failure');
         expect(fs.existsSync(dir)).toBe(false);
+    });
+
+    it('empty preexisting target: mid-fail leaves it empty so retry succeeds (RF-4.3)', () => {
+        const dir = path.join(tmp, 'empty-preexisting');
+        fs.mkdirSync(dir);
+        expect(fs.readdirSync(dir)).toEqual([]);
+
+        const { scaffoldRegistry } = loadScaffold();
+        let writes = 0;
+        const failed = scaffoldRegistry(dir, {
+            writeFileSync: (file, data) => {
+                writes += 1;
+                if (writes >= 3) {
+                    throw new Error('injected write failure');
+                }
+                fs.writeFileSync(file, data);
+            },
+        });
+
+        expect(failed.ok).toBe(false);
+        if (failed.ok) return;
+        expect(failed.error).toContain('injected write failure');
+
+        // Target must not hold partial scaffold files (stage-then-rename).
+        if (fs.existsSync(dir)) {
+            expect(fs.readdirSync(dir)).toEqual([]);
+        }
+
+        const retry = scaffoldRegistry(dir);
+        expect(retry.ok).toBe(true);
+        if (!retry.ok) return;
+        expect(fs.existsSync(path.join(dir, 'awm-registry.json'))).toBe(true);
+        expect(fs.existsSync(path.join(dir, 'REGISTRY.md'))).toBe(true);
+        const { doctorRegistry } = loadDoctor();
+        expect(doctorRegistry(dir).structural).toEqual([]);
     });
 });

@@ -45,10 +45,38 @@ frontmatter; values live in the machine-local environment store
 `;
 }
 
+function writeScaffoldTree(
+    root: string,
+    name: string,
+    write: NonNullable<ScaffoldOptions['writeFileSync']>,
+): void {
+    writeJson(write, path.join(root, 'awm-registry.json'), {
+        overrides: [],
+        minCliVersion: FACTS_MIN_CLI_VERSION,
+    });
+    writeJson(write, path.join(root, 'catalog.json'), {
+        version: 1,
+        bundles: [],
+    });
+
+    const skillsDir = path.join(root, 'skills');
+    fs.mkdirSync(skillsDir, { recursive: true });
+    // Track skills/ in git — an empty dir is dropped on clone and then
+    // validateRegistryLayout / awm registry add reject the tree (RF-4.1).
+    write(path.join(skillsDir, '.gitkeep'), '');
+
+    writeJson(write, path.join(root, 'facts.json'), {
+        schemaVersion: 1,
+        facts: {},
+    });
+    write(path.join(root, 'REGISTRY.md'), handbookFor(name));
+}
+
 /**
  * Create a minimal registry tree that passes structural `doctorRegistry`.
- * Atomic: non-empty existing dir → error; if this call created the directory
- * and a later write fails, the directory is removed (RF-4.1–4.3).
+ * Atomic (RF-4.3): write into a temp sibling, then rename into place; on
+ * failure remove only the staging dir so an empty preexisting target stays
+ * empty (retryable) and a missing target stays absent.
  */
 export function scaffoldRegistry(dir: string, opts: ScaffoldOptions = {}): ScaffoldResult {
     if (typeof dir !== 'string' || dir.trim() === '') {
@@ -57,62 +85,49 @@ export function scaffoldRegistry(dir: string, opts: ScaffoldOptions = {}): Scaff
 
     const abs = path.resolve(dir);
     const write = opts.writeFileSync ?? ((file, data) => fs.writeFileSync(file, data));
-    let createdByUs = false;
 
-    try {
-        if (fs.existsSync(abs)) {
-            let stat: fs.Stats;
-            try {
-                stat = fs.lstatSync(abs);
-            } catch (e) {
-                return {
-                    ok: false,
-                    error: `Cannot inspect target ${abs}: ${e instanceof Error ? e.message : String(e)}`,
-                };
-            }
-            if (!stat.isDirectory() || stat.isSymbolicLink()) {
-                return { ok: false, error: `Target exists and is not a directory: ${abs}` };
-            }
-            const entries = fs.readdirSync(abs);
-            if (entries.length > 0) {
-                return {
-                    ok: false,
-                    error: `Target directory is not empty — refuse to overwrite: ${abs}`,
-                };
-            }
-        } else {
-            fs.mkdirSync(abs, { recursive: true });
-            createdByUs = true;
+    let targetExistsEmpty = false;
+    if (fs.existsSync(abs)) {
+        let stat: fs.Stats;
+        try {
+            stat = fs.lstatSync(abs);
+        } catch (e) {
+            return {
+                ok: false,
+                error: `Cannot inspect target ${abs}: ${e instanceof Error ? e.message : String(e)}`,
+            };
         }
+        if (!stat.isDirectory() || stat.isSymbolicLink()) {
+            return { ok: false, error: `Target exists and is not a directory: ${abs}` };
+        }
+        if (fs.readdirSync(abs).length > 0) {
+            return {
+                ok: false,
+                error: `Target directory is not empty — refuse to overwrite: ${abs}`,
+            };
+        }
+        targetExistsEmpty = true;
+    }
 
+    const parent = path.dirname(abs);
+    let staging: string | undefined;
+    try {
+        fs.mkdirSync(parent, { recursive: true });
+        staging = fs.mkdtempSync(path.join(parent, '.awm-scaffold-'));
         const name = path.basename(abs) || 'registry';
+        writeScaffoldTree(staging, name, write);
 
-        writeJson(write, path.join(abs, 'awm-registry.json'), {
-            overrides: [],
-            minCliVersion: FACTS_MIN_CLI_VERSION,
-        });
-        writeJson(write, path.join(abs, 'catalog.json'), {
-            version: 1,
-            bundles: [],
-        });
-
-        const skillsDir = path.join(abs, 'skills');
-        fs.mkdirSync(skillsDir, { recursive: true });
-        // Track skills/ in git — an empty dir is dropped on clone and then
-        // validateRegistryLayout / awm registry add reject the tree (RF-4.1).
-        write(path.join(skillsDir, '.gitkeep'), '');
-
-        writeJson(write, path.join(abs, 'facts.json'), {
-            schemaVersion: 1,
-            facts: {},
-        });
-        write(path.join(abs, 'REGISTRY.md'), handbookFor(name));
-
+        if (targetExistsEmpty) {
+            // Drop the empty shell so rename can place staging at abs atomically.
+            fs.rmdirSync(abs);
+        }
+        fs.renameSync(staging, abs);
+        staging = undefined;
         return { ok: true, dir: abs };
     } catch (e) {
-        if (createdByUs) {
+        if (staging) {
             try {
-                fs.rmSync(abs, { recursive: true, force: true });
+                fs.rmSync(staging, { recursive: true, force: true });
             } catch {
                 // best-effort cleanup; surface the original write error
             }
