@@ -13,6 +13,7 @@ import { addRegistry } from './add';
 import { removeRegistry } from './remove';
 import { canDiscoverRegistryContent, overrideStatus } from './status';
 import { doctorExitCode, doctorRegistry } from './doctor';
+import { scaffoldRegistry } from './scaffold';
 import { getPreferences } from '../../utils/config';
 import { findProjectRoot } from '../../core/profile';
 import { AGENT_TARGETS, AgentTarget } from '../../providers';
@@ -180,6 +181,19 @@ export function registerRegistryCommand(program: Command): void {
                 // reconciliation must not abort a successful remove
             }
             outro(`✅ Registry ${pc.cyan(name)} removed.`);
+        });
+
+    reg.command('scaffold <dir>')
+        .description('create a minimal registry layout (handbook + facts) that passes doctor')
+        .action((dir: string) => {
+            intro(pc.bgCyan(pc.black(' AWM - Scaffold Registry ')));
+            const result = scaffoldRegistry(dir);
+            if (!result.ok) {
+                console.error(pc.red(result.error));
+                process.exit(1);
+                return;
+            }
+            outro(`✅ Registry scaffolded at ${pc.cyan(result.dir)}. Run ${pc.cyan('awm registry doctor ' + result.dir)} to audit.`);
         });
 
     reg.command('doctor [nameOrPath]')

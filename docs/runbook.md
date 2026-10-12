@@ -194,21 +194,28 @@ content or unrelated working-tree changes.
 ## Team registries
 
 A team registry is a Git repository that distributes skills, bundles, sensor
-packs, and related content. A registry needs at least one content directory:
-`skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
-bundle-oriented example; `catalog.json` is required only when the registry
-publishes bundles:
+packs, facts catalogs, and related content. The canonical create path is
+`awm registry scaffold` (see
+`docs/plans/2026-10-12-operator-environments-design.md`):
 
-```text
-<registry>/
-├── skills/<skill-name>/SKILL.md
-├── bundles/<bundle-name>/bundle.json
-└── catalog.json
+```bash
+awm registry scaffold <dir>
+awm registry doctor <dir>
 ```
 
-Create the repository, add the relevant content (and catalog entries when it
-publishes bundles), commit it, and give teammates its Git remote. Register it
-locally without silently installing every available bundle:
+Scaffold writes a minimal layout that already passes structural doctor:
+`awm-registry.json` (with a valid `minCliVersion`), empty `catalog.json`,
+`skills/`, empty `facts.json`, and `REGISTRY.md` with a Capabilities index
+and a facts chapter. Audit with `awm registry doctor` before publishing.
+
+This delivery does **not** modify `awm-cenco-infra-registry` (RF-5.2 —
+out of scope). Existing or externally authored registries are covered by
+doctor, not by rewriting foreign trees.
+
+A registry needs at least one content directory: `skills/`, `bundles/`,
+`workflows/`, or `agents/`. After scaffold (or hand-authoring), add skills
+and catalog entries as needed, commit, and publish a Git remote. Register
+it locally without silently installing every available bundle:
 
 ```bash
 awm registry add <git-url> --no-install

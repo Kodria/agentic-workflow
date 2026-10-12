@@ -701,6 +701,22 @@ when the system `zip` binary is available (folder-only fallback otherwise).
 
 Additional registries let a team or individual distribute their own skills, bundles, and packs alongside the baseline. Each registry is a git repo cloned under `~/.awm/registries/<name>/`.
 
+### `awm registry scaffold <dir>`
+
+Create a minimal registry layout at `<dir>`: `awm-registry.json` (valid `minCliVersion`), `catalog.json` with `version: 1` and `bundles: []`, `skills/`, empty `facts.json` (`schemaVersion: 1`), and `REGISTRY.md` with a Capabilities index (`facts | active`) plus a `## Capability: facts` chapter. Refuses a non-empty existing directory; if the command created the directory and a write fails mid-way, the directory is removed (atomic scaffold). On success the tree passes structural `awm registry doctor`.
+
+```
+awm registry scaffold <dir>
+```
+
+### `awm registry doctor [name|path]`
+
+Audit a registry tree (installed name under `~/.awm/registries/` or a local path). Structural failures exit non-zero; advisories alone exit 0.
+
+```
+awm registry doctor [name|path]
+```
+
 ### `awm registry add <remote>`
 
 Clone an additional registry (git URL or local path) and register it in the machine config.
@@ -732,6 +748,52 @@ Pin a registry (`baseline` or an additional registry name) to a version tag, e.g
 ### `awm unpin <registry>`
 
 Remove the version pin (the registry returns to the latest tag on the next `awm update`).
+
+---
+
+## Env (operator facts store)
+
+Machine-local fact values for registry-declared catalogs. Stores live under `AWM_HOME/environments/<name>/` — never inside a registry git tree. One active environment per machine.
+
+### `awm env status`
+
+Show the active environment and each catalog fact status (`fresh` / `missing` / `stale`).
+
+```
+awm env status
+```
+
+### `awm env set <factId>`
+
+Set a fact value in the active environment. Non-interactive use requires `--value` (prompt / editable store / `--value` only — no registry-declared commands).
+
+```
+awm env set <factId> --value <text>
+```
+
+### `awm env edit`
+
+Print the absolute path of the active environment `values.json` for manual editing.
+
+```
+awm env edit
+```
+
+### `awm env refresh [factId]`
+
+Re-set a fact value (`--value` required non-interactive). Same resolution surface as `set`.
+
+```
+awm env refresh <factId> --value <text>
+```
+
+### `awm env use <name>`
+
+Switch the active environment name.
+
+```
+awm env use <name>
+```
 
 ---
 
