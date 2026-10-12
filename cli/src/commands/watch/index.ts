@@ -157,11 +157,10 @@ export function registerWatchCommand(program: Command): void {
                 process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
             } else {
                 process.stdout.write(`awm watch: ${outcome === 'stopped' ? 'detenido' : 'track congelado'}; ciclo ${final.cycleState ?? final.state} — sin certificacion de cierre\n`);
-                // Hard exit on SIGINT-stop: setting only process.exitCode races with the
-                // signal disposition on Darwin (CI macos-14), where child_process then
-                // reports close/exit code null instead of 130 and flakes the suite.
-                if (outcome === 'stopped') process.exit(130);
-                if (outcome === 'complete' || final.state !== 'present') process.exitCode = 1;
+                // exitCode only — never process.exit here: in-process tests call parseAsync
+                // inside Jest; a hard exit kills the worker (CI exit 130 on every OS).
+                if (outcome === 'stopped') process.exitCode = 130;
+                else if (outcome === 'complete' || final.state !== 'present') process.exitCode = 1;
             }
         });
 
