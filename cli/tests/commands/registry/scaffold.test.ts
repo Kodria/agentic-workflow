@@ -1,8 +1,12 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { FACTS_MIN_CLI_VERSION } from '../../../src/core/facts/types';
 import { compareSemver } from '../../../src/core/versioning';
+
+const GIT = (cwd: string, cmd: string) =>
+    execSync(`git -c user.email=t@t.t -c user.name=t ${cmd}`, { cwd, stdio: 'pipe' });
 
 describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
     let tmp: string;
@@ -29,6 +33,10 @@ describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
         return require('../../../src/commands/registry/doctor');
     }
 
+    function loadValidate(): { validateRegistryLayout: (root: string) => boolean } {
+        return require('../../../src/core/registries');
+    }
+
     it('writes min layout with versions, facts, handbook; doctor structural empty (RF-4.1/4.2)', () => {
         const dir = path.join(tmp, 'new-reg');
         const { scaffoldRegistry } = loadScaffold();
@@ -45,6 +53,7 @@ describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
         expect(catalog).toEqual({ version: 1, bundles: [] });
 
         expect(fs.statSync(path.join(dir, 'skills')).isDirectory()).toBe(true);
+        expect(fs.existsSync(path.join(dir, 'skills', '.gitkeep'))).toBe(true);
 
         const facts = JSON.parse(fs.readFileSync(path.join(dir, 'facts.json'), 'utf-8'));
         expect(facts).toEqual({ schemaVersion: 1, facts: {} });
@@ -63,6 +72,27 @@ describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
 
         const { doctorRegistry } = loadDoctor();
         expect(doctorRegistry(dir).structural).toEqual([]);
+    });
+
+    it('survives git commit+clone: layout valid and doctor structural empty (RF-4.1)', () => {
+        const src = path.join(tmp, 'scaffold-src');
+        const { scaffoldRegistry } = loadScaffold();
+        const scaffolded = scaffoldRegistry(src);
+        expect(scaffolded.ok).toBe(true);
+        if (!scaffolded.ok) return;
+
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm scaffold');
+
+        const clone = path.join(tmp, 'scaffold-clone');
+        execSync(`git clone -q "${src}" "${clone}"`, { stdio: 'pipe' });
+
+        expect(fs.existsSync(path.join(clone, 'skills', '.gitkeep'))).toBe(true);
+        const { validateRegistryLayout } = loadValidate();
+        expect(validateRegistryLayout(clone)).toBe(true);
+        const { doctorRegistry } = loadDoctor();
+        expect(doctorRegistry(clone).structural).toEqual([]);
     });
 
     it('refuses non-empty existing dir without writing (RF-4.3)', () => {

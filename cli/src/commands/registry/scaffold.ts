@@ -96,7 +96,11 @@ export function scaffoldRegistry(dir: string, opts: ScaffoldOptions = {}): Scaff
             bundles: [],
         });
 
-        fs.mkdirSync(path.join(abs, 'skills'), { recursive: true });
+        const skillsDir = path.join(abs, 'skills');
+        fs.mkdirSync(skillsDir, { recursive: true });
+        // Track skills/ in git — an empty dir is dropped on clone and then
+        // validateRegistryLayout / awm registry add reject the tree (RF-4.1).
+        write(path.join(skillsDir, '.gitkeep'), '');
 
         writeJson(write, path.join(abs, 'facts.json'), {
             schemaVersion: 1,

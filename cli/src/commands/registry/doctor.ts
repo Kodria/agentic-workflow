@@ -151,6 +151,9 @@ function collectSkillMdPaths(root: string, structural: string[]): string[] {
             continue;
         }
         if (!dirStat.isDirectory()) {
+            // Scaffold tracks empty skills/ with .gitkeep so git clone keeps the
+            // content dir (RF-4.1). Other loose files remain structural.
+            if (entry.name === '.gitkeep' && dirStat.isFile()) continue;
             structural.push(`Skill path ${relDir} must be a regular directory (fail closed)`);
             continue;
         }
