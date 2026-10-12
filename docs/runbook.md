@@ -194,8 +194,19 @@ content or unrelated working-tree changes.
 ## Team registries
 
 A team registry is a Git repository that distributes skills, bundles, sensor
-packs, facts catalogs, and related content. The canonical create path is
-`awm registry scaffold` (see
+packs, facts catalogs, and related content. A registry needs at least one content
+directory: `skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
+bundle-oriented example; `catalog.json` is required only when the registry
+publishes bundles:
+
+```text
+<registry>/
+├── skills/<skill-name>/SKILL.md
+├── bundles/<bundle-name>/bundle.json
+└── catalog.json
+```
+
+The canonical create path is `awm registry scaffold` (see
 `docs/plans/2026-10-12-operator-environments-design.md`):
 
 ```bash
@@ -231,10 +242,9 @@ awm env use <name>
 a fixed budget; otherwise it stays on reference. Audit registries with
 `awm registry doctor` (store files inside the tree are a structural failure).
 
-A registry needs at least one content directory: `skills/`, `bundles/`,
-`workflows/`, or `agents/`. After scaffold (or hand-authoring), add skills
-and catalog entries as needed, commit, and publish a Git remote. Register
-it locally without silently installing every available bundle:
+After scaffold (or hand-authoring), add skills and catalog entries when the
+registry publishes bundles, commit, and publish a Git remote. Register it
+locally without silently installing every available bundle:
 
 ```bash
 awm registry add <git-url> --no-install

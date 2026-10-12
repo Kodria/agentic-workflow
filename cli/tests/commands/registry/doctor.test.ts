@@ -287,22 +287,29 @@ describe('doctorRegistry (RF-4.4–4.8, RF-5.1)', () => {
         expect(report.structural.some((m) => /regular/i.test(m) && /SKILL\.md|symlink|regular file/i.test(m))).toBe(true);
     });
 
-    it('reports unreadable SKILL.md as structural (fail closed)', () => {
-        const root = path.join(tmp, 'skill-unreadable');
-        scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
-        const skillDir = path.join(root, 'skills', 'locked');
-        fs.mkdirSync(skillDir, { recursive: true });
-        const skillMd = path.join(skillDir, 'SKILL.md');
-        fs.writeFileSync(skillMd, '---\nname: locked\ndescription: d\n---\n');
-        fs.chmodSync(skillMd, 0);
-        try {
-            const { doctorRegistry } = loadDoctor();
-            const report = doctorRegistry(root);
-            expect(report.structural.some((m) => /locked|SKILL\.md|Cannot read|unreadable/i.test(m))).toBe(true);
-        } finally {
-            fs.chmodSync(skillMd, 0o644);
-        }
-    });
+    // chmod(0) is a POSIX permission seam; on win32 NTFS ACLs often still allow
+    // the creating user to read, so the unreadable path is not reproducible there.
+    (process.platform === 'win32' ? it.skip : it)(
+        'reports unreadable SKILL.md as structural (fail closed)',
+        () => {
+            const root = path.join(tmp, 'skill-unreadable');
+            scaffoldBare(root, { withBundle: false, minCliVersion: FACTS_MIN_CLI_VERSION });
+            const skillDir = path.join(root, 'skills', 'locked');
+            fs.mkdirSync(skillDir, { recursive: true });
+            const skillMd = path.join(skillDir, 'SKILL.md');
+            fs.writeFileSync(skillMd, '---\nname: locked\ndescription: d\n---\n');
+            fs.chmodSync(skillMd, 0);
+            try {
+                const { doctorRegistry } = loadDoctor();
+                const report = doctorRegistry(root);
+                expect(
+                    report.structural.some((m) => /locked|SKILL\.md|Cannot read|unreadable/i.test(m)),
+                ).toBe(true);
+            } finally {
+                fs.chmodSync(skillMd, 0o644);
+            }
+        },
+    );
 
     it('does not require facts chapter beyond Capabilities when no facts.json and no needs', () => {
         const root = path.join(tmp, 'legacy');
