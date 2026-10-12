@@ -1,3 +1,8 @@
+## v9.18.0 - 2026-10-12
+
+### Features
+- **registry:** operator environments — facts, env store, scaffold, doctor (#148) (#214)
+
 ## v9.17.0 - 2026-10-09
 
 ### Features
