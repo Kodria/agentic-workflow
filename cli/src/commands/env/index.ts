@@ -105,13 +105,8 @@ export function registerEnvCommand(program: Command, deps: EnvCommandDeps = {}):
         .option('--value <text>', 'fact value (required non-interactive; never runs registry commands)')
         .action((factId: string, opts: { value?: string }) => {
             const value = requireValue(opts.value, 'awm env set');
-            try {
-                setFact(factId, value, { loadCatalog, consultedRoots });
-                process.stdout.write(`Set ${factId} in environment ${getActiveEnvironmentName()}\n`);
-            } catch (e) {
-                if (e instanceof EnvironmentStoreError) throw e;
-                throw e;
-            }
+            setFact(factId, value, { loadCatalog, consultedRoots });
+            process.stdout.write(`Set ${factId} in environment ${getActiveEnvironmentName()}\n`);
         });
 
     env.command('edit')

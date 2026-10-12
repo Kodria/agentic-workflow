@@ -156,25 +156,57 @@ export function readValues(name: string): EnvironmentValues {
 }
 
 /**
- * True when `targetPath` is the same as or nested under any registry content root.
- * Used to refuse writing environment stores into registry git trees (RNF-1).
+ * Resolve a path through any intermediate symlinks (including when the leaf does
+ * not exist yet). Walks up to the nearest existing ancestor, realpaths it, then
+ * re-appends missing segments — same spirit as sensors/ledger realpath containment.
+ */
+function resolvePathForContainment(targetPath: string): string {
+    const absolute = path.resolve(targetPath);
+    const missing: string[] = [];
+    let cursor = absolute;
+    while (!fs.existsSync(cursor)) {
+        const parent = path.dirname(cursor);
+        if (parent === cursor) break;
+        missing.unshift(path.basename(cursor));
+        cursor = parent;
+    }
+    let realBase: string;
+    try {
+        realBase = fs.realpathSync.native(cursor);
+    } catch {
+        realBase = cursor;
+    }
+    return missing.length === 0 ? realBase : path.join(realBase, ...missing);
+}
+
+function isPathInsideRoot(candidate: string, root: string): boolean {
+    if (sameExistingPath(candidate, root)) return true;
+    const rel = path.relative(root, candidate);
+    if (rel === '') return true;
+    if (rel === '..') return false;
+    if (!rel.startsWith(`..${path.sep}`) && !rel.startsWith('..') && !path.isAbsolute(rel)) return true;
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    return candidate === root || candidate.startsWith(prefix);
+}
+
+/**
+ * True when `targetPath` (after resolving symlinks) is the same as or nested under
+ * any registry content root. Catches AWM_HOME/environments → registry symlink (RNF-1).
  */
 export function isInsideRegistryTree(targetPath: string, registryRoots?: string[]): boolean {
     if (typeof targetPath !== 'string' || targetPath.trim() === '') {
         throw new EnvironmentStoreError('target path must be a non-empty string');
     }
-    const resolvedTarget = path.resolve(targetPath);
+    const lexicalTarget = path.resolve(targetPath);
+    const realTarget = resolvePathForContainment(targetPath);
     const roots = registryRoots ?? contentRoots();
     for (const root of roots) {
         if (typeof root !== 'string' || root.trim() === '') continue;
-        const resolvedRoot = path.resolve(root);
-        if (sameExistingPath(resolvedTarget, resolvedRoot)) return true;
-        const rel = path.relative(resolvedRoot, resolvedTarget);
-        if (rel === '') return true;
-        if (!rel.startsWith('..') && !path.isAbsolute(rel)) return true;
-        // Fallback when root does not exist yet: string prefix check on resolved paths.
-        const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
-        if (resolvedTarget === resolvedRoot || resolvedTarget.startsWith(prefix)) return true;
+        const lexicalRoot = path.resolve(root);
+        const realRoot = resolvePathForContainment(root);
+        if (isPathInsideRoot(realTarget, realRoot)) return true;
+        // Also check lexical forms so non-existent trees still refuse obvious nesting.
+        if (isPathInsideRoot(lexicalTarget, lexicalRoot)) return true;
     }
     return false;
 }

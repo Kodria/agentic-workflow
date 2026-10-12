@@ -89,7 +89,10 @@ export function buildInjection(opts: BuildInjectionOptions): InjectionResult {
         throw new Error('buildInjection: store must be an object');
     }
 
-    const inject = opts.inject ?? 'reference';
+    const rawInject = opts.inject ?? 'reference';
+    // Unknown/typo must not fall through into context (fail-open). Prefer reference (RNF-2).
+    const inject: 'reference' | 'context' =
+        rawInject === 'reference' || rawInject === 'context' ? rawInject : 'reference';
     const maxChars = opts.maxChars ?? CONTEXT_INJECT_MAX_CHARS;
     if (typeof maxChars !== 'number' || !Number.isFinite(maxChars) || maxChars < 0) {
         throw new Error('buildInjection: maxChars must be a non-negative finite number');
@@ -104,7 +107,7 @@ export function buildInjection(opts: BuildInjectionOptions): InjectionResult {
         factIds: [...factIds],
     });
 
-    if (inject === 'reference') {
+    if (inject !== 'context') {
         return referenceResult();
     }
 

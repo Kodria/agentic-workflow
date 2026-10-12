@@ -225,6 +225,25 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
         expect(JSON.stringify(result)).not.toContain('ace');
     });
 
+    it('unknown/typo inject does not fail open into context; no values inlined (RNF-2)', () => {
+        const store: Record<string, StoredFactValue> = {
+            'team.color': { value: 'blue', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+            'team.nick': { value: 'ace', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+        };
+        // Runtime typo must not fall through into the context branch (fail-open).
+        const result = buildInjection({
+            catalog: contextCatalog,
+            store,
+            storePath: '/store/values.json',
+            inject: 'contezt' as unknown as 'context',
+            maxChars: CONTEXT_INJECT_MAX_CHARS,
+        });
+        expect(result.mode).toBe('reference');
+        expect(result.values).toBeUndefined();
+        expect(JSON.stringify(result)).not.toContain('blue');
+        expect(JSON.stringify(result)).not.toContain('ace');
+    });
+
     it('inject: context under budget includes fresh context values (RF-3.2)', () => {
         const store: Record<string, StoredFactValue> = {
             'team.color': { value: 'blue', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },

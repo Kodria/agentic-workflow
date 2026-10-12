@@ -127,6 +127,37 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
         expect(fs.existsSync(badTarget)).toBe(false);
     });
 
+    it('refuses write when AWM_HOME/environments is a symlink into a registry root (RNF-1)', () => {
+        const registryRoot = path.join(tmp, 'fake-registry');
+        const registryEnvLanding = path.join(registryRoot, 'hijacked-env');
+        fs.mkdirSync(registryEnvLanding, { recursive: true });
+        const awm = process.env.AWM_HOME!;
+        fs.mkdirSync(awm, { recursive: true });
+        // Lexical path is under AWM_HOME; realpath lands inside the registry.
+        fs.symlinkSync(registryEnvLanding, path.join(awm, 'environments'));
+
+        expect(() =>
+            writeFact(
+                'default',
+                'repos.root',
+                { value: '/leaked', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+                { registryRoots: [registryRoot] },
+            ),
+        ).toThrow(EnvironmentStoreError);
+        expect(() =>
+            writeFact(
+                'default',
+                'repos.root',
+                { value: '/leaked', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+                { registryRoots: [registryRoot] },
+            ),
+        ).toThrow(/registry/i);
+
+        // Nothing materialised inside the registry landing dir.
+        expect(fs.readdirSync(registryEnvLanding)).toEqual([]);
+        expect(fs.existsSync(path.join(registryEnvLanding, 'default', 'values.json'))).toBe(false);
+    });
+
     it('writeFact rejects empty path valueType without mutating store', () => {
         const def: FactDefinition = {
             valueType: 'path',
