@@ -866,9 +866,18 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             }
             expect(stdout).toContain('supervisor activo');
             child.kill('SIGINT');
-            const exit = await new Promise<number | null>(resolve => child.once('close', code => resolve(code)));
-            expect(exit).toBe(130);
+            const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
+                child.once('exit', (code, signal) => resolve({ code, signal }));
+            });
+            // Contract: truthful interrupt report. Exit status is secondary —
+            // on Darwin, child_process often reports code null + SIGINT when the
+            // signal disposition races process.exitCode=130 (never use process.exit
+            // in watch/index: it kills in-process Jest callers). Either 130 or
+            // null+SIGINT is an interrupted stop; require the detenido line either way.
             expect(stdout).toMatch(/detenido; ciclo IN_PROGRESS/);
+            expect(
+                exit.code === 130 || (exit.code === null && exit.signal === 'SIGINT'),
+            ).toBe(true);
             expect(stdout).not.toContain('COMPLETE');
             expect(stderr).not.toContain('Error');
         } finally {
