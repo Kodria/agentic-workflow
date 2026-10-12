@@ -765,11 +765,15 @@ awm env status
 
 ### `awm env set <factId>`
 
-Set a fact value in the active environment. Non-interactive use requires `--value` (prompt / editable store / `--value` only — no registry-declared commands).
+Set a fact value in the active environment. Resolution is prompt / editable store / `--value` only — never a registry-declared command. On a TTY, omitting `--value` prompts interactively; non-interactive runs require `--value`.
 
 ```
 awm env set <factId> --value <text>
 ```
+
+| Flag | Description |
+|---|---|
+| `--value <text>` | Fact value (required when stdin is not a TTY). |
 
 ### `awm env edit`
 
@@ -781,11 +785,30 @@ awm env edit
 
 ### `awm env refresh [factId]`
 
-Re-set a fact value (`--value` required non-interactive). Same resolution surface as `set`.
+Re-set a fact value with the same resolution surface as `set` (prompt / `--value` only). `--all` refreshes every fact id already present in the store via interactive prompts (TTY only).
 
 ```
 awm env refresh <factId> --value <text>
+awm env refresh --all
 ```
+
+| Flag | Description |
+|---|---|
+| `--value <text>` | New value (required non-interactive when a `factId` is given). |
+| `--all` | Refresh every stored fact via interactive prompts (TTY). |
+
+### `awm env inject`
+
+Print a JSON injection payload for the active environment. Default mode is `reference` (store path + fact ids, no values). `context` includes fresh `inject: context` values only within a fixed character budget; over budget degrades to `reference` with a warning.
+
+```
+awm env inject
+awm env inject --mode reference|context
+```
+
+| Flag | Description |
+|---|---|
+| `--mode <mode>` | `reference` (default) or `context`. |
 
 ### `awm env use <name>`
 
