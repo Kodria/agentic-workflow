@@ -310,6 +310,14 @@ function checkVersionCoherence(root: string, structural: string[]): void {
 export function doctorRegistry(root: string): DoctorReport {
     const structural: string[] = [];
     const advisories: string[] = [];
+
+    if (typeof root !== 'string' || root.trim() === '') {
+        return {
+            structural: ['Registry root must be a non-empty string'],
+            advisories,
+        };
+    }
+
     const resolvedRoot = path.resolve(root);
 
     if (!fs.existsSync(resolvedRoot) || !fs.statSync(resolvedRoot).isDirectory()) {
@@ -393,8 +401,11 @@ export function doctorRegistry(root: string): DoctorReport {
         if (needs.length === 0) continue;
         anyNeeds = true;
         if (!catalog) {
+            const reason = factsPresent
+                ? 'facts.json is invalid/unreadable'
+                : 'facts.json is missing';
             structural.push(
-                `Skill ${path.relative(resolvedRoot, skillMd)} declares needs but facts.json is missing (fail closed)`,
+                `Skill ${path.relative(resolvedRoot, skillMd)} declares needs but ${reason} (fail closed)`,
             );
             continue;
         }

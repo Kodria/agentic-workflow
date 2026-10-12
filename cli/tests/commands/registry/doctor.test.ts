@@ -215,7 +215,55 @@ describe('doctorRegistry (RF-4.4–4.8, RF-5.1)', () => {
         );
         const { doctorRegistry } = loadDoctor();
         const report = doctorRegistry(root);
-        expect(report.structural.some((m) => /needs/i.test(m) && /facts\.json/i.test(m))).toBe(true);
+        expect(report.structural.some((m) => /needs/i.test(m) && /facts\.json/i.test(m) && /missing/i.test(m))).toBe(
+            true,
+        );
+        expect(report.structural.every((m) => !/invalid|unreadable/i.test(m) || !/needs/i.test(m))).toBe(true);
+    });
+
+    it('reports needs + invalid facts.json as invalid/unreadable, not missing', () => {
+        const root = path.join(tmp, 'needs-bad-catalog');
+        scaffoldBare(root, {
+            withBundle: false,
+            minCliVersion: FACTS_MIN_CLI_VERSION,
+            facts: { schemaVersion: 1, facts: {} },
+        });
+        fs.writeFileSync(path.join(root, 'facts.json'), '{not-json');
+        const skillDir = path.join(root, 'skills', 'demo');
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(skillDir, 'SKILL.md'),
+            `---\nname: demo\ndescription: d\nneeds:\n  - repos.root\n---\n# Demo\n`,
+        );
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        const needsMsg = report.structural.find((m) => /needs/i.test(m) && /facts\.json/i.test(m));
+        expect(needsMsg).toBeDefined();
+        expect(needsMsg!).toMatch(/invalid|unreadable/i);
+        expect(needsMsg!).not.toMatch(/\bmissing\b/i);
+    });
+
+    it('fails structurally when facts present and minCliVersion key absent (RF-4.8)', () => {
+        const root = path.join(tmp, 'facts-no-min');
+        scaffoldBare(root, {
+            withBundle: false,
+            facts: { schemaVersion: 1, facts: {} },
+        });
+        // scaffoldBare omits minCliVersion when not provided
+        const { doctorRegistry } = loadDoctor();
+        const report = doctorRegistry(root);
+        expect(report.structural.some((m) => /minCliVersion/i.test(m))).toBe(true);
+    });
+
+    it('rejects empty / non-string root with structural error before path.resolve', () => {
+        const { doctorRegistry } = loadDoctor();
+        expect(doctorRegistry('').structural.some((m) => /root|required|non-empty|string/i.test(m))).toBe(true);
+        expect(doctorRegistry('   ').structural.some((m) => /root|required|non-empty|string/i.test(m))).toBe(true);
+        expect(
+            doctorRegistry(null as unknown as string).structural.some((m) =>
+                /root|required|non-empty|string/i.test(m),
+            ),
+        ).toBe(true);
     });
 
     it('reports symlink skill dirs and non-regular SKILL.md as structural (fail closed)', () => {

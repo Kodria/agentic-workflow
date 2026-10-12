@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
+import readline from 'readline';
 import { parseFactsCatalog } from '../../core/facts/catalog';
 import type { FactsCatalog } from '../../core/facts/types';
 import { contentRoots } from '../../core/registries';
@@ -12,7 +13,7 @@ import {
     valuesPath,
     writeFact,
 } from '../../core/environments/store';
-import { statusFor } from '../../core/environments/resolve';
+import { buildInjection, statusFor } from '../../core/environments/resolve';
 
 export interface EnvCommandDeps {
     /** Load merged/explicit facts catalog for validation. Tests inject a fixed catalog. */
@@ -21,6 +22,10 @@ export interface EnvCommandDeps {
     consultedRoots?: () => string[];
     /** Clock for status display. */
     now?: () => Date;
+    /** Whether stdin is a TTY (interactive prompts). Defaults to `process.stdin.isTTY`. */
+    stdinIsTTY?: () => boolean;
+    /** Prompt for a missing --value. Defaults to readline question on stdin. */
+    promptValue?: (question: string) => string | Promise<string>;
 }
 
 function loadCatalogFromInstalledRoots(): FactsCatalog {
@@ -45,6 +50,33 @@ function requireValue(value: string | undefined, flagHint: string): string {
         );
     }
     return value;
+}
+
+async function defaultPromptValue(question: string): Promise<string> {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+        return await new Promise<string>((resolve) => {
+            rl.question(question, (answer) => resolve(answer));
+        });
+    } finally {
+        rl.close();
+    }
+}
+
+async function resolveValue(
+    optsValue: string | undefined,
+    flagHint: string,
+    factId: string,
+    deps: {
+        stdinIsTTY: () => boolean;
+        promptValue: (question: string) => string | Promise<string>;
+    },
+): Promise<string> {
+    if (optsValue !== undefined) return optsValue;
+    if (!deps.stdinIsTTY()) {
+        return requireValue(undefined, flagHint);
+    }
+    return Promise.resolve(deps.promptValue(`Value for ${factId}: `));
 }
 
 function setFact(
@@ -73,6 +105,8 @@ export function registerEnvCommand(program: Command, deps: EnvCommandDeps = {}):
     const loadCatalog = deps.loadCatalog ?? loadCatalogFromInstalledRoots;
     const consultedRoots = deps.consultedRoots ?? defaultConsultedRoots;
     const now = deps.now ?? (() => new Date());
+    const stdinIsTTY = deps.stdinIsTTY ?? (() => Boolean(process.stdin.isTTY));
+    const promptValue = deps.promptValue ?? defaultPromptValue;
 
     const env = program.command('env').description('manage machine-local operator environments (facts store)');
 
@@ -103,8 +137,11 @@ export function registerEnvCommand(program: Command, deps: EnvCommandDeps = {}):
     env.command('set <factId>')
         .description('set a fact value in the active environment (--value for non-interactive)')
         .option('--value <text>', 'fact value (required non-interactive; never runs registry commands)')
-        .action((factId: string, opts: { value?: string }) => {
-            const value = requireValue(opts.value, 'awm env set');
+        .action(async (factId: string, opts: { value?: string }) => {
+            const value = await resolveValue(opts.value, 'awm env set', factId, {
+                stdinIsTTY,
+                promptValue,
+            });
             setFact(factId, value, { loadCatalog, consultedRoots });
             process.stdout.write(`Set ${factId} in environment ${getActiveEnvironmentName()}\n`);
         });
@@ -120,17 +157,33 @@ export function registerEnvCommand(program: Command, deps: EnvCommandDeps = {}):
     env.command('refresh [factId]')
         .description('re-set a fact value (prompt / --value only; no registry commands)')
         .option('--value <text>', 'new value (required non-interactive)')
-        .option('--all', 'refresh every fact present in the store (each needs --value? not supported; pass factId)')
-        .action((factId: string | undefined, opts: { value?: string; all?: boolean }) => {
+        .option('--all', 'refresh every fact present in the store (interactive prompts, or pass factId)')
+        .action(async (factId: string | undefined, opts: { value?: string; all?: boolean }) => {
             if (opts.all && !factId) {
-                throw new EnvironmentStoreError(
-                    'awm env refresh --all requires interactive prompts in v1; pass <factId> with --value in tests/non-interactive',
-                );
+                if (!stdinIsTTY()) {
+                    throw new EnvironmentStoreError(
+                        'awm env refresh --all requires a TTY (or pass <factId> with --value in non-interactive mode)',
+                    );
+                }
+                const name = getActiveEnvironmentName();
+                const ids = Object.keys(readValues(name));
+                if (ids.length === 0) {
+                    throw new EnvironmentStoreError('awm env refresh --all: active store has no facts');
+                }
+                for (const id of ids) {
+                    const value = await Promise.resolve(promptValue(`Value for ${id}: `));
+                    setFact(id, value, { loadCatalog, consultedRoots });
+                    process.stdout.write(`Refreshed ${id} in environment ${getActiveEnvironmentName()}\n`);
+                }
+                return;
             }
             if (!factId) {
                 throw new EnvironmentStoreError('awm env refresh requires <factId> (or interactive --all)');
             }
-            const value = requireValue(opts.value, 'awm env refresh');
+            const value = await resolveValue(opts.value, 'awm env refresh', factId, {
+                stdinIsTTY,
+                promptValue,
+            });
             setFact(factId, value, { loadCatalog, consultedRoots });
             process.stdout.write(`Refreshed ${factId} in environment ${getActiveEnvironmentName()}\n`);
         });
@@ -140,5 +193,25 @@ export function registerEnvCommand(program: Command, deps: EnvCommandDeps = {}):
         .action((name: string) => {
             setActiveEnvironmentName(name);
             process.stdout.write(`Active environment: ${name}\n`);
+        });
+
+    env.command('inject')
+        .description('print JSON injection payload for the active environment (default mode: reference)')
+        .option('--mode <mode>', 'injection mode: reference|context', 'reference')
+        .action((opts: { mode?: string }) => {
+            const rawMode = opts.mode ?? 'reference';
+            const mode: 'reference' | 'context' =
+                rawMode === 'reference' || rawMode === 'context' ? rawMode : 'reference';
+            const name = getActiveEnvironmentName();
+            const catalog = loadCatalog();
+            const store = readValues(name);
+            const result = buildInjection({
+                catalog,
+                store,
+                storePath: valuesPath(name),
+                inject: mode,
+                now: now(),
+            });
+            process.stdout.write(JSON.stringify(result, null, 2) + '\n');
         });
 }

@@ -115,12 +115,32 @@ export function scaffoldRegistry(dir: string, opts: ScaffoldOptions = {}): Scaff
         fs.mkdirSync(parent, { recursive: true });
         staging = fs.mkdtempSync(path.join(parent, '.awm-scaffold-'));
         const name = path.basename(abs) || 'registry';
+        // Always stage first so mid-fail never leaves a partial target (RF-4.3).
         writeScaffoldTree(staging, name, write);
 
         if (targetExistsEmpty) {
-            // Drop the empty shell so rename can place staging at abs atomically.
-            fs.rmdirSync(abs);
+            // Never rmdir the empty shell before contents land. Write into abs
+            // directly from the validated staging pattern, then drop staging.
+            try {
+                writeScaffoldTree(abs, name, write);
+            } catch (writeErr) {
+                // Best-effort: remove what we wrote into the preexisting empty
+                // dir without deleting the empty shell itself.
+                try {
+                    for (const entry of fs.readdirSync(abs)) {
+                        fs.rmSync(path.join(abs, entry), { recursive: true, force: true });
+                    }
+                } catch {
+                    // best-effort
+                }
+                throw writeErr;
+            }
+            fs.rmSync(staging, { recursive: true, force: true });
+            staging = undefined;
+            return { ok: true, dir: abs };
         }
+
+        // Target does not exist: atomic rename of staging into place.
         fs.renameSync(staging, abs);
         staging = undefined;
         return { ok: true, dir: abs };

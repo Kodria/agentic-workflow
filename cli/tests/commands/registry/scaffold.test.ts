@@ -95,6 +95,41 @@ describe('scaffoldRegistry (RF-4.1, RF-4.2, RF-4.3)', () => {
         expect(doctorRegistry(clone).structural).toEqual([]);
     });
 
+    it('addRegistry accepts local path clone of scaffolded registry (RF-4.1)', async () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-scaffold-add-home-'));
+        const prevHome = process.env.HOME;
+        const prevAwm = process.env.AWM_HOME;
+        process.env.HOME = home;
+        process.env.AWM_HOME = path.join(home, '.awm');
+        jest.resetModules();
+        try {
+            const src = path.join(tmp, 'scaffold-for-add');
+            const { scaffoldRegistry } = require('../../../src/commands/registry/scaffold');
+            const scaffolded = scaffoldRegistry(src);
+            expect(scaffolded.ok).toBe(true);
+            if (!scaffolded.ok) return;
+
+            GIT(src, 'init -q');
+            GIT(src, 'add -A');
+            GIT(src, 'commit -qm scaffold');
+
+            const { addRegistry } = require('../../../src/commands/registry/add');
+            const { validateRegistryLayout, registryContentRoot } = require('../../../src/core/registries');
+            const result = await addRegistry(src, 'scaffold-local');
+            expect(result.ok).toBe(true);
+            if (!result.ok) return;
+            expect(validateRegistryLayout(registryContentRoot('scaffold-local'))).toBe(true);
+            const { doctorRegistry } = require('../../../src/commands/registry/doctor');
+            expect(doctorRegistry(registryContentRoot('scaffold-local')).structural).toEqual([]);
+        } finally {
+            fs.rmSync(home, { recursive: true, force: true });
+            if (prevHome === undefined) delete process.env.HOME;
+            else process.env.HOME = prevHome;
+            if (prevAwm === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = prevAwm;
+        }
+    });
+
     it('refuses non-empty existing dir without writing (RF-4.3)', () => {
         const dir = path.join(tmp, 'occupied');
         fs.mkdirSync(dir);
