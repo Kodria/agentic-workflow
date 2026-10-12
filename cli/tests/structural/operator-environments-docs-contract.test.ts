@@ -40,12 +40,17 @@ describe('operator-environments docs contract (RF-5.2)', () => {
 
         expect(section).toContain('awm registry doctor');
 
-        // RF-5.2: Cenco infra registry is out of scope — assert in this section window
-        // so a loose mention elsewhere cannot satisfy the contract vacuously.
-        expect(section).toMatch(/awm-cenco-infra-registry/);
-        expect(section).toMatch(/out of scope|out-of-scope|does not modify|SHALL NOT modify/i);
+        // RF-5.2: Cenco infra registry is out of scope — require the out-of-scope
+        // phrase near the cenco mention (same paragraph/window), not a loose
+        // match elsewhere in the section.
         expect(section).toMatch(/RF-5\.2/);
         expect(section).toContain(designPath);
+        const cencoIdx = section.search(/awm-cenco-infra-registry/);
+        expect(cencoIdx).toBeGreaterThanOrEqual(0);
+        const windowStart = Math.max(0, cencoIdx - 120);
+        const windowEnd = Math.min(section.length, cencoIdx + 160);
+        const nearCenco = section.slice(windowStart, windowEnd);
+        expect(nearCenco).toMatch(/out of scope|out-of-scope|does not modify|SHALL NOT modify/i);
     });
 
     it('cli-reference documents registry scaffold, registry doctor, and awm env', () => {
