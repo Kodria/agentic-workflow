@@ -201,9 +201,9 @@ export function writeEnvValue(
     if (!isRecord(values)) {
         throw new EnvironmentStoreError('values must be an object');
     }
+    // RNF-1: refuse registry-tree targets. Callers that need environmentsRoot placement
+    // (writeFact) pass valuesPath(name); this helper does not re-check environmentsRoot.
     assertNotInsideRegistryTree(targetPath, opts.registryRoots);
-    // Also refuse if the path is somehow outside environmentsRoot (defense in depth for
-    // callers that pass arbitrary paths). writeFact always uses valuesPath under env root.
     writeFileAtomic(targetPath, JSON.stringify(values, null, 2) + '\n');
 }
 

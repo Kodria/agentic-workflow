@@ -99,12 +99,14 @@ describe('awm env commands (RF-2, RF-3.3)', () => {
 
     it('status reports missing for unset facts and fresh after set (RF-2.5)', () => {
         let { out } = run(['status']);
-        expect(out).toMatch(/repos\.root/);
-        expect(out).toMatch(/missing/i);
+        expect(out).toMatch(/repos\.root:\s*missing/);
+        expect(out).toMatch(/aws\.profile:\s*missing/);
         run(['set', 'repos.root', '--value', '/r']);
         ({ out } = run(['status']));
-        expect(out).toMatch(/fresh/i);
-        expect(out).not.toMatch(/\/invented-default/);
+        expect(out).toMatch(/repos\.root:\s*fresh/);
+        // Unset sibling stays missing — no silent default invent for other ids.
+        expect(out).toMatch(/aws\.profile:\s*missing/);
+        expect(out).not.toMatch(/aws\.profile:\s*fresh/);
     });
 
     it('edit prints absolute store path', () => {

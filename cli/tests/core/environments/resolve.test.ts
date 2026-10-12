@@ -41,6 +41,19 @@ const volatileCatalog: FactsCatalog = parseFactsCatalog({
     },
 });
 
+/** Volatile + inject:context — required so the fresh-status gate in buildInjection is reachable. */
+const volatileContextCatalog: FactsCatalog = parseFactsCatalog({
+    schemaVersion: 1,
+    facts: {
+        'aws.token': {
+            valueType: 'string',
+            durability: 'volatile',
+            ttl: 1,
+            inject: 'context',
+        },
+    },
+});
+
 const contextCatalog: FactsCatalog = parseFactsCatalog({
     schemaVersion: 1,
     facts: {
@@ -106,28 +119,57 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
         expect(injection.values).toBeUndefined();
     });
 
-    it('volatile with ttl elapsed → stale; resolve does not serve value as fresh (RF-2.4/2.5)', () => {
+    it('volatile+ttl elapsed + inject:context does not serve secret as fresh (RF-2.4/2.5)', () => {
+        const secret = 'secret-should-not-serve-as-fresh';
         const store: Record<string, StoredFactValue> = {
             'aws.token': {
-                value: 'secret-should-not-serve-as-fresh',
+                value: secret,
                 status: 'fresh',
                 updatedAt: '2026-10-12T00:00:00.000Z',
                 expiresAt: '2026-10-12T00:00:01.000Z',
             },
         };
         const now = new Date('2026-10-12T00:00:02.000Z');
-        expect(statusFor(volatileCatalog, store, now)['aws.token']).toBe('stale');
+        expect(statusFor(volatileContextCatalog, store, now)['aws.token']).toBe('stale');
+        // Catalog inject:context + request inject:context so omitting the stale/fresh
+        // gate would put `secret` into values and flip mode to context (mutation-proof).
         const injection = buildInjection({
-            catalog: volatileCatalog,
+            catalog: volatileContextCatalog,
             store,
             storePath: '/store/values.json',
             inject: 'context',
             now,
             maxChars: 10_000,
         });
-        // stale must not appear as a fresh context value
-        expect(injection.values).toBeUndefined();
         expect(injection.mode).toBe('reference');
+        expect(injection.values).toBeUndefined();
+        expect(injection.values?.['aws.token']).toBeUndefined();
+        expect(JSON.stringify(injection)).not.toContain(secret);
+    });
+
+    it('stored status stale + inject:context does not inline the value (RF-2.4/2.5)', () => {
+        const secret = 'stale-context-secret-value';
+        const store: Record<string, StoredFactValue> = {
+            'aws.token': {
+                value: secret,
+                status: 'stale',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+                expiresAt: '2026-10-12T00:00:01.000Z',
+            },
+        };
+        const now = new Date('2026-10-12T00:00:00.500Z'); // before expiresAt; stored status still stale
+        expect(statusFor(volatileContextCatalog, store, now)['aws.token']).toBe('stale');
+        const injection = buildInjection({
+            catalog: volatileContextCatalog,
+            store,
+            storePath: '/store/values.json',
+            inject: 'context',
+            now,
+            maxChars: 10_000,
+        });
+        expect(injection.mode).toBe('reference');
+        expect(injection.values).toBeUndefined();
+        expect(JSON.stringify(injection)).not.toContain(secret);
     });
 
     it('missing fact → status missing, no default (RF-2.5)', () => {
@@ -143,7 +185,7 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
         expect(injection.factIds).toContain('repos.root');
     });
 
-    it('buildInjection({ inject: reference }) returns store path + ids, no values (RF-3.1, RNF-2)', () => {
+    it('buildInjection({ inject: reference }) returns store path + ids, no values (RF-3.1)', () => {
         const store: Record<string, StoredFactValue> = {
             'team.color': { value: 'blue', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
             'team.nick': { value: 'ace', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
@@ -159,6 +201,25 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
             storePath: '/abs/environments/default/values.json',
         });
         expect(result.factIds).toEqual(expect.arrayContaining(['team.color', 'team.nick', 'repos.root']));
+        expect(result.values).toBeUndefined();
+        expect(JSON.stringify(result)).not.toContain('blue');
+        expect(JSON.stringify(result)).not.toContain('ace');
+    });
+
+    it('buildInjection omits inject option → default reference; no values even when context-fresh exist (RNF-2)', () => {
+        const store: Record<string, StoredFactValue> = {
+            'team.color': { value: 'blue', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+            'team.nick': { value: 'ace', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+        };
+        // No `inject` field: default must be reference. Mutating default to `context` would
+        // include blue/ace and fail these assertions.
+        const result = buildInjection({
+            catalog: contextCatalog,
+            store,
+            storePath: '/abs/environments/default/values.json',
+            maxChars: CONTEXT_INJECT_MAX_CHARS,
+        });
+        expect(result.mode).toBe('reference');
         expect(result.values).toBeUndefined();
         expect(JSON.stringify(result)).not.toContain('blue');
         expect(JSON.stringify(result)).not.toContain('ace');
