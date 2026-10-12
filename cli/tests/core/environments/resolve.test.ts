@@ -302,4 +302,70 @@ describe('environment resolve / inject (RF-2.3–2.5, RF-3.1–3.2, RNF-2)', () 
         const now = new Date('2026-10-12T00:00:02.000Z');
         expect(statusFor(volatileCatalog, store, now)['aws.token']).toBe('stale');
     });
+
+    it('volatile: now >= expiresAt is stale; missing/garbage expiresAt is stale; null now throws', () => {
+        const expired: Record<string, StoredFactValue> = {
+            'aws.token': {
+                value: 'tok',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+                expiresAt: '2026-10-12T00:00:01.000Z',
+            },
+        };
+        // Exact boundary: now === expiresAt → stale (>=, not >).
+        expect(
+            statusFor(volatileCatalog, expired, new Date('2026-10-12T00:00:01.000Z'))['aws.token'],
+        ).toBe('stale');
+        // One ms before boundary stays fresh.
+        expect(
+            statusFor(volatileCatalog, expired, new Date('2026-10-12T00:00:00.999Z'))['aws.token'],
+        ).toBe('fresh');
+
+        const missingExpires: Record<string, StoredFactValue> = {
+            'aws.token': {
+                value: 'tok',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            },
+        };
+        expect(statusFor(volatileCatalog, missingExpires, new Date())['aws.token']).toBe('stale');
+
+        const garbageExpires: Record<string, StoredFactValue> = {
+            'aws.token': {
+                value: 'tok',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+                expiresAt: 'not-a-date',
+            },
+        };
+        expect(statusFor(volatileCatalog, garbageExpires, new Date())['aws.token']).toBe('stale');
+
+        expect(() => statusFor(volatileCatalog, expired, null as unknown as Date)).toThrow(/now|Date/i);
+        expect(() =>
+            buildInjection({
+                catalog: volatileCatalog,
+                store: expired,
+                storePath: '/store/values.json',
+                now: new Date(Number.NaN),
+            }),
+        ).toThrow(/now|Date/i);
+    });
+
+    it('inject: context mixed fresh+stale inlines only fresh (RF-3.2)', () => {
+        const store: Record<string, StoredFactValue> = {
+            'team.color': { value: 'blue', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+            'team.nick': { value: 'stale-nick', status: 'stale', updatedAt: '2026-10-12T00:00:00.000Z' },
+        };
+        const result = buildInjection({
+            catalog: contextCatalog,
+            store,
+            storePath: '/store/values.json',
+            inject: 'context',
+            maxChars: CONTEXT_INJECT_MAX_CHARS,
+        });
+        expect(result.mode).toBe('context');
+        expect(result.values).toEqual({ 'team.color': 'blue' });
+        expect(result.values).not.toHaveProperty('team.nick');
+        expect(JSON.stringify(result)).not.toContain('stale-nick');
+    });
 });

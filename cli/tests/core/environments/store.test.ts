@@ -12,6 +12,7 @@ import {
     writeFact,
 } from '../../../src/core/environments/store';
 import type { FactDefinition } from '../../../src/core/facts/types';
+import { writeRegistriesConfig, registryContentRoot } from '../../../src/core/registries';
 
 function isolateHome(): string {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-env-store-'));
@@ -63,25 +64,25 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
         expect(entries).toEqual(['environments']);
     });
 
-    it('maintains exactly one active environment; default name is default (RF-2.2)', () => {
+    it('maintains exactly one active environment; first writeFact activates that name (RF-2.2)', () => {
+        expect(getActiveEnvironmentName()).toBe('default');
+        // First materialization activates the env being written — not a hardcoded default.
+        writeFact('staging', 'repos.root', {
+            value: '/a',
+            status: 'fresh',
+            updatedAt: '2026-10-12T00:00:00.000Z',
+        });
+        expect(getActiveEnvironmentName()).toBe('staging');
+        setActiveEnvironmentName('default');
         expect(getActiveEnvironmentName()).toBe('default');
         writeFact('default', 'repos.root', {
-            value: '/a',
+            value: '/b',
             status: 'fresh',
             updatedAt: '2026-10-12T00:00:00.000Z',
         });
         expect(getActiveEnvironmentName()).toBe('default');
         setActiveEnvironmentName('staging');
         expect(getActiveEnvironmentName()).toBe('staging');
-        writeFact('staging', 'repos.root', {
-            value: '/b',
-            status: 'fresh',
-            updatedAt: '2026-10-12T00:00:00.000Z',
-        });
-        expect(getActiveEnvironmentName()).toBe('staging');
-        // Switching does not create a second "active" — only one name is active
-        setActiveEnvironmentName('default');
-        expect(getActiveEnvironmentName()).toBe('default');
     });
 
     it('readValues returns empty object when store file is missing', () => {
@@ -205,5 +206,128 @@ describe('environment store (RF-2.1, RF-2.2, RNF-1)', () => {
             ),
         ).toThrow(/reg-a/);
         expect(readValues('default')).toEqual({});
+    });
+
+    it('writeFact with catalog rejects prototype key id toString', () => {
+        expect(() =>
+            writeFact(
+                'default',
+                'toString',
+                { value: 'x', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+                {
+                    catalog: {
+                        schemaVersion: 1,
+                        facts: {
+                            'repos.root': {
+                                valueType: 'path',
+                                resolution: 'prompt',
+                                durability: 'durable',
+                                inject: 'reference',
+                            },
+                        },
+                    },
+                    consultedRoots: ['/tmp/reg'],
+                },
+            ),
+        ).toThrow(/toString|Unknown fact/i);
+        expect(readValues('default')).toEqual({});
+    });
+
+    it('assertEnvName rejects NUL, meta.json, values.json', () => {
+        expect(() =>
+            writeFact('meta.json', 'repos.root', {
+                value: '/x',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            }),
+        ).toThrow(EnvironmentStoreError);
+        expect(() =>
+            writeFact('values.json', 'repos.root', {
+                value: '/x',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            }),
+        ).toThrow(EnvironmentStoreError);
+        expect(() =>
+            writeFact('bad\0name', 'repos.root', {
+                value: '/x',
+                status: 'fresh',
+                updatedAt: '2026-10-12T00:00:00.000Z',
+            }),
+        ).toThrow(EnvironmentStoreError);
+        expect(() => setActiveEnvironmentName('   ')).toThrow(EnvironmentStoreError);
+    });
+
+    it('getActiveEnvironmentName asserts active from meta (corrupt → throw)', () => {
+        const meta = path.join(process.env.AWM_HOME!, 'environments', 'meta.json');
+        fs.mkdirSync(path.dirname(meta), { recursive: true });
+        fs.writeFileSync(meta, JSON.stringify({ active: 'meta.json' }) + '\n');
+        expect(() => getActiveEnvironmentName()).toThrow(EnvironmentStoreError);
+    });
+
+    it('registryRoots:[] still unions contentRoots() — cannot bypass RNF-1', () => {
+        const regName = 'guard-reg';
+        writeRegistriesConfig([{ name: regName, remote: 'https://example.test/guard.git' }]);
+        const regRoot = registryContentRoot(regName);
+        fs.mkdirSync(path.join(regRoot, 'skills'), { recursive: true });
+        const badTarget = path.join(regRoot, 'environments', 'default', 'values.json');
+        // Explicit empty array must NOT disable checks — contentRoots() still applies.
+        expect(() =>
+            writeEnvValue(
+                badTarget,
+                {
+                    'repos.root': {
+                        value: '/leaked',
+                        status: 'fresh',
+                        updatedAt: '2026-10-12T00:00:00.000Z',
+                    },
+                },
+                { registryRoots: [] },
+            ),
+        ).toThrow(/registry/i);
+        expect(fs.existsSync(badTarget)).toBe(false);
+    });
+
+    it('writeEnvValue validates each stored entry before write', () => {
+        const target = path.join(process.env.AWM_HOME!, 'environments', 'default', 'values.json');
+        expect(() =>
+            writeEnvValue(target, {
+                'repos.root': { value: 1, status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' } as never,
+            }),
+        ).toThrow(EnvironmentStoreError);
+        expect(fs.existsSync(target)).toBe(false);
+    });
+
+    it('withExpiresAt requires finite ttl for volatile and catches RangeError', () => {
+        const noTtl: FactDefinition = {
+            valueType: 'string',
+            resolution: 'prompt',
+            durability: 'volatile',
+            inject: 'reference',
+        };
+        expect(() =>
+            writeFact(
+                'default',
+                'aws.token',
+                { value: 'tok', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+                { definition: noTtl },
+            ),
+        ).toThrow(/ttl/i);
+
+        const huge: FactDefinition = {
+            valueType: 'string',
+            resolution: 'prompt',
+            durability: 'volatile',
+            inject: 'reference',
+            ttl: Number.MAX_SAFE_INTEGER,
+        };
+        expect(() =>
+            writeFact(
+                'default',
+                'aws.token',
+                { value: 'tok', status: 'fresh', updatedAt: '2026-10-12T00:00:00.000Z' },
+                { definition: huge },
+            ),
+        ).toThrow(EnvironmentStoreError);
     });
 });

@@ -68,6 +68,14 @@ function assertEnvName(name: string): void {
     if (typeof name !== 'string' || name.trim() === '') {
         throw new EnvironmentStoreError('environment name must be a non-empty string');
     }
+    if (name.includes('\0')) {
+        throw new EnvironmentStoreError(`Invalid environment name ${JSON.stringify(name)}: NUL byte`);
+    }
+    if (name === META_FILE || name === VALUES_FILE) {
+        throw new EnvironmentStoreError(
+            `Invalid environment name ${JSON.stringify(name)}: reserved store filename`,
+        );
+    }
     if (name.includes('/') || name.includes('\\') || name.includes('..') || name === '.' || name === '..') {
         throw new EnvironmentStoreError(`Invalid environment name ${JSON.stringify(name)}`);
     }
@@ -99,7 +107,9 @@ function writeMeta(meta: EnvironmentsMeta): void {
 /** Exactly one active environment per machine; default name `default` (RF-2.2). */
 export function getActiveEnvironmentName(): string {
     const meta = readMeta();
-    return meta?.active ?? DEFAULT_ENV_NAME;
+    if (!meta) return DEFAULT_ENV_NAME;
+    assertEnvName(meta.active);
+    return meta.active;
 }
 
 export function setActiveEnvironmentName(name: string): void {
@@ -192,6 +202,10 @@ function isPathInsideRoot(candidate: string, root: string): boolean {
 /**
  * True when `targetPath` (after resolving symlinks) is the same as or nested under
  * any registry content root. Catches AWM_HOME/environments → registry symlink (RNF-1).
+ *
+ * Always unions `contentRoots()` with any explicit `registryRoots`. An empty
+ * explicit array no longer disables checks — callers that need extra roots pass
+ * them; they cannot opt out of installed content roots.
  */
 export function isInsideRegistryTree(targetPath: string, registryRoots?: string[]): boolean {
     if (typeof targetPath !== 'string' || targetPath.trim() === '') {
@@ -199,7 +213,7 @@ export function isInsideRegistryTree(targetPath: string, registryRoots?: string[
     }
     const lexicalTarget = path.resolve(targetPath);
     const realTarget = resolvePathForContainment(targetPath);
-    const roots = registryRoots ?? contentRoots();
+    const roots = [...contentRoots(), ...(registryRoots ?? [])];
     for (const root of roots) {
         if (typeof root !== 'string' || root.trim() === '') continue;
         const lexicalRoot = path.resolve(root);
@@ -232,6 +246,9 @@ export function writeEnvValue(
     }
     if (!isRecord(values)) {
         throw new EnvironmentStoreError('values must be an object');
+    }
+    for (const [id, entry] of Object.entries(values)) {
+        parseStoredEntry(id, entry);
     }
     // RNF-1: refuse registry-tree targets. Callers that need environmentsRoot placement
     // (writeFact) pass valuesPath(name); this helper does not re-check environmentsRoot.
@@ -266,12 +283,25 @@ function withExpiresAt(
             updatedAt: entry.updatedAt,
         };
     }
-    const ttlSeconds = definition.ttl ?? 0;
+    if (typeof definition.ttl !== 'number' || !Number.isFinite(definition.ttl) || definition.ttl <= 0) {
+        throw new EnvironmentStoreError('volatile fact definition requires a finite ttl > 0');
+    }
+    const ttlSeconds = definition.ttl;
     const updatedMs = Date.parse(entry.updatedAt);
     if (!Number.isFinite(updatedMs)) {
         throw new EnvironmentStoreError(`updatedAt must be a valid ISO timestamp, got ${JSON.stringify(entry.updatedAt)}`);
     }
-    const expiresAt = new Date(updatedMs + ttlSeconds * 1000).toISOString();
+    let expiresAt: string;
+    try {
+        expiresAt = new Date(updatedMs + ttlSeconds * 1000).toISOString();
+    } catch (e) {
+        if (e instanceof RangeError) {
+            throw new EnvironmentStoreError(
+                `volatile expiresAt out of range for updatedAt=${JSON.stringify(entry.updatedAt)} ttl=${ttlSeconds}`,
+            );
+        }
+        throw e;
+    }
     return { ...entry, expiresAt };
 }
 
@@ -301,8 +331,8 @@ export function writeFact(
 
     let definition = opts.definition;
     if (opts.catalog) {
-        const fromCatalog = opts.catalog.facts[id];
-        if (!fromCatalog) {
+        // Own keys only — prototype members (toString, …) are not catalog facts.
+        if (!Object.hasOwn(opts.catalog.facts, id)) {
             const roots = opts.consultedRoots?.length
                 ? opts.consultedRoots.join(', ')
                 : '(no catalog roots)';
@@ -310,7 +340,7 @@ export function writeFact(
                 `Unknown fact id ${JSON.stringify(id)}; consulted: ${roots}`,
             );
         }
-        definition = definition ?? fromCatalog;
+        definition = definition ?? opts.catalog.facts[id];
     }
     if (definition) {
         validateValue(definition, entry.value);
@@ -332,8 +362,8 @@ export function writeFact(
     const next: EnvironmentValues = { ...current, [id]: nextEntry };
     writeEnvValue(file, next, { registryRoots: opts.registryRoots });
 
-    // First write materializes the single active env name (default `default`) (RF-2.2).
+    // First write materializes the single active env as the env being written (RF-2.2).
     if (!readMeta()) {
-        writeMeta({ active: DEFAULT_ENV_NAME });
+        writeMeta({ active: name });
     }
 }

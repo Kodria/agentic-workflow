@@ -159,4 +159,48 @@ describe('parseFactsCatalog (RF-1.1)', () => {
         });
         expect(ok.facts['env.tier'].values).toEqual(['dev', 'prod']);
     });
+
+    it('rejects volatile without finite ttl in (0, MAX] (RF-2.4 catalog)', () => {
+        expect(() =>
+            parseFactsCatalog({
+                schemaVersion: 1,
+                facts: { 'aws.token': { valueType: 'string', durability: 'volatile' } },
+            }),
+        ).toThrow(FactsCatalogError);
+        expect(() =>
+            parseFactsCatalog({
+                schemaVersion: 1,
+                facts: { 'aws.token': { valueType: 'string', durability: 'volatile', ttl: 0 } },
+            }),
+        ).toThrow(FactsCatalogError);
+        expect(() =>
+            parseFactsCatalog({
+                schemaVersion: 1,
+                facts: {
+                    'aws.token': {
+                        valueType: 'string',
+                        durability: 'volatile',
+                        ttl: 365 * 24 * 3600 + 1,
+                    },
+                },
+            }),
+        ).toThrow(FactsCatalogError);
+        const ok = parseFactsCatalog({
+            schemaVersion: 1,
+            facts: { 'aws.token': { valueType: 'string', durability: 'volatile', ttl: 60 } },
+        });
+        expect(ok.facts['aws.token'].ttl).toBe(60);
+    });
+
+    it('rejects invalid JSON file with named FactsCatalogError (RF-1.1)', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-facts-bad-'));
+        try {
+            const file = path.join(dir, 'facts.json');
+            fs.writeFileSync(file, '{not-json');
+            expect(() => parseFactsCatalog(file)).toThrow(FactsCatalogError);
+            expect(() => parseFactsCatalog(file)).toThrow(/Invalid JSON/i);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
 });

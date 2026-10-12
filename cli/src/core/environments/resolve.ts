@@ -28,6 +28,12 @@ export interface InjectionResult {
     warning?: string;
 }
 
+function assertValidNow(now: Date): void {
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+        throw new Error('now must be a Date with a finite getTime()');
+    }
+}
+
 function effectiveStatus(
     definitionDurability: 'durable' | 'volatile',
     stored: StoredFactValue | undefined,
@@ -40,12 +46,13 @@ function effectiveStatus(
     if (definitionDurability === 'durable') {
         return stored.status === 'fresh' ? 'fresh' : stored.status;
     }
-    // Volatile: stale if now > expiresAt (RF-2.4).
-    if (stored.expiresAt) {
-        const expiresMs = Date.parse(stored.expiresAt);
-        if (Number.isFinite(expiresMs) && now.getTime() > expiresMs) {
-            return 'stale';
-        }
+    // Volatile: fail closed — missing/invalid expiresAt or now >= expiresAt → stale (RF-2.4).
+    if (typeof stored.expiresAt !== 'string' || stored.expiresAt.trim() === '') {
+        return 'stale';
+    }
+    const expiresMs = Date.parse(stored.expiresAt);
+    if (!Number.isFinite(expiresMs) || now.getTime() >= expiresMs) {
+        return 'stale';
     }
     return stored.status === 'fresh' ? 'fresh' : stored.status;
 }
@@ -64,6 +71,7 @@ export function statusFor(
     if (!store || typeof store !== 'object') {
         throw new Error('statusFor: store must be an object');
     }
+    assertValidNow(now);
     const out: Record<string, FactRuntimeStatus> = {};
     for (const [id, def] of Object.entries(catalog.facts)) {
         out[id] = effectiveStatus(def.durability, store[id], now);
@@ -98,6 +106,7 @@ export function buildInjection(opts: BuildInjectionOptions): InjectionResult {
         throw new Error('buildInjection: maxChars must be a non-negative finite number');
     }
     const now = opts.now ?? new Date();
+    assertValidNow(now);
     const factIds = opts.factIds ?? Object.keys(opts.catalog.facts);
     const statuses = statusFor(opts.catalog, opts.store, now);
 

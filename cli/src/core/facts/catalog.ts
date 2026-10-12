@@ -15,6 +15,8 @@ const VALUE_TYPES: readonly FactValueType[] = ['string', 'path', 'enum'];
 const RESOLUTIONS: readonly FactResolution[] = ['prompt'];
 const DURABILITIES: readonly FactDurability[] = ['durable', 'volatile'];
 const INJECTS: readonly FactInject[] = ['reference', 'context'];
+/** Max volatile ttl (seconds) so updatedMs + ttl*1000 stays in a safe Date range. */
+export const MAX_VOLATILE_TTL_SECONDS = 365 * 24 * 3600;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,6 +80,18 @@ function parseFactEntry(id: string, raw: unknown): FactDefinition {
             throw new FactsCatalogError(`facts.${id}.ttl must be a non-negative number`);
         }
         def.ttl = raw.ttl;
+    }
+    if (def.durability === 'volatile') {
+        if (
+            typeof def.ttl !== 'number' ||
+            !Number.isFinite(def.ttl) ||
+            def.ttl <= 0 ||
+            def.ttl > MAX_VOLATILE_TTL_SECONDS
+        ) {
+            throw new FactsCatalogError(
+                `facts.${id}: durability volatile requires finite ttl in (0, ${MAX_VOLATILE_TTL_SECONDS}] seconds`,
+            );
+        }
     }
     return def;
 }

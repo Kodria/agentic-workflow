@@ -77,4 +77,17 @@ needs: repos.root
         expect(findOrphanNeeds(['repos.root'], catalog)).toEqual([]);
         expect(findOrphanNeeds([], catalog)).toEqual([]);
     });
+
+    it('treats Object.prototype keys as orphans (not catalog facts)', () => {
+        const catalog = parseFactsCatalog({
+            schemaVersion: 1,
+            facts: { 'repos.root': { valueType: 'path' } },
+        });
+        // `in` would match prototype; Object.hasOwn must not.
+        expect(findOrphanNeeds(['toString'], catalog)).toEqual(['toString']);
+        expect(findOrphanNeeds(['__proto__', 'constructor'], catalog)).toEqual([
+            '__proto__',
+            'constructor',
+        ]);
+    });
 });

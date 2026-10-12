@@ -47,5 +47,6 @@ export function readSkillNeeds(skillMdPath: string): string[] {
 
 /** Ids in `needs` that are absent from the catalog (fail-closed; never invent). */
 export function findOrphanNeeds(needs: string[], catalog: FactsCatalog): string[] {
-    return needs.filter((id) => !(id in catalog.facts));
+    // Own keys only — `in` would treat Object.prototype (toString, …) as catalog facts.
+    return needs.filter((id) => !Object.hasOwn(catalog.facts, id));
 }
