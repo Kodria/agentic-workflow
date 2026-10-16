@@ -104,4 +104,28 @@ describe('checkCurrentness under a global insteadOf rewrite (real git)', () => {
             status: 'unverifiable', detail: expect.stringMatching(/origin does not match configured remote/i),
         }));
     });
+
+    it('does not let a global remote.origin.url stand in for a checkout without its own origin', async () => {
+        const checkout = cloneTaggedRegistry();
+        git(checkout, ['remote', 'remove', 'origin']);
+        fs.appendFileSync(process.env.GIT_CONFIG_GLOBAL as string, `[remote "origin"]\n\turl = ${CONFIGURED}\n`);
+        expect(git(checkout, ['config', '--get', 'remote.origin.url']).trim()).toBe(CONFIGURED);
+
+        const report = await check(checkout);
+
+        expect(report.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable', detail: 'Could not read local registry origin.',
+        }));
+    });
+
+    it('reports an empty stored origin as an unreadable origin', async () => {
+        const checkout = cloneTaggedRegistry();
+        git(checkout, ['config', 'remote.origin.url', '']);
+
+        const report = await check(checkout);
+
+        expect(report.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable', detail: 'Could not read local registry origin.',
+        }));
+    });
 });

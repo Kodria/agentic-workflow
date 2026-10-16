@@ -432,11 +432,28 @@ describe('checkCurrentness', () => {
         }));
 
         expect(result.components[1]).toEqual(expect.objectContaining({ status: 'current', latest: 'v1.2.3' }));
-        expect(git).toHaveBeenCalledWith('/registry', ['config', '--get', 'remote.origin.url'], expect.any(Object));
+        expect(git).toHaveBeenCalledWith('/registry', ['config', '--local', '--get', 'remote.origin.url'], expect.any(Object));
         expect(git).not.toHaveBeenCalledWith('/registry', ['remote', 'get-url', 'origin'], expect.any(Object));
         expect(git).toHaveBeenCalledWith('/registry', ['ls-remote', '--tags', configured], expect.any(Object));
         expect(JSON.stringify(result)).not.toContain('x-access-token');
         expect(JSON.stringify(result)).not.toContain('SECRET');
+    });
+
+    it.each([['an empty', ''], ['a whitespace-only', '  \n']])('reports %s origin config value as an unreadable origin', async (_label, output) => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'config') return output;
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/v1.2.3\n`;
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: 'Could not read local registry origin.',
+        }));
     });
 
     it('reports a missing origin config value as an unreadable origin', async () => {
