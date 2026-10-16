@@ -390,14 +390,6 @@ In that case admission reports the preserved verdict `sensors: "not-certified"` 
 with `sensorEvidence: "r8-registry-opt-out"`, never a `pass`, and every other gate still
 applies. The release proof of such a registry lives in its CI (`validate` and `auto-tag`).
 
-The sensor run behind `--verify-sensors` is read-only: a tree snapshot taken before and
-after the run must match. Git-ignored generated directories that hold no tracked file (by
-default `node_modules`, `.next`, `dist`, `coverage`, and similar) are skipped and listed
-in the run's `readOnlyObservation`; see
-[Read-only admission observation](configuration.md#read-only-admission-observation-awmadmissionjson).
-When admission blocks on a `not-certified` sensor verdict, `ADMISSION_SENSORS_BLOCKED`
-carries the sensor run's reason and remedy.
-
 The exception does not apply to:
 
 - an opt-out outside a registry;
@@ -405,6 +397,14 @@ The exception does not apply to:
 - `native-gate`, a missing or invalid manifest, or a failing sensor.
 
 The `awm watch` supervisor still requires a real `pass` before relaunching a controller.
+
+The sensor run behind `--verify-sensors` is read-only: a tree snapshot taken before and
+after the run must match. Git-ignored generated directories that hold no tracked file (by
+default `node_modules`, `.next`, `dist`, `coverage`, and similar) are skipped and, when
+the run reaches the snapshot, listed in its `readOnlyObservation`; see
+[Read-only admission observation](configuration.md#read-only-admission-observation-awmadmissionjson).
+When admission blocks on a `not-certified` sensor verdict, `ADMISSION_SENSORS_BLOCKED`
+carries the sensor run's reason and remedy.
 
 To opt in (when the D-023 suspension is lifted), initialize the matching valid
 unattended plan first with `awm watch --init --plan PLAN_PATH`. Initialization

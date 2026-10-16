@@ -276,9 +276,11 @@ or replace that list with an optional, committed `.awm/admission.json`:
 - An invalid file blocks read-only runs with reason `admission-config-invalid` and a
   remedy naming the field. Ordinary `awm sensors run` never reads the file.
 
-Every read-only run reports what it skipped in `readOnlyObservation`: `defaults`,
-`excluded`, and `rejected` entries with reason `not-ignored`, `contains-tracked`, or
-`git-unavailable`.
+A read-only run that gets as far as the snapshot reports what it skipped in
+`readOnlyObservation`: `defaults`, `excluded`, and `rejected` entries with reason
+`not-ignored`, `contains-tracked`, or `git-unavailable`. Runs that stop earlier (an
+invalid `.awm/admission.json`, a `native-gate` or `opt-out` declaration, an unresolvable
+sensor source) do not include the field.
 
 **Accepted risk:** a sensor that changes content inside a skipped directory is not
 detected. Changes to tracked files, `.gitignore`, and `.awm/` still are. CLIs older than
