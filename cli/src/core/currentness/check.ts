@@ -154,7 +154,9 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
     if (!authorizedSource) return fail('Configured registry remote is not an authoritative HTTPS or SSH source.', 'Configure an authoritative registry remote and rerun strict preflight.');
 
     const [originResult, headResult, tagResult, remoteResult] = await Promise.allSettled([
-        deadline(git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+        // The literal stored value: `git remote get-url` applies url.*.insteadOf, and
+        // cloud environments (AWM's own D-7 recipe) rewrite to a token-bearing URL.
+        deadline(git(registry.contentRoot, ['config', '--get', 'remote.origin.url'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
         deadline(git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
         deadline(git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
         deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
