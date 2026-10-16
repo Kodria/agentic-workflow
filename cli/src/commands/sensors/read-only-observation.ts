@@ -112,6 +112,8 @@ export function createExclusionPolicy(config: AdmissionConfig, verifier: Candida
     const verdicts = new Map<string, CandidateVerdict>();
     return {
         isExcluded(relativePath, name) {
+            // .git and .awm are never excluded, at any depth below them (B-R5).
+            if (RESERVED_ROOTS.has(relativePath.split('/')[0].toLowerCase())) return false;
             if (!names.has(name) && !paths.has(relativePath)) return false;
             let verdict = verdicts.get(relativePath);
             if (verdict === undefined) {
@@ -146,13 +148,17 @@ export function gitVerifier(projectRoot: string, env: NodeJS.ProcessEnv = proces
         stdio: ['ignore', 'pipe', 'ignore'],
     });
     return relativePath => {
+        // Git reads magic prefixes (":(top)", ":/") even after "--"; a leading "./"
+        // makes the candidate an ordinary relative pathspec, so a directory that is
+        // literally named like magic is never mistaken for a different path.
+        const pathspec = `./${relativePath}`;
         // Tracked first: git already reports a directory holding a force-added file
         // as not ignored, which would hide the more precise reason.
-        const tracked = git(['ls-files', '-z', '--', relativePath]);
+        const tracked = git(['ls-files', '-z', '--', pathspec]);
         if ((tracked.error as NodeJS.ErrnoException | undefined)?.code === 'ENOBUFS') return 'contains-tracked';
         if (tracked.error || tracked.status !== 0) return 'git-unavailable';
         if (tracked.stdout !== '') return 'contains-tracked';
-        const ignored = git(['check-ignore', '-q', '--', relativePath]);
+        const ignored = git(['check-ignore', '-q', '--', pathspec]);
         if (ignored.error) return 'git-unavailable';
         if (ignored.status === 0) return 'excluded';
         return ignored.status === 1 ? 'not-ignored' : 'git-unavailable';
@@ -220,7 +226,7 @@ export function filesystemSnapshot(root: string, policy?: ExclusionPolicy, limit
 
 export function snapshotUnavailableRemedy(failure: SnapshotFailure): string {
     if (failure === 'unreadable') return 'run admission from a readable git worktree';
-    const limit = failure === 'limit-bytes' ? '1 GiB of observed file content' : `${READ_ONLY_MAX_ENTRIES} observed entries`;
+    const limit = failure === 'limit-bytes' ? `${READ_ONLY_MAX_BYTES / 1024 ** 3} GiB of observed file content` : `${READ_ONLY_MAX_ENTRIES} observed entries`;
     return `the project tree exceeds the read-only observation limit of ${limit}; git-ignore heavy generated directories `
         + `(ignored ${DEFAULT_EXCLUSION_NAMES.join(', ')} are skipped by default) or declare them in ${ADMISSION_CONFIG_LABEL} readOnlyObservation.exclude`;
 }

@@ -154,6 +154,20 @@ describe('read-only observation', () => {
             });
         });
 
+        it('never excludes anything under .git or .awm, whatever the verifier says', () => {
+            const verifier = jest.fn((): CandidateVerdict => 'excluded');
+            const policy = createExclusionPolicy(
+                config([{ kind: 'name', name: 'dist' }, { kind: 'name', name: 'build' }, { kind: 'name', name: 'node_modules' }]),
+                verifier,
+            );
+            expect(policy.isExcluded('.awm/dist', 'dist')).toBe(false);
+            expect(policy.isExcluded('.AWM/build', 'build')).toBe(false);
+            expect(policy.isExcluded('.git/x/node_modules', 'node_modules')).toBe(false);
+            expect(verifier).not.toHaveBeenCalled();
+            expect(policy.evidence()).toEqual({ defaults: false, excluded: [], rejected: [] });
+            expect(policy.isExcluded('packages/a/dist', 'dist')).toBe(true);
+        });
+
         it('fails loudly without a validated config or verifier', () => {
             expect(() => createExclusionPolicy(undefined as never, () => 'excluded')).toThrow(/validated admission config/);
             expect(() => createExclusionPolicy(config([]), undefined as never)).toThrow(/candidate verifier/);
@@ -241,6 +255,37 @@ describe('read-only observation', () => {
             expect(verify('dist')).toBe('contains-tracked');
             expect(verify('vendor')).toBe('contains-tracked');
             expect(verify('scratch')).toBe('not-ignored');
+        });
+
+        // Directory names containing ":" cannot exist on Windows.
+        const posixOnly = process.platform === 'win32' ? it.skip : it;
+
+        posixOnly.each([[':(top)x'], [':/x']])('treats the directory %s literally, never as pathspec magic', name => {
+            git(['init', '-q', '-b', 'main']);
+            write('.gitignore', 'x/\n');
+            write('x/ignored.txt');
+            write(`${name}/f.txt`);
+            git(['add', '-f', '--', `./${name}/f.txt`]);
+            git(['add', '.gitignore']);
+            git(['commit', '-qm', 'initial']);
+
+            expect(gitVerifier(project, { ...process.env })(name)).toBe('contains-tracked');
+        });
+
+        it('treats glob characters in a directory name literally', () => {
+            git(['init', '-q', '-b', 'main']);
+            write('.gitignore', 'a\\[b\\]/\nc\\[d\\]/\n');
+            write('a[b]/f.txt');
+            write('c[d]/g.txt');
+            write('src/a.ts');
+            git(['add', '.gitignore', 'src']);
+            git(['add', '-f', '--', './c[d]/g.txt']);
+            git(['commit', '-qm', 'initial']);
+
+            const verify = gitVerifier(project, { ...process.env });
+
+            expect(verify('a[b]')).toBe('excluded');
+            expect(verify('c[d]')).toBe('contains-tracked');
         });
 
         it('reports git-unavailable outside a worktree', () => {
