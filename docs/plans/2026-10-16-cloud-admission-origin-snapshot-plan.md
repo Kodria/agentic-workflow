@@ -199,6 +199,7 @@
 - No large fixtures: limit overflow is provoked with injected limits of a few entries/bytes (V-R2).
 - Commit after each slice's GREEN with a conventional message ending in the session attribution lines; the PR/squash title is `feat(admission): Cloud insteadOf origin + read-only snapshot exclusions (#215)` (design delivery note).
 - Run commands from the repository root exactly as declared (`npm --prefix cli …`).
+- **Amendment A1 (test env propagation, found by S1):** Jest's sandboxed `process.env` is a copy; assignments to it never reach a spawned child. Every test-side git invocation therefore passes `env: { ...process.env }` explicitly, and production code that spawns git for observation takes an optional `env` (`gitVerifier(projectRoot, env = process.env)`), so tests inject the isolated environment. Without it, real-git tests lose the isolated identity/global config (`Author identity unknown`, rewrite not applied).
 
 <a id="slice-s1"></a>
 ### Slice S1: Registry origin read from literal config
@@ -265,7 +266,8 @@ Interface unchanged: `checkCurrentness(cwd, deps)`, `GitTransport(cwd, args, opt
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
 import { pathToFileURL } from 'url';
 
 /**
@@ -310,7 +312,11 @@ describe('checkCurrentness under a global insteadOf rewrite (real git)', () => {
         fs.rmSync(root, { recursive: true, force: true });
     });
 
-    const git = (cwd: string, args: string[]): string => execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' });
+    // Amendment A1: Jest's `process.env` is a sandbox copy, so every git invocation
+    // (setup and the CLI transport) receives the isolated environment explicitly.
+    const git = (cwd: string, args: string[]): string => execFileSync('git', args, { cwd, env: { ...process.env }, stdio: 'pipe', encoding: 'utf8' });
+    const realGit = async (cwd: string, args: string[], options: { timeoutMs: number; maxOutputBytes: number }): Promise<string> =>
+        (await promisify(execFile)('git', args, { cwd, env: { ...process.env }, timeout: options.timeoutMs, maxBuffer: options.maxOutputBytes })).stdout;
 
     function cloneTaggedRegistry(): string {
         const seed = path.join(root, 'seed');
@@ -337,6 +343,7 @@ describe('checkCurrentness under a global insteadOf rewrite (real git)', () => {
             fetch: jest.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({ version: '1.2.3' }) }),
             readPreferences: () => ({ pins: {} }),
             listRegistries: () => [{ name: 'baseline', remote: CONFIGURED, contentRoot: checkout }],
+            git: realGit,
         });
     }
 
@@ -424,7 +431,7 @@ export type SnapshotResult = { ok: true; digest: string } | { ok: false; failure
 export type SnapshotLimits = { maxEntries: number; maxBytes: number };
 export function loadAdmissionConfig(projectRoot: string): AdmissionConfigResult;
 export function createExclusionPolicy(config: AdmissionConfig, verifier: CandidateVerifier): ExclusionPolicy;
-export function gitVerifier(projectRoot: string): CandidateVerifier;
+export function gitVerifier(projectRoot: string, env?: NodeJS.ProcessEnv): CandidateVerifier;
 export function filesystemSnapshot(root: string, policy?: ExclusionPolicy, limits?: SnapshotLimits): SnapshotResult;
 export function snapshotUnavailableRemedy(failure: SnapshotFailure): string;
 export function admissionConfigRemedy(problem: { field: string; message: string }): string;
@@ -507,7 +514,7 @@ describe('read-only observation', () => {
         fs.writeFileSync(file, content);
     };
     const writeConfig = (value: unknown): void => write('.awm/admission.json', typeof value === 'string' ? value : JSON.stringify(value));
-    const git = (args: string[]): string => execFileSync('git', args, { cwd: project, stdio: 'pipe', encoding: 'utf8' });
+    const git = (args: string[]): string => execFileSync('git', args, { cwd: project, env: { ...process.env }, stdio: 'pipe', encoding: 'utf8' });
     const tiny = { maxEntries: 50, maxBytes: 1024 };
     const nodeModulesOnly = (verdict: CandidateVerdict) =>
         createExclusionPolicy({ defaults: false, rules: [{ kind: 'name', name: 'node_modules' }] }, () => verdict);
@@ -692,7 +699,7 @@ describe('read-only observation', () => {
             git(['commit', '-qm', 'initial']);
             write('scratch/tmp.txt');
 
-            const verify = gitVerifier(project);
+            const verify = gitVerifier(project, { ...process.env });
 
             expect(verify('node_modules')).toBe('excluded');
             expect(verify('dist')).toBe('contains-tracked');
@@ -702,7 +709,7 @@ describe('read-only observation', () => {
 
         it('reports git-unavailable outside a worktree', () => {
             write('node_modules/pkg/index.js');
-            expect(gitVerifier(project)('node_modules')).toBe('git-unavailable');
+            expect(gitVerifier(project, { ...process.env })('node_modules')).toBe('git-unavailable');
         });
 
         it('fails loudly on an empty project root', () => {
@@ -853,10 +860,11 @@ export function createExclusionPolicy(config: AdmissionConfig, verifier: Candida
 }
 
 /** Git decides: no tracked file inside (checked first) and ignored. Any doubt observes. */
-export function gitVerifier(projectRoot: string): CandidateVerifier {
+export function gitVerifier(projectRoot: string, env: NodeJS.ProcessEnv = process.env): CandidateVerifier {
     const cwd = requireRoot(projectRoot, 'git verifier projectRoot');
     const git = (args: string[]) => spawnSync('git', args, {
         cwd,
+        env,
         encoding: 'utf8',
         timeout: GIT_TIMEOUT_MS,
         maxBuffer: GIT_MAX_OUTPUT_BYTES,
@@ -1037,7 +1045,7 @@ describe('runSensors read-only observation (admission)', () => {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, content);
     }
-    const git = (args: string[]): string => execFileSync('git', args, { cwd: project, stdio: 'pipe', encoding: 'utf8' });
+    const git = (args: string[]): string => execFileSync('git', args, { cwd: project, env: { ...process.env }, stdio: 'pipe', encoding: 'utf8' });
     function commitProject(gitignore: string): void {
         write('.gitignore', gitignore);
         git(['init', '-q', '-b', 'main']);
@@ -1446,3 +1454,7 @@ If a docs heading used as an insertion point has moved, insert at the nearest eq
 | V-R4 | S4 | `cloud-admission-docs-contract.test.ts` (four tests) |
 
 Backward check: every new test and every code change above maps to at least one requirement; no orphan scope. Coverage gate: every requirement has ≥1 slice and ≥1 test (B-R13's timeout branch is verified by review, stated explicitly).
+
+## Amendments and deviations
+
+- **A1 (2026-10-16, found by S1 implementer, accepted by controller):** the plan's real-git test helpers assumed `process.env` assignments reach spawned git. Under Jest they do not, so the first GREEN run failed (`Author identity unknown`, `insteadOf` rewrite not applied). Corrected: S1's shipped helpers pass `env: { ...process.env }` and inject a `realGit` transport (assertions unchanged; verified meaningful — with the old `remote get-url` code the "current" test fails); S2/S3 test helpers do the same, and `gitVerifier` takes an optional `env` defaulting to `process.env`. No requirement, owner, command or boundary changed; plan identity re-derived and re-admitted before any S1 review. Failure class: plan (test infrastructure).
