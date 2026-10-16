@@ -132,4 +132,43 @@ describe('runSensors read-only observation (admission)', () => {
         expect(out.readOnlyObservation).toEqual({ defaults: true, excluded: [], rejected: [] });
         expect(mockRunCommand).not.toHaveBeenCalled();
     });
+
+    describe('the post-run snapshot', () => {
+        const DIGEST = 'a'.repeat(64);
+        const stubSnapshot = (second: object) => {
+            const calls = jest.fn()
+                .mockReturnValueOnce({ ok: true, digest: DIGEST })
+                .mockReturnValueOnce(second);
+            jest.doMock('../../../src/commands/sensors/read-only-observation', () => {
+                const actual = jest.requireActual('../../../src/commands/sensors/read-only-observation');
+                return { ...actual, filesystemSnapshot: (...args: any[]) => calls(...args) };
+            });
+            return calls;
+        };
+
+        it('never certifies a run whose worktree cannot be observed after the sensors ran', async () => {
+            const snapshot = stubSnapshot({ ok: false, failure: 'unreadable' });
+
+            const out = await load().runSensors({ cwd: project, readOnly: true });
+
+            expect(out).toMatchObject({
+                overall: 'not_certified', reason: 'read-only-mutation-detected',
+                remedy: 'sensor execution changed the worktree; repair it before using this evidence for admission',
+            });
+            expect(out.readOnlyObservation).toEqual({ defaults: true, excluded: expect.any(Array), rejected: expect.any(Array) });
+            expect(snapshot).toHaveBeenCalledTimes(2);
+            expect(mockRunCommand).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps the verdict when the post-run snapshot matches the first one', async () => {
+            const snapshot = stubSnapshot({ ok: true, digest: DIGEST });
+
+            const out = await load().runSensors({ cwd: project, readOnly: true });
+
+            expect(out.reason).not.toBe('read-only-mutation-detected');
+            expect(out.readOnlyObservation).toEqual({ defaults: true, excluded: expect.any(Array), rejected: expect.any(Array) });
+            expect(snapshot).toHaveBeenCalledTimes(2);
+            expect(mockRunCommand).toHaveBeenCalledTimes(1);
+        });
+    });
 });
