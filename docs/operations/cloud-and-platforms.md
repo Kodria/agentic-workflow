@@ -45,7 +45,10 @@ Strict currentness works with this recipe. `awm preflight --require-current` and
 `awm plan admit --require-current` compare the registry checkout's stored
 `remote.origin.url` (the clean URL) with the configured remote, not the token-bearing URL
 that `git remote get-url` reports after the `insteadOf` rewrite. No temporary
-`GIT_CONFIG_GLOBAL` workaround is needed.
+`GIT_CONFIG_GLOBAL` workaround is needed. The origin is read from the checkout's own
+local git config (`remote.origin.url` read with `--local`), so a global or system git
+setting never substitutes for a missing origin, and an empty value is reported as an
+unreadable origin.
 
 ## 3. Windows — use WSL
 

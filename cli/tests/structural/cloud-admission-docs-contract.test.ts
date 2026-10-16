@@ -29,6 +29,9 @@ describe('issue #215 documentation contract (V-R4)', () => {
         '`git-unavailable`',
         '`.git` or `.awm`',
         'never skipped',
+        'including any `.awm` or `.git` nested',
+        'regular file',
+        '65536 bytes',
     ])('documents the observation limit, reason code or reserved-name rule %s', literal => {
         expect(configuration).toContain(literal);
     });
@@ -43,6 +46,7 @@ describe('issue #215 documentation contract (V-R4)', () => {
         const doc = read('docs/operations/cloud-and-platforms.md');
         expect(doc).toContain('`awm preflight --require-current`');
         expect(doc).toContain('`remote.origin.url`');
+        expect(doc).toContain('--local');
     });
 
     it('describes the snapshot exclusions in the plan admit help', () => {

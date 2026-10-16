@@ -273,6 +273,8 @@ or replace that list with an optional, committed `.awm/admission.json`:
   `/`-separated segments is `.git` or `.awm` (case-insensitive, exact segment match, so
   `my.awm` or `.gitignore-dir` are fine). A directory with such a segment at any depth is
   never skipped, even when a name rule matches.
+- The file must be a regular file (a symlink, directory or device is rejected) of at most
+  65536 bytes.
 - An invalid file blocks read-only runs with reason `admission-config-invalid` and a
   remedy naming the field. Ordinary `awm sensors run` never reads the file.
 
@@ -283,8 +285,10 @@ invalid `.awm/admission.json`, a `native-gate` or `opt-out` declaration, an unre
 sensor source) do not include the field.
 
 **Accepted risk:** a sensor that changes content inside a skipped directory is not
-detected. Changes to tracked files, `.gitignore`, and `.awm/` still are. CLIs older than
-this feature ignore `.awm/admission.json` and observe the whole tree.
+detected. Content inside a skipped directory is not observed, including any `.awm` or
+`.git` nested within it; the project-root `.awm/`, tracked files, `.gitignore` and any
+directory that is not skipped are still observed. CLIs older than this feature ignore
+`.awm/admission.json` and observe the whole tree.
 
 ## What machine initialization installs
 
