@@ -23,6 +23,12 @@ const MAX_FIELD_LABEL = 64;
 const MAX_CONFIG_BYTES = 65_536;
 // Control characters (C0, DEL, C1), bidi controls (marks, embeddings, isolates) and line/paragraph separators.
 const UNSAFE_LABEL_CHARS = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/gu;
+// Variables that relocate the repository, index or object store: inherited ones would
+// make git answer for a different repository than `projectRoot` (fail-open).
+const GIT_LOCATION_VARIABLES = new Set([
+    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_PREFIX',
+]);
 const RESERVED_NAMES = new Set(['.git', '.awm']);
 
 export type ExclusionRule = { kind: 'name'; name: string } | { kind: 'path'; path: string };
@@ -154,12 +160,22 @@ export function createExclusionPolicy(config: AdmissionConfig, verifier: Candida
     };
 }
 
+/** A copy of `env` without repository-location variables (case-insensitive: Windows). */
+function scrubGitLocation(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const scrubbed: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(env)) {
+        if (!GIT_LOCATION_VARIABLES.has(key.toUpperCase())) scrubbed[key] = value;
+    }
+    return scrubbed;
+}
+
 /** Git decides: no tracked file inside (checked first) and ignored. Any doubt observes. */
 export function gitVerifier(projectRoot: string, env: NodeJS.ProcessEnv = process.env, spawn: typeof spawnSync = spawnSync): CandidateVerifier {
     const cwd = requireRoot(projectRoot, 'git verifier projectRoot');
+    const childEnv = scrubGitLocation(env);
     const git = (args: string[]) => spawn('git', args, {
         cwd,
-        env,
+        env: childEnv,
         encoding: 'utf8',
         timeout: GIT_TIMEOUT_MS,
         maxBuffer: GIT_MAX_OUTPUT_BYTES,

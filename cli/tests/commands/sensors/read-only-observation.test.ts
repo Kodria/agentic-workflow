@@ -366,6 +366,26 @@ describe('read-only observation', () => {
             expect(verifierWith(lsFiles, checkIgnore).verify('pkg/node_modules')).toBe(expected);
         });
 
+        it('scrubs repository-location variables from the child env without mutating the input', () => {
+            const input: NodeJS.ProcessEnv = {
+                PATH: '/usr/bin', GIT_CONFIG_GLOBAL: '/tmp/gitconfig', GIT_CEILING_DIRECTORIES: '/tmp',
+                GIT_DIR: '/x', GIT_WORK_TREE: '/x', GIT_INDEX_FILE: '/x', git_index_file: '/x', GIT_OBJECT_DIRECTORY: '/x',
+                GIT_ALTERNATE_OBJECT_DIRECTORIES: '/x', GIT_COMMON_DIR: '/x', GIT_NAMESPACE: 'x', GIT_PREFIX: 'x',
+            };
+            const snapshot = { ...input };
+            const seen: Array<NodeJS.ProcessEnv | undefined> = [];
+            const spawn = ((_command: string, args: string[], options: SpawnSyncOptions) => {
+                seen.push(options.env);
+                return (args[0] === 'ls-files' ? { status: 0, stdout: '' } : { status: 1 }) as SpawnSyncReturns<string>;
+            }) as unknown as typeof spawnSync;
+            gitVerifier(project, input, spawn)('pkg');
+            expect(seen).toHaveLength(2);
+            for (const env of seen) {
+                expect(env).toEqual({ PATH: '/usr/bin', GIT_CONFIG_GLOBAL: '/tmp/gitconfig', GIT_CEILING_DIRECTORIES: '/tmp' });
+            }
+            expect(input).toEqual(snapshot);
+        });
+
         it('invokes git without a shell, rooted, bounded and after --', () => {
             const { verify, calls } = verifierWith({ status: 0, stdout: '' }, { status: 0 });
             verify('pkg/node_modules');
@@ -433,6 +453,19 @@ describe('read-only observation', () => {
 
             expect(verify('a[b]')).toBe('excluded');
             expect(verify('c[d]')).toBe('contains-tracked');
+        });
+
+        it('is not redirected to another index by an inherited GIT_INDEX_FILE', () => {
+            git(['init', '-q', '-b', 'main']);
+            write('.gitignore', 'dist\n');
+            write('dist/f');
+            git(['add', '.gitignore']);
+            git(['add', '-f', '--', 'dist/f']);
+            git(['commit', '-qm', 'initial']);
+
+            const verify = gitVerifier(project, { ...process.env, GIT_INDEX_FILE: path.join(root, 'missing-index') });
+
+            expect(verify('dist')).toBe('contains-tracked');
         });
 
         it('reports git-unavailable outside a worktree', () => {
