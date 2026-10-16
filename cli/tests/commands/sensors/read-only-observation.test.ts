@@ -215,16 +215,18 @@ describe('read-only observation', () => {
         it('verifies each candidate once and reports sorted evidence', () => {
             const verdicts: Record<string, CandidateVerdict> = {
                 'b/node_modules': 'excluded', 'a/node_modules': 'not-ignored', dist: 'contains-tracked', node_modules: 'git-unavailable',
+                'c/dist': 'excluded',
             };
             const verifier = jest.fn((relative: string) => verdicts[relative]);
             const policy = createExclusionPolicy({ defaults: true, rules: [{ kind: 'name', name: 'node_modules' }, { kind: 'name', name: 'dist' }] }, verifier);
-            for (const relative of ['b/node_modules', 'a/node_modules', 'dist', 'node_modules', 'b/node_modules']) {
+            // Insertion order is deliberately reverse-alphabetical: evidence() must sort, not echo it.
+            for (const relative of ['node_modules', 'dist', 'c/dist', 'b/node_modules', 'a/node_modules', 'b/node_modules']) {
                 policy.isExcluded(relative, relative.split('/').pop()!);
             }
-            expect(verifier).toHaveBeenCalledTimes(4);
+            expect(verifier).toHaveBeenCalledTimes(5);
             expect(policy.evidence()).toEqual({
                 defaults: true,
-                excluded: ['b/node_modules'],
+                excluded: ['b/node_modules', 'c/dist'],
                 rejected: [
                     { path: 'a/node_modules', reason: 'not-ignored' },
                     { path: 'dist', reason: 'contains-tracked' },
