@@ -252,7 +252,7 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .requiredOption('--cwd <path>', 'repository root for plan containment and source resolution')
         .option('--execution-mode <mode>', 'explicit override: interactivo or desatendido')
         .option('--require-current', 'require authoritative consumed-contract currentness')
-        .option('--verify-sensors', 'require an empirical sensor pass')
+        .option('--verify-sensors', 'require an empirical sensor pass; read-only observation skips git-ignored build output (see .awm/admission.json)')
         .option('--runtime-kind <kind>', 'routing runtime kind for compact v2')
         .option('--runtime-version <version>', 'routing runtime version for compact v2')
         .option('--account-scope-digest <sha>', 'routing account scope digest for compact v2')

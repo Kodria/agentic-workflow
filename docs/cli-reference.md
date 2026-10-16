@@ -390,6 +390,14 @@ In that case admission reports the preserved verdict `sensors: "not-certified"` 
 with `sensorEvidence: "r8-registry-opt-out"`, never a `pass`, and every other gate still
 applies. The release proof of such a registry lives in its CI (`validate` and `auto-tag`).
 
+The sensor run behind `--verify-sensors` is read-only: a tree snapshot taken before and
+after the run must match. Git-ignored generated directories that hold no tracked file (by
+default `node_modules`, `.next`, `dist`, `coverage`, and similar) are skipped and listed
+in the run's `readOnlyObservation`; see
+[Read-only admission observation](configuration.md#read-only-admission-observation-awmadmissionjson).
+When admission blocks on a `not-certified` sensor verdict, `ADMISSION_SENSORS_BLOCKED`
+carries the sensor run's reason and remedy.
+
 The exception does not apply to:
 
 - an opt-out outside a registry;
