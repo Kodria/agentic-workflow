@@ -73,6 +73,18 @@ describe('read-only observation', () => {
             });
         });
 
+        it.each([
+            [{ schemaVersion: 1 }],
+            [{ schemaVersion: 1, readOnlyObservation: {} }],
+        ])('treats the minimal config %j as the defaults', value => {
+            writeConfig(value);
+            expect(loadAdmissionConfig(project)).toEqual({
+                ok: true,
+                config: { defaults: true, rules: DEFAULT_EXCLUSION_NAMES.map(name => ({ kind: 'name', name })) },
+            });
+            expect(DEFAULT_EXCLUSION_NAMES).toHaveLength(8);
+        });
+
         it('keeps the defaults when only exclude is declared', () => {
             writeConfig({ schemaVersion: 1, readOnlyObservation: { exclude: ['out'] } });
             const result = loadAdmissionConfig(project);
@@ -257,6 +269,22 @@ describe('read-only observation', () => {
             write('node_modules/pkg/big.js', 'x'.repeat(2048));
             expect(filesystemSnapshot(project, nodeModulesOnly('excluded'), tiny)).toEqual({ ok: true, digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
             expect(filesystemSnapshot(project, nodeModulesOnly('not-ignored'), tiny)).toEqual({ ok: false, failure: 'limit-bytes' });
+        });
+
+        it('allows exactly the entry limit and rejects one entry more', () => {
+            write('a.txt');
+            write('b.txt');
+            write('c.txt');
+            expect(filesystemSnapshot(project, undefined, { maxEntries: 3, maxBytes: 1024 })).toEqual({ ok: true, digest: expect.any(String) });
+            write('d.txt');
+            expect(filesystemSnapshot(project, undefined, { maxEntries: 3, maxBytes: 1024 })).toEqual({ ok: false, failure: 'limit-entries' });
+        });
+
+        it('allows exactly the byte limit and rejects one byte more', () => {
+            write('f.txt', 'x'.repeat(10));
+            expect(filesystemSnapshot(project, undefined, { maxEntries: 50, maxBytes: 10 })).toEqual({ ok: true, digest: expect.any(String) });
+            write('f.txt', 'x'.repeat(11));
+            expect(filesystemSnapshot(project, undefined, { maxEntries: 50, maxBytes: 10 })).toEqual({ ok: false, failure: 'limit-bytes' });
         });
 
         it('reports the entry limit distinctly', () => {
