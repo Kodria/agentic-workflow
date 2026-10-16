@@ -123,6 +123,48 @@ describe('read-only observation', () => {
             }
         });
 
+        describe('the config file itself', () => {
+            const configPath = (): string => path.join(project, '.awm', 'admission.json');
+            const symlinksSupported = ((): boolean => {
+                const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-symlink-probe-'));
+                try {
+                    fs.writeFileSync(path.join(probe, 'target'), 'x');
+                    fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'));
+                    return true;
+                } catch {
+                    return false;
+                } finally {
+                    fs.rmSync(probe, { recursive: true, force: true });
+                }
+            })();
+            const symlinkOnly = symlinksSupported ? it : it.skip;
+            const jsonPaddedTo = (bytes: number): string => `{"schemaVersion":1}${' '.repeat(bytes - '{"schemaVersion":1}'.length)}`;
+
+            it('fails closed when the file cannot be read for a reason other than being absent', () => {
+                fs.mkdirSync(configPath(), { recursive: true });
+                expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: expect.any(String) });
+            });
+
+            it('fails closed when .awm is not a directory', () => {
+                write('.awm', 'not a directory');
+                expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: expect.any(String) });
+            });
+
+            it('accepts a file of exactly 65536 bytes and rejects one byte more', () => {
+                writeConfig(jsonPaddedTo(65536));
+                expect(loadAdmissionConfig(project).ok).toBe(true);
+                writeConfig(jsonPaddedTo(65537));
+                expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: 'is larger than 65536 bytes' });
+            });
+
+            symlinkOnly('rejects a symlink even when it points at a valid regular file', () => {
+                write('real-admission.json', '{"schemaVersion":1}');
+                fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+                fs.symlinkSync(path.join(project, 'real-admission.json'), configPath());
+                expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: 'must be a regular file, not a link or device' });
+            });
+        });
+
         it('fails loudly on an empty project root', () => {
             expect(() => loadAdmissionConfig('')).toThrow(/non-empty string/);
         });

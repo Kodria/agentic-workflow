@@ -20,6 +20,7 @@ const ADMISSION_CONFIG_LABEL = '.awm/admission.json';
 const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_FIELD_LABEL = 64;
+const MAX_CONFIG_BYTES = 65_536;
 // Control characters (C0, DEL, C1), bidi controls (marks, embeddings, isolates) and line/paragraph separators.
 const UNSAFE_LABEL_CHARS = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/gu;
 const RESERVED_NAMES = new Set(['.git', '.awm']);
@@ -75,11 +76,22 @@ function entryProblem(entry: string): string | null {
 export function loadAdmissionConfig(projectRoot: string): AdmissionConfigResult {
     const root = requireRoot(projectRoot, 'admission config projectRoot');
     const invalid = (field: string, message: string): AdmissionConfigResult => ({ ok: false, field, message });
-    let raw: string;
+    const file = path.join(root, '.awm', 'admission.json');
+    // The file is repo-controlled: inspect it before reading so a link, device or huge
+    // file can never be followed or slurped into memory.
+    let stat: fs.Stats;
     try {
-        raw = fs.readFileSync(path.join(root, '.awm', 'admission.json'), 'utf8');
+        stat = fs.lstatSync(file);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, config: { defaults: true, rules: defaultRules() } };
+        return invalid('(file)', 'could not be read');
+    }
+    if (!stat.isFile()) return invalid('(file)', 'must be a regular file, not a link or device');
+    if (stat.size > MAX_CONFIG_BYTES) return invalid('(file)', `is larger than ${MAX_CONFIG_BYTES} bytes`);
+    let raw: string;
+    try {
+        raw = fs.readFileSync(file, 'utf8');
+    } catch {
         return invalid('(file)', 'could not be read');
     }
     let value: unknown;
