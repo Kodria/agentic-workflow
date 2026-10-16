@@ -57,7 +57,7 @@
     {
       "id": "SRC-RUN",
       "path": "cli/src/commands/sensors/run.ts",
-      "locator": "function filesystemSnapshot",
+      "locator": "export async function runSensors",
       "fact": "READ_ONLY_MAX_ENTRIES/BYTES constants and filesystemSnapshot(root): string | null (skips root .git, hashes every entry with mode and size) live here; runSensors takes the before snapshot after manifest resolution and compares an after snapshot just before returning output."
     },
     {
@@ -1458,3 +1458,4 @@ Backward check: every new test and every code change above maps to at least one 
 ## Amendments and deviations
 
 - **A1 (2026-10-16, found by S1 implementer, accepted by controller):** the plan's real-git test helpers assumed `process.env` assignments reach spawned git. Under Jest they do not, so the first GREEN run failed (`Author identity unknown`, `insteadOf` rewrite not applied). Corrected: S1's shipped helpers pass `env: { ...process.env }` and inject a `realGit` transport (assertions unchanged; verified meaningful — with the old `remote get-url` code the "current" test fails); S2/S3 test helpers do the same, and `gitVerifier` takes an optional `env` defaulting to `process.env`. No requirement, owner, command or boundary changed; plan identity re-derived and re-admitted before any S1 review. Failure class: plan (test infrastructure).
+- **A2 (2026-10-16, found by the controller during post-implementation QA):** the manifest source `SRC-RUN` located `function filesystemSnapshot` in `cli/src/commands/sensors/run.ts`, but slice S3 moves that function into `read-only-observation.ts` exactly as the plan prescribes, so the plan became `invalid` (`PLAN_SOURCE_LOCATOR`) against the very code it describes and `awm plan admit` would have failed at every later lifecycle transition. Corrected by pointing the locator at `export async function runSensors`, which still exists. No requirement, owner, command, slice boundary or behavior changed; the plan identity was re-derived and re-admitted. Failure class: plan (stale source locator).
