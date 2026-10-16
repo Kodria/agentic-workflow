@@ -17,6 +17,7 @@ describe('issue #215 documentation contract (V-R4)', () => {
         expect(configuration).toContain('**Accepted risk:**');
         expect(configuration).toContain('`admission-config-invalid`');
         expect(configuration).toContain('`readOnlyObservation`');
+        expect(configuration).toContain('`awm plan admit` does not print it');
     });
 
     it.each([
@@ -39,7 +40,7 @@ describe('issue #215 documentation contract (V-R4)', () => {
     it('points --verify-sensors in the CLI reference at the observation rules', () => {
         const doc = read('docs/cli-reference.md');
         expect(doc).toContain('configuration.md#read-only-admission-observation-awmadmissionjson');
-        expect(doc).toContain('`readOnlyObservation`');
+        expect(doc).toContain('`ADMISSION_SENSORS_BLOCKED`');
     });
 
     it('states that the D-7 insteadOf recipe passes strict currentness', () => {

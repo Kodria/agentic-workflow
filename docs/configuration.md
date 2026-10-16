@@ -278,11 +278,14 @@ or replace that list with an optional, committed `.awm/admission.json`:
 - An invalid file blocks read-only runs with reason `admission-config-invalid` and a
   remedy naming the field. Ordinary `awm sensors run` never reads the file.
 
-A read-only run that gets as far as the snapshot reports what it skipped in
-`readOnlyObservation`: `defaults`, `excluded`, and `rejected` entries with reason
-`not-ignored`, `contains-tracked`, or `git-unavailable`. Runs that stop earlier (an
-invalid `.awm/admission.json`, a `native-gate` or `opt-out` declaration, an unresolvable
-sensor source) do not include the field.
+Internally, a read-only run that gets as far as the snapshot records what it skipped in
+the sensor-run result under `readOnlyObservation`: `defaults`, `excluded`, and `rejected`
+entries with reason `not-ignored`, `contains-tracked`, or `git-unavailable`. Runs that
+stop earlier (an invalid `.awm/admission.json`, a `native-gate` or `opt-out`
+declaration, an unresolvable sensor source) do not include the field. That result is
+consumed by admission and `awm plan admit` does not print it: what you see is the
+sensor verdict, and when it is `not-certified`, the reason and remedy carried by
+`ADMISSION_SENSORS_BLOCKED`.
 
 **Accepted risk:** a sensor that changes content inside a skipped directory is not
 detected. Content inside a skipped directory is not observed, including any `.awm` or
