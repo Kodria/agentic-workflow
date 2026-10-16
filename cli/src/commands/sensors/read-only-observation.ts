@@ -20,7 +20,7 @@ const ADMISSION_CONFIG_LABEL = '.awm/admission.json';
 const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_FIELD_LABEL = 64;
-const RESERVED_ROOTS = new Set(['.git', '.awm']);
+const RESERVED_NAMES = new Set(['.git', '.awm']);
 
 export type ExclusionRule = { kind: 'name'; name: string } | { kind: 'path'; path: string };
 export type AdmissionConfig = { defaults: boolean; rules: ExclusionRule[] };
@@ -53,6 +53,11 @@ function defaultRules(): ExclusionRule[] {
     return DEFAULT_EXCLUSION_NAMES.map(name => ({ kind: 'name' as const, name }));
 }
 
+/** Exact, case-insensitive match: `my.awm` and `.gitignore-dir` are not reserved. */
+function isReservedSegment(segment: string): boolean {
+    return RESERVED_NAMES.has(segment.toLowerCase());
+}
+
 function entryProblem(entry: string): string | null {
     if (entry === '') return 'must not be empty';
     if (/[\0\r\n\\*?[]/.test(entry)) return 'must not contain a backslash, wildcard, NUL or line break';
@@ -60,7 +65,7 @@ function entryProblem(entry: string): string | null {
     if (entry.endsWith('/')) return 'must not end with "/"';
     const segments = entry.split('/');
     if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return 'must not contain an empty, "." or ".." segment';
-    if (RESERVED_ROOTS.has(segments[0].toLowerCase())) return 'must not exclude .git or .awm';
+    if (segments.some(isReservedSegment)) return 'must not exclude .git or .awm';
     return null;
 }
 
@@ -112,8 +117,8 @@ export function createExclusionPolicy(config: AdmissionConfig, verifier: Candida
     const verdicts = new Map<string, CandidateVerdict>();
     return {
         isExcluded(relativePath, name) {
-            // .git and .awm are never excluded, at any depth below them (B-R5).
-            if (RESERVED_ROOTS.has(relativePath.split('/')[0].toLowerCase())) return false;
+            // .git and .awm are never excluded, at any depth, nor anything inside them (B-R5).
+            if (relativePath.split('/').some(isReservedSegment)) return false;
             if (!names.has(name) && !paths.has(relativePath)) return false;
             let verdict = verdicts.get(relativePath);
             if (verdict === undefined) {

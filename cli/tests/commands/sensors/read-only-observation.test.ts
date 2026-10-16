@@ -95,7 +95,7 @@ describe('read-only observation', () => {
 
         it.each([
             '', '/abs', 'C:/abs', 'a/../b', './a', 'a//b', 'a\\b', '*.log', 'a?', '[a]', 'a\nb', 'a\u0000b', 'dist/',
-            '.git', '.awm', '.awm/cache', '.git/hooks', '.AWM', 42,
+            '.git', '.awm', '.awm/cache', '.git/hooks', '.AWM', 'packages/a/.awm', 'sub/.git', 'a/.AWM/b', 42,
         ])('rejects the exclude entry %j', entry => {
             writeConfig({ schemaVersion: 1, readOnlyObservation: { exclude: [entry] } });
             expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: 'readOnlyObservation.exclude[0]', message: expect.any(String) });
@@ -166,6 +166,29 @@ describe('read-only observation', () => {
             expect(verifier).not.toHaveBeenCalled();
             expect(policy.evidence()).toEqual({ defaults: false, excluded: [], rejected: [] });
             expect(policy.isExcluded('packages/a/dist', 'dist')).toBe(true);
+        });
+
+        it('never excludes a .git or .awm directory at any depth, nor anything inside one', () => {
+            const verifier = jest.fn((): CandidateVerdict => 'excluded');
+            const policy = createExclusionPolicy(
+                config([{ kind: 'name', name: '.awm' }, { kind: 'name', name: '.GIT' }, { kind: 'name', name: 'dist' }, { kind: 'path', path: 'packages/a/.awm' }]),
+                verifier,
+            );
+            expect(policy.isExcluded('packages/a/.awm', '.awm')).toBe(false);
+            expect(policy.isExcluded('sub/.GIT', '.GIT')).toBe(false);
+            expect(policy.isExcluded('packages/a/.awm/dist', 'dist')).toBe(false);
+            expect(verifier).not.toHaveBeenCalled();
+            expect(policy.evidence()).toEqual({ defaults: false, excluded: [], rejected: [] });
+            expect(policy.isExcluded('packages/a/dist', 'dist')).toBe(true);
+        });
+
+        it('treats only an exact .git or .awm segment as reserved', () => {
+            writeConfig({ schemaVersion: 1, readOnlyObservation: { defaults: false, exclude: ['my.awm', '.gitignore-dir', 'x.git', '.awmx'] } });
+            const loaded = loadAdmissionConfig(project);
+            expect(loaded.ok).toBe(true);
+            if (!loaded.ok) return;
+            const policy = createExclusionPolicy(loaded.config, () => 'excluded');
+            for (const name of ['my.awm', '.gitignore-dir', 'x.git', '.awmx']) expect(policy.isExcluded(`pkg/${name}`, name)).toBe(true);
         });
 
         it('fails loudly without a validated config or verifier', () => {
