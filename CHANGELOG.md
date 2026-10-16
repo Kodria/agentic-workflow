@@ -1,3 +1,8 @@
+## v9.19.0 - 2026-10-16
+
+### Features
+- **admission:** Cloud insteadOf origin + read-only snapshot exclusions (#215) (#216)
+
 ## v9.18.0 - 2026-10-12
 
 ### Features
