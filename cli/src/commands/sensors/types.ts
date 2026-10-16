@@ -152,6 +152,12 @@ export type SensorResult = {
     execution?: ExecutionEvidence;
 };
 
+/** A directory that matched an exclusion rule but stayed observed, and why. */
+export type ReadOnlyCandidateRejection = { path: string; reason: 'not-ignored' | 'contains-tracked' | 'git-unavailable' };
+
+/** What a read-only (admission) snapshot skipped and what it observed anyway. */
+export type ReadOnlyObservation = { defaults: boolean; excluded: string[]; rejected: ReadOnlyCandidateRejection[] };
+
 export type RunOutput = {
     sensors: SensorResult[];
     overall: 'pass' | 'fail' | 'skipped' | 'not_certified';
@@ -174,6 +180,11 @@ export type RunOutput = {
      * full one just because it happened to come back green.
      */
     changedScope?: { files: number; error?: string };
+    /**
+     * Present on read-only (admission) runs: the directories the tree snapshot
+     * skipped (git-ignored, no tracked file) and the matching ones it observed anyway.
+     */
+    readOnlyObservation?: ReadOnlyObservation;
 } & Partial<SensorAuthority>;
 
 export type SensorCheck = {
