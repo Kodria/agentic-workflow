@@ -167,9 +167,11 @@ function sensorVerdict(report: RunOutput): AdmissionReport['sensors'] { return r
 
 /** A not-certified verdict alone does not say what to fix; carry the run's own cause. */
 function sensorBlockedMessage(report: RunOutput, verdict: AdmissionReport['sensors']): string {
-    const reason = verdict === 'not-certified' && typeof report.reason === 'string' ? report.reason.trim() : '';
+    // The diagnostic code must stay the message's only ADMISSION_ token (recovery classification counts them); echoed text may carry user-chosen ones.
+    const plain = (text: string): string => text.trim().replace(/ADMISSION_/g, 'ADMISSION-');
+    const reason = verdict === 'not-certified' && typeof report.reason === 'string' ? plain(report.reason) : '';
     if (!reason) return `Sensor verdict is ${verdict}.`;
-    const remedy = typeof report.remedy === 'string' ? report.remedy.trim().replace(/\.+$/, '') : '';
+    const remedy = typeof report.remedy === 'string' ? plain(report.remedy).replace(/\.+$/, '') : '';
     return remedy ? `Sensor verdict is ${verdict} (${reason}): ${remedy}.` : `Sensor verdict is ${verdict} (${reason}).`;
 }
 function journalStatus(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>): AdmissionReport['journal'] {

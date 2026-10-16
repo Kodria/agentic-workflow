@@ -298,6 +298,19 @@ describe('admitPlan', () => {
             expect(report.diagnostics[0].message).toBe('Sensor verdict is not-certified (native-gate-declared).');
         });
 
+        it.each([
+            ['remedy', { reason: 'admission-config-invalid', remedy: 'repair .awm/admission.json: ADMISSION_FOO is not a known field' }, 'ADMISSION-FOO'],
+            ['reason', { reason: 'ADMISSION_X-unavailable', remedy: 'fix it' }, 'ADMISSION-X'],
+        ])('leaves the diagnostic code as the only ADMISSION_ token when the %s echoes one', async (_name, fields, neutralized) => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', ...fields, projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0].code).toBe('ADMISSION_SENSORS_BLOCKED');
+            expect(report.diagnostics[0].message).toContain(neutralized);
+            expect(`${report.diagnostics[0].code} ${report.diagnostics[0].message}`.match(/ADMISSION_[A-Z_]+/g)).toEqual(['ADMISSION_SENSORS_BLOCKED']);
+        });
+
         it('keeps the bare verdict for a failing run', async () => {
             const report = await admitPlan({ ...base(), sensors: {
                 overall: 'fail', sensors: [], mode: 'project-sensors', reason: 'configured-v3', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
