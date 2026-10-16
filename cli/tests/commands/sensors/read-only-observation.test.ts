@@ -15,6 +15,21 @@ import {
 } from '../../../src/commands/sensors/read-only-observation';
 
 describe('read-only observation', () => {
+    const symlinksSupported = ((): boolean => {
+        const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-symlink-probe-'));
+        try {
+            fs.writeFileSync(path.join(probe, 'target'), 'x');
+            fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'));
+            return true;
+        } catch {
+            return false;
+        } finally {
+            fs.rmSync(probe, { recursive: true, force: true });
+        }
+    })();
+    const symlinkOnly = symlinksSupported ? it : it.skip;
+    // Modes, fifos and ':' in names are not portable to Windows.
+    const posixOnly = process.platform === 'win32' ? it.skip : it;
     const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CEILING_DIRECTORIES'] as const;
     const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
     let root: string;
@@ -137,19 +152,6 @@ describe('read-only observation', () => {
 
         describe('the config file itself', () => {
             const configPath = (): string => path.join(project, '.awm', 'admission.json');
-            const symlinksSupported = ((): boolean => {
-                const probe = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-symlink-probe-'));
-                try {
-                    fs.writeFileSync(path.join(probe, 'target'), 'x');
-                    fs.symlinkSync(path.join(probe, 'target'), path.join(probe, 'link'));
-                    return true;
-                } catch {
-                    return false;
-                } finally {
-                    fs.rmSync(probe, { recursive: true, force: true });
-                }
-            })();
-            const symlinkOnly = symlinksSupported ? it : it.skip;
             const jsonPaddedTo = (bytes: number): string => `{"schemaVersion":1}${' '.repeat(bytes - '{"schemaVersion":1}'.length)}`;
 
             it('fails closed when the file cannot be read for a reason other than being absent', () => {
@@ -336,6 +338,70 @@ describe('read-only observation', () => {
             expect(filesystemSnapshot(project, policy, tiny)).not.toEqual(before);
         });
 
+        describe('what the digest covers', () => {
+            const digestOf = (): string => {
+                const result = filesystemSnapshot(project, undefined, tiny);
+                if (!result.ok) throw new Error(`snapshot failed: ${result.failure}`);
+                return result.digest;
+            };
+
+            it('changes on a same-size content edit', () => {
+                write('f.txt', 'aaaa');
+                const before = digestOf();
+                write('f.txt', 'bbbb');
+                expect(digestOf()).not.toBe(before);
+            });
+
+            posixOnly('changes on a file mode change', () => {
+                write('f.txt', 'same');
+                fs.chmodSync(path.join(project, 'f.txt'), 0o644);
+                const before = digestOf();
+                fs.chmodSync(path.join(project, 'f.txt'), 0o755);
+                expect(digestOf()).not.toBe(before);
+            });
+
+            posixOnly('changes on a directory mode change', () => {
+                write('sub/f.txt', 'same');
+                const dir = path.join(project, 'sub');
+                fs.chmodSync(dir, 0o755);
+                const before = digestOf();
+                try {
+                    fs.chmodSync(dir, 0o700);
+                    expect(digestOf()).not.toBe(before);
+                } finally {
+                    fs.chmodSync(dir, 0o755);
+                }
+            });
+
+            symlinkOnly('changes when a symlink is retargeted to a same-size file', () => {
+                write('a.txt', 'same');
+                write('b.txt', 'same');
+                fs.symlinkSync('a.txt', path.join(project, 'link'));
+                const before = digestOf();
+                fs.rmSync(path.join(project, 'link'));
+                fs.symlinkSync('b.txt', path.join(project, 'link'));
+                expect(digestOf()).not.toBe(before);
+            });
+
+            it('observes a nested .git but skips the root one', () => {
+                write('.git/HEAD', 'root');
+                write('sub/.git/HEAD', 'nested one');
+                const before = digestOf();
+                write('.git/HEAD', 'root changed');
+                expect(digestOf()).toBe(before);
+                write('sub/.git/HEAD', 'nested two');
+                expect(digestOf()).not.toBe(before);
+            });
+
+            posixOnly('hashes a special file by path and mode without reading it', () => {
+                write('f.txt', 'x');
+                const before = digestOf();
+                execFileSync('mkfifo', [path.join(project, 'pipe')], { env: { ...process.env } });
+                expect(filesystemSnapshot(project, undefined, tiny)).toEqual({ ok: true, digest: expect.any(String) });
+                expect(digestOf()).not.toBe(before);
+            });
+        });
+
         it('never descends into the root .git and never asks about a linked directory', () => {
             write('.git/HEAD', 'ref');
             write('real/file.txt');
@@ -451,9 +517,6 @@ describe('read-only observation', () => {
             expect(verify('vendor')).toBe('contains-tracked');
             expect(verify('scratch')).toBe('not-ignored');
         });
-
-        // Directory names containing ":" cannot exist on Windows.
-        const posixOnly = process.platform === 'win32' ? it.skip : it;
 
         posixOnly.each([[':(top)x'], [':/x']])('treats the directory %s literally, never as pathspec magic', name => {
             git(['init', '-q', '-b', 'main']);
