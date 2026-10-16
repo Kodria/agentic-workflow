@@ -37,6 +37,7 @@ describe('read-only observation', () => {
     });
 
     afterEach(() => {
+        jest.restoreAllMocks();
         for (const key of ENV_KEYS) {
             if (saved[key] === undefined) delete process.env[key];
             else process.env[key] = saved[key];
@@ -112,12 +113,12 @@ describe('read-only observation', () => {
         });
 
         it('strips C1, separator and bidi control characters from an unknown field name', () => {
-            const hostile = 'a\u009bb\u0085c\u202ed\u2028e\u2029f\u2066g\u2069h\u202ai';
+            const hostile = 'a\u009bb\u0085c\u202ed\u2028e\u2029f\u2066g\u2069h\u202ai\u200ej\u200fk\u061cl';
             writeConfig(JSON.stringify({ schemaVersion: 1, [hostile]: true }));
             const result = loadAdmissionConfig(project);
             expect(result.ok).toBe(false);
             if (!result.ok) {
-                expect(result.field).toBe('a?b?c?d?e?f?g?h?i');
+                expect(result.field).toBe('a?b?c?d?e?f?g?h?i?j?k?l');
                 expect(result.field.length).toBeLessThanOrEqual(64);
             }
         });
@@ -234,6 +235,34 @@ describe('read-only observation', () => {
             fs.rmSync(path.join(project, 'node_modules'), { recursive: true });
             expect(filesystemSnapshot(project, policy, tiny)).toEqual(before);
             write('src/a.ts', 'changed');
+            expect(filesystemSnapshot(project, policy, tiny)).not.toEqual(before);
+        });
+
+        it('hashes observed directories without their size, so edits inside a nested excluded directory leave the digest unchanged', () => {
+            // ext4 reports a constant directory size; tmpfs, APFS and NTFS do not. Simulate the
+            // size-sensitive case so the rule is pinned on every platform.
+            const realLstat = fs.lstatSync;
+            jest.spyOn(fs, 'lstatSync').mockImplementation(((target: fs.PathLike, ...rest: unknown[]) => {
+                const stat = (realLstat as (...args: unknown[]) => fs.Stats)(target, ...rest);
+                if (!stat.isDirectory()) return stat;
+                const size = 4096 + 1024 * fs.readdirSync(target).length;
+                return new Proxy(stat, { get: (object, key) => (key === 'size' ? size : Reflect.get(object, key, object)) });
+            }) as unknown as typeof fs.lstatSync);
+            write('packages/x/src/a.ts', 'a');
+            write('packages/x/node_modules/pkg/index.js', 'one');
+            const policy = nodeModulesOnly('excluded');
+            const before = filesystemSnapshot(project, policy, tiny);
+            expect(before.ok).toBe(true);
+            write('packages/x/node_modules/pkg/extra.js', 'created');
+            write('packages/x/node_modules/other/deep/file.js', 'created');
+            expect(filesystemSnapshot(project, policy, tiny)).toEqual(before);
+            write('packages/x/node_modules/pkg/index.js', 'grown'.repeat(20));
+            expect(filesystemSnapshot(project, policy, tiny)).toEqual(before);
+            fs.rmSync(path.join(project, 'packages', 'x', 'node_modules', 'pkg'), { recursive: true });
+            expect(filesystemSnapshot(project, policy, tiny)).toEqual(before);
+            fs.rmSync(path.join(project, 'packages', 'x', 'node_modules'), { recursive: true });
+            expect(filesystemSnapshot(project, policy, tiny)).toEqual(before);
+            write('packages/x/src/a.ts', 'changed');
             expect(filesystemSnapshot(project, policy, tiny)).not.toEqual(before);
         });
 

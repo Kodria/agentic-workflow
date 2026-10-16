@@ -20,8 +20,8 @@ const ADMISSION_CONFIG_LABEL = '.awm/admission.json';
 const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_FIELD_LABEL = 64;
-// Control characters (C0, DEL, C1), line/paragraph separators and bidi controls.
-const UNSAFE_LABEL_CHARS = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu;
+// Control characters (C0, DEL, C1), bidi controls (marks, embeddings, isolates) and line/paragraph separators.
+const UNSAFE_LABEL_CHARS = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/gu;
 const RESERVED_NAMES = new Set(['.git', '.awm']);
 
 export type ExclusionRule = { kind: 'name'; name: string } | { kind: 'path'; path: string };
