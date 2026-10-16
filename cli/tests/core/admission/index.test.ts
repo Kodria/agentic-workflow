@@ -323,6 +323,20 @@ describe('admitPlan', () => {
             expect(report.diagnostics[0]).toEqual({ code: 'ADMISSION_SENSORS_BLOCKED', message });
         });
 
+        it('neutralizes every ADMISSION_ token when several are echoed in the reason and the remedy', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid',
+                reason: 'admission-config-invalid ADMISSION_BAZ ADMISSION_QUX',
+                remedy: 'repair .awm/admission.json: ADMISSION_FOO is not allowed, ADMISSION_BAR neither',
+                projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            const { code, message } = report.diagnostics[0];
+            expect(code).toBe('ADMISSION_SENSORS_BLOCKED');
+            for (const token of ['ADMISSION-FOO', 'ADMISSION-BAR', 'ADMISSION-BAZ', 'ADMISSION-QUX']) expect(message).toContain(token);
+            expect(`${code} ${message}`.match(/ADMISSION_[A-Z_]+/g)).toEqual(['ADMISSION_SENSORS_BLOCKED']);
+        });
+
         it('keeps the bare verdict for a failing run', async () => {
             const report = await admitPlan({ ...base(), sensors: {
                 overall: 'fail', sensors: [], mode: 'project-sensors', reason: 'configured-v3', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
