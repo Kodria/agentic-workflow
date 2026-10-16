@@ -238,6 +238,61 @@ AWM expands its sole `{files}` placeholder as literal argv entries; unsupported
 scope, no applicable files, and Git errors remain explicit rather than looking
 like a full clean run.
 
+## Read-only admission observation (`.awm/admission.json`)
+
+`awm plan admit --verify-sensors` runs the project sensors in read-only mode: it hashes
+the project tree before and after the run, and any difference makes the sensor evidence
+`not_certified` with reason `read-only-mutation-detected`. The walk is bounded to 250000
+observed entries and 1 GiB of observed file content; past either limit the reason is
+`read-only-observation-unavailable` and the remedy names the limit.
+
+Generated output such as `node_modules` would exhaust those limits, so the snapshot
+skips a directory when it matches an exclusion rule **and** git confirms that it is
+git-ignored and contains no tracked file (force-added files count as tracked). A matching
+directory that fails either check is hashed as usual. Without git, nothing is skipped.
+
+By default, directories with these names are candidates at any depth: `node_modules`,
+`.next`, `.turbo`, `dist`, `build`, `coverage`, `.venv`, `target`. A project can extend
+or replace that list with an optional, committed `.awm/admission.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "readOnlyObservation": {
+    "defaults": true,
+    "exclude": ["storybook-static", "apps/web/.cache"]
+  }
+}
+```
+
+- `defaults` (default `true`) keeps the built-in names; `false` drops them.
+- `exclude` adds rules. An entry without `/` matches a directory name at any depth; an
+  entry with `/` matches that exact path relative to the project root.
+- Entries cannot be empty or absolute, contain empty, `.` or `..` segments, backslashes,
+  wildcards or line breaks, or end with `/`. An entry is also rejected when any of its
+  `/`-separated segments is `.git` or `.awm` (case-insensitive, exact segment match, so
+  `my.awm` or `.gitignore-dir` are fine). A directory with such a segment at any depth is
+  never skipped, even when a name rule matches.
+- The file must be a regular file (a symlink, directory or device is rejected) of at most
+  65536 bytes.
+- An invalid file blocks read-only runs with reason `admission-config-invalid` and a
+  remedy naming the field. Ordinary `awm sensors run` never reads the file.
+
+Internally, a read-only run that gets as far as the snapshot records what it skipped in
+the sensor-run result under `readOnlyObservation`: `defaults`, `excluded`, and `rejected`
+entries with reason `not-ignored`, `contains-tracked`, or `git-unavailable`. Runs that
+stop earlier (an invalid `.awm/admission.json`, a `native-gate` or `opt-out`
+declaration, an unresolvable sensor source) do not include the field. That result is
+consumed by admission and `awm plan admit` does not print it: what you see is the
+sensor verdict, and when it is `not-certified`, the reason and remedy carried by
+`ADMISSION_SENSORS_BLOCKED`.
+
+**Accepted risk:** a sensor that changes content inside a skipped directory is not
+detected. Content inside a skipped directory is not observed, including any `.awm` or
+`.git` nested within it; the project-root `.awm/`, tracked files, `.gitignore` and any
+directory that is not skipped are still observed. CLIs older than this feature ignore
+`.awm/admission.json` and observe the whole tree.
+
 ## What machine initialization installs
 
 Machine initialization seeds and synchronizes registries, records enabled

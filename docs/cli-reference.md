@@ -398,6 +398,13 @@ The exception does not apply to:
 
 The `awm watch` supervisor still requires a real `pass` before relaunching a controller.
 
+The sensor run behind `--verify-sensors` is read-only: a tree snapshot taken before and
+after the run must match. Git-ignored generated directories that hold no tracked file (by
+default `node_modules`, `.next`, `dist`, `coverage`, and similar) are skipped; see
+[Read-only admission observation](configuration.md#read-only-admission-observation-awmadmissionjson).
+When admission blocks on a `not-certified` sensor verdict, `ADMISSION_SENSORS_BLOCKED`
+carries the sensor run's reason and remedy.
+
 To opt in (when the D-023 suspension is lifted), initialize the matching valid
 unattended plan first with `awm watch --init --plan PLAN_PATH`. Initialization
 binds the plan; it does not register tasks, review obligations, or a controller

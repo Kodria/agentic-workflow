@@ -164,6 +164,16 @@ function currentness(report: CurrentnessReport, consumedRegistryComponents: read
     return { status, cli, diagnostics: [diagnostic('ADMISSION_CURRENTNESS_BLOCKED', `Consumed contract currentness is ${status}: ${names}.`)] };
 }
 function sensorVerdict(report: RunOutput): AdmissionReport['sensors'] { return report.overall === 'not_certified' ? 'not-certified' : report.overall === 'pass' ? 'pass' : 'fail'; }
+
+/** A not-certified verdict alone does not say what to fix; carry the run's own cause. */
+function sensorBlockedMessage(report: RunOutput, verdict: AdmissionReport['sensors']): string {
+    // The diagnostic code must stay the message's only ADMISSION_ token (recovery classification counts them); echoed text may carry user-chosen ones.
+    const plain = (text: string): string => text.trim().replace(/ADMISSION_/g, 'ADMISSION-');
+    const reason = verdict === 'not-certified' && typeof report.reason === 'string' ? plain(report.reason) : '';
+    if (!reason) return `Sensor verdict is ${verdict}.`;
+    const remedy = typeof report.remedy === 'string' ? plain(report.remedy).replace(/\.+$/, '') : '';
+    return remedy ? `Sensor verdict is ${verdict} (${reason}): ${remedy}.` : `Sensor verdict is ${verdict} (${reason}).`;
+}
 function journalStatus(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>): AdmissionReport['journal'] {
     if (input.journalCorrupt) return 'corrupt';
     const journal = input.journalState;
@@ -269,7 +279,7 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         if (!input.sensors) return blocked(input, [diagnostic('ADMISSION_SENSORS_REQUIRED', 'Sensor evidence was required but not supplied.')], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness });
         const sensors = sensorVerdict(input.sensors);
         const registryOptOut = sensors === 'not-certified' && input.sensorClosurePolicy === 'r8-registry-opt-out' && input.sensors.mode === 'opt-out';
-        if (sensors !== 'pass' && !registryOptOut) return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', `Sensor verdict is ${sensors}.`)], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors });
+        if (sensors !== 'pass' && !registryOptOut) return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', sensorBlockedMessage(input.sensors, sensors))], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors });
         sensorsReported = sensors;
         if (registryOptOut) sensorEvidence = { sensorEvidence: 'r8-registry-opt-out' };
     }

@@ -274,6 +274,78 @@ describe('admitPlan', () => {
         });
     });
 
+    describe('the sensor-blocked diagnostic', () => {
+        const base = () => ({ plan: valid as PlanValidationReport, provider: 'codex' as const, cwd: process.cwd(), enabledAgents: ['codex'] as const, verifySensors: true });
+
+        it('carries the sensor reason and remedy when the verdict is not-certified', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', reason: 'read-only-observation-unavailable',
+                remedy: 'declare heavy directories in .awm/admission.json.', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({
+                code: 'ADMISSION_SENSORS_BLOCKED',
+                message: 'Sensor verdict is not-certified (read-only-observation-unavailable): declare heavy directories in .awm/admission.json.',
+            });
+            expect(report.diagnostics[0].message.match(/ADMISSION_[A-Z_]+/g)).toBeNull();
+        });
+
+        it('keeps the reason alone when the run has no remedy', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'native-gate', reason: 'native-gate-declared', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0].message).toBe('Sensor verdict is not-certified (native-gate-declared).');
+        });
+
+        it.each([
+            ['remedy', { reason: 'admission-config-invalid', remedy: 'repair .awm/admission.json: ADMISSION_FOO is not a known field' }, 'ADMISSION-FOO'],
+            ['reason', { reason: 'ADMISSION_X-unavailable', remedy: 'fix it' }, 'ADMISSION-X'],
+        ])('leaves the diagnostic code as the only ADMISSION_ token when the %s echoes one', async (_name, fields, neutralized) => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', ...fields, projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0].code).toBe('ADMISSION_SENSORS_BLOCKED');
+            expect(report.diagnostics[0].message).toContain(neutralized);
+            expect(`${report.diagnostics[0].code} ${report.diagnostics[0].message}`.match(/ADMISSION_[A-Z_]+/g)).toEqual(['ADMISSION_SENSORS_BLOCKED']);
+        });
+
+        it.each([
+            ['trims a padded reason and remedy', '  read-only-observation-unavailable  ', '  declare it in .awm/admission.json.  ', 'Sensor verdict is not-certified (read-only-observation-unavailable): declare it in .awm/admission.json.'],
+            ['drops a whitespace-only reason', '   ', 'declare it in .awm/admission.json.', 'Sensor verdict is not-certified.'],
+            ['drops a whitespace-only remedy', 'some-reason', '   ', 'Sensor verdict is not-certified (some-reason).'],
+        ])('%s', async (_name, reason, remedy, message) => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', reason, remedy, projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({ code: 'ADMISSION_SENSORS_BLOCKED', message });
+        });
+
+        it('neutralizes every ADMISSION_ token when several are echoed in the reason and the remedy', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid',
+                reason: 'admission-config-invalid ADMISSION_BAZ ADMISSION_QUX',
+                remedy: 'repair .awm/admission.json: ADMISSION_FOO is not allowed, ADMISSION_BAR neither',
+                projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            const { code, message } = report.diagnostics[0];
+            expect(code).toBe('ADMISSION_SENSORS_BLOCKED');
+            for (const token of ['ADMISSION-FOO', 'ADMISSION-BAR', 'ADMISSION-BAZ', 'ADMISSION-QUX']) expect(message).toContain(token);
+            expect(`${code} ${message}`.match(/ADMISSION_[A-Z_]+/g)).toEqual(['ADMISSION_SENSORS_BLOCKED']);
+        });
+
+        it('keeps the bare verdict for a failing run', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'fail', sensors: [], mode: 'project-sensors', reason: 'configured-v3', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({ code: 'ADMISSION_SENSORS_BLOCKED', message: 'Sensor verdict is fail.' });
+        });
+    });
+
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
         const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };

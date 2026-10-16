@@ -41,6 +41,15 @@ cat ~/.awm/registries.json          # remote must be the clean https URL, no tok
 cat ~/.awm/registries/<name>/.git/config   # also clean
 ```
 
+Strict currentness works with this recipe. `awm preflight --require-current` and
+`awm plan admit --require-current` compare the registry checkout's stored
+`remote.origin.url` (the clean URL) with the configured remote, not the token-bearing URL
+that `git remote get-url` reports after the `insteadOf` rewrite. No temporary
+`GIT_CONFIG_GLOBAL` workaround is needed. The origin is read from the checkout's own
+local git config (`remote.origin.url` read with `--local`), so a global or system git
+setting never substitutes for a missing origin, and an empty value is reported as an
+unreadable origin.
+
 ## 3. Windows — use WSL
 
 Native Windows support is deferred (brief decision D-1, tracked as WS-D). Today,
