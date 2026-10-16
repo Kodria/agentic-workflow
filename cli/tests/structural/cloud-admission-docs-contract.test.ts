@@ -3,17 +3,34 @@ import path from 'path';
 
 /** CMD-DOCS — V-R4 (issue #215 documentation). */
 const repoRoot = path.resolve(__dirname, '../../..');
-const read = (relative: string): string => fs.readFileSync(path.join(repoRoot, ...relative.split('/')), 'utf8');
+/** Whitespace-normalized so re-wrapping the prose never breaks a pinned phrase. */
+const read = (relative: string): string =>
+    fs.readFileSync(path.join(repoRoot, ...relative.split('/')), 'utf8').replace(/\s+/g, ' ');
 
 describe('issue #215 documentation contract (V-R4)', () => {
+    const configuration = read('docs/configuration.md');
+
     it('documents .awm/admission.json with defaults, the git rule and the accepted risk', () => {
-        const doc = read('docs/configuration.md');
-        expect(doc).toContain('## Read-only admission observation (`.awm/admission.json`)');
-        for (const name of ['node_modules', '.next', '.turbo', 'dist', 'build', 'coverage', '.venv', 'target']) expect(doc).toContain(`\`${name}\``);
-        expect(doc).toContain('git-ignored and contains no tracked file');
-        expect(doc).toContain('**Accepted risk:**');
-        expect(doc).toContain('`admission-config-invalid`');
-        expect(doc).toContain('`readOnlyObservation`');
+        expect(configuration).toContain('## Read-only admission observation (`.awm/admission.json`)');
+        for (const name of ['node_modules', '.next', '.turbo', 'dist', 'build', 'coverage', '.venv', 'target']) expect(configuration).toContain(`\`${name}\``);
+        expect(configuration).toContain('git-ignored and contains no tracked file');
+        expect(configuration).toContain('**Accepted risk:**');
+        expect(configuration).toContain('`admission-config-invalid`');
+        expect(configuration).toContain('`readOnlyObservation`');
+    });
+
+    it.each([
+        '250000',
+        '1 GiB',
+        '`read-only-mutation-detected`',
+        '`read-only-observation-unavailable`',
+        '`not-ignored`',
+        '`contains-tracked`',
+        '`git-unavailable`',
+        '`.git` or `.awm`',
+        'never skipped',
+    ])('documents the observation limit, reason code or reserved-name rule %s', literal => {
+        expect(configuration).toContain(literal);
     });
 
     it('points --verify-sensors in the CLI reference at the observation rules', () => {
