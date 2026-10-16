@@ -432,6 +432,23 @@ describe('read-only observation', () => {
             expect(() => filesystemSnapshot('')).toThrow(/non-empty string/);
             expect(() => filesystemSnapshot(project, undefined, { maxEntries: 0, maxBytes: 1 })).toThrow(/positive integers/);
         });
+
+        it.each([
+            [{ maxEntries: NaN, maxBytes: 10 }],
+            [{ maxEntries: 1.5, maxBytes: 10 }],
+            [{ maxEntries: Infinity, maxBytes: 10 }],
+            [{ maxEntries: 10, maxBytes: 0 }],
+            [{ maxEntries: 10, maxBytes: -1 }],
+            [{ maxEntries: 10, maxBytes: NaN }],
+        ])('rejects the snapshot limits %j instead of disabling the bound', limits => {
+            expect(() => filesystemSnapshot(project, undefined, limits)).toThrow(/positive integers/);
+        });
+
+        it('rejects a whitespace-only root everywhere a root is taken', () => {
+            expect(() => filesystemSnapshot('   ')).toThrow(/non-empty string/);
+            expect(() => loadAdmissionConfig('   ')).toThrow(/non-empty string/);
+            expect(() => gitVerifier('   ')).toThrow(/non-empty string/);
+        });
     });
 
     describe('remedies', () => {
