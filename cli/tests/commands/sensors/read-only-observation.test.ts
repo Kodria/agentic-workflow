@@ -171,6 +171,16 @@ describe('read-only observation', () => {
                 expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: 'is larger than 65536 bytes' });
             });
 
+            it('fails closed when reading a regular, small file fails', () => {
+                writeConfig({ schemaVersion: 1 });
+                const realRead = fs.readFileSync;
+                jest.spyOn(fs, 'readFileSync').mockImplementation(((target: unknown, ...rest: unknown[]) => {
+                    if (typeof target === 'string' && target.endsWith('admission.json')) throw new Error('EIO');
+                    return (realRead as (...args: unknown[]) => unknown)(target, ...rest);
+                }) as unknown as typeof fs.readFileSync);
+                expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: 'could not be read' });
+            });
+
             symlinkOnly('rejects a symlink even when it points at a valid regular file', () => {
                 write('real-admission.json', '{"schemaVersion":1}');
                 fs.mkdirSync(path.dirname(configPath()), { recursive: true });
