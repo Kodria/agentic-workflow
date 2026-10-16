@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, type SpawnSyncOptions, type SpawnSyncReturns, type spawnSync } from 'child_process';
 import {
     DEFAULT_EXCLUSION_NAMES,
     admissionConfigRemedy,
@@ -108,6 +108,17 @@ describe('read-only observation', () => {
             if (!result.ok) {
                 expect(result.field.length).toBeLessThanOrEqual(64);
                 expect(result.field).not.toMatch(/[\u0000-\u001f]/);
+            }
+        });
+
+        it('strips C1, separator and bidi control characters from an unknown field name', () => {
+            const hostile = 'a\u009bb\u0085c\u202ed\u2028e\u2029f\u2066g\u2069h\u202ai';
+            writeConfig(JSON.stringify({ schemaVersion: 1, [hostile]: true }));
+            const result = loadAdmissionConfig(project);
+            expect(result.ok).toBe(false);
+            if (!result.ok) {
+                expect(result.field).toBe('a?b?c?d?e?f?g?h?i');
+                expect(result.field.length).toBeLessThanOrEqual(64);
             }
         });
 
@@ -256,6 +267,48 @@ describe('read-only observation', () => {
 
         it('names the offending admission field', () => {
             expect(admissionConfigRemedy({ field: 'schemaVersion', message: 'must be 1' })).toBe('repair .awm/admission.json: schemaVersion must be 1');
+        });
+    });
+
+    describe('gitVerifier fail-closed branches (fake spawn)', () => {
+        type Reply = Partial<SpawnSyncReturns<string>>;
+        const verifierWith = (lsFiles: Reply, checkIgnore: Reply = { status: 1 }) => {
+            const calls: Array<{ args: string[]; options: SpawnSyncOptions }> = [];
+            const spawn = ((_command: string, args: string[], options: SpawnSyncOptions) => {
+                calls.push({ args, options });
+                return (args[0] === 'ls-files' ? lsFiles : checkIgnore) as SpawnSyncReturns<string>;
+            }) as unknown as typeof spawnSync;
+            return { verify: gitVerifier(project, { MARKER: 'env' }, spawn), calls };
+        };
+
+        it.each([
+            ['ls-files ENOBUFS', { error: Object.assign(new Error('buffer'), { code: 'ENOBUFS' }) }, undefined, 'contains-tracked'],
+            ['ls-files spawn error', { error: new Error('x') }, undefined, 'git-unavailable'],
+            ['ls-files status 128', { status: 128, stdout: '' }, undefined, 'git-unavailable'],
+            ['ls-files lists a file', { status: 0, stdout: 'a/b\0' }, { status: 0 }, 'contains-tracked'],
+            ['check-ignore spawn error', { status: 0, stdout: '' }, { error: new Error('x') }, 'git-unavailable'],
+            ['check-ignore status 2', { status: 0, stdout: '' }, { status: 2 }, 'git-unavailable'],
+            ['check-ignore status 128', { status: 0, stdout: '' }, { status: 128 }, 'git-unavailable'],
+            ['check-ignore status 1', { status: 0, stdout: '' }, { status: 1 }, 'not-ignored'],
+            ['check-ignore status 0', { status: 0, stdout: '' }, { status: 0 }, 'excluded'],
+        ] as Array<[string, Reply, Reply | undefined, CandidateVerdict]>)('%s', (_label, lsFiles, checkIgnore, expected) => {
+            expect(verifierWith(lsFiles, checkIgnore).verify('pkg/node_modules')).toBe(expected);
+        });
+
+        it('invokes git without a shell, rooted, bounded and after --', () => {
+            const { verify, calls } = verifierWith({ status: 0, stdout: '' }, { status: 0 });
+            verify('pkg/node_modules');
+            expect(calls.map(call => call.args)).toEqual([
+                ['ls-files', '-z', '--', './pkg/node_modules'],
+                ['check-ignore', '-q', '--', './pkg/node_modules'],
+            ]);
+            for (const { options } of calls) {
+                expect(options.cwd).toBe(project);
+                expect(options.timeout).toBeGreaterThan(0);
+                expect(options.maxBuffer).toBeGreaterThan(0);
+                expect(options.shell).toBeFalsy();
+                expect(options.env).toEqual({ MARKER: 'env' });
+            }
         });
     });
 

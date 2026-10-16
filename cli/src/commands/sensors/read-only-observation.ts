@@ -20,6 +20,8 @@ const ADMISSION_CONFIG_LABEL = '.awm/admission.json';
 const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_OUTPUT_BYTES = 64 * 1024;
 const MAX_FIELD_LABEL = 64;
+// Control characters (C0, DEL, C1), line/paragraph separators and bidi controls.
+const UNSAFE_LABEL_CHARS = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu;
 const RESERVED_NAMES = new Set(['.git', '.awm']);
 
 export type ExclusionRule = { kind: 'name'; name: string } | { kind: 'path'; path: string };
@@ -43,9 +45,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Unknown keys come from the project file: bound them and strip control characters. */
+/** Unknown keys come from the project file: bound them and neutralize control characters. */
 function fieldLabel(key: string): string {
-    const clean = key.replace(/[\u0000-\u001f\u007f]/g, '?');
+    const clean = key.replace(UNSAFE_LABEL_CHARS, '?');
     return clean.length <= MAX_FIELD_LABEL ? clean : `${clean.slice(0, MAX_FIELD_LABEL - 1)}…`;
 }
 
@@ -141,9 +143,9 @@ export function createExclusionPolicy(config: AdmissionConfig, verifier: Candida
 }
 
 /** Git decides: no tracked file inside (checked first) and ignored. Any doubt observes. */
-export function gitVerifier(projectRoot: string, env: NodeJS.ProcessEnv = process.env): CandidateVerifier {
+export function gitVerifier(projectRoot: string, env: NodeJS.ProcessEnv = process.env, spawn: typeof spawnSync = spawnSync): CandidateVerifier {
     const cwd = requireRoot(projectRoot, 'git verifier projectRoot');
-    const git = (args: string[]) => spawnSync('git', args, {
+    const git = (args: string[]) => spawn('git', args, {
         cwd,
         env,
         encoding: 'utf8',
@@ -225,6 +227,9 @@ export function filesystemSnapshot(root: string, policy?: ExclusionPolicy, limit
         visit(root, '');
         return { ok: true, digest: digest.digest('hex') };
     } catch (error) {
+        // Every unexpected error (unreadable entry, vanished file, a throwing injected
+        // policy) is deliberately reported as 'unreadable': a tree that cannot be fully
+        // observed must fail closed instead of yielding a digest.
         return { ok: false, failure: error instanceof SnapshotLimitError ? error.failure : 'unreadable' };
     }
 }
