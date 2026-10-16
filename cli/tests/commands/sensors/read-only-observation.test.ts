@@ -159,7 +159,8 @@ describe('read-only observation', () => {
                 expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: expect.any(String) });
             });
 
-            it('fails closed when .awm is not a directory', () => {
+            // ENOTDIR is POSIX behavior: on Windows a file in the middle of a path reads as ENOENT.
+            posixOnly('fails closed when .awm is not a directory', () => {
                 write('.awm', 'not a directory');
                 expect(loadAdmissionConfig(project)).toEqual({ ok: false, field: '(file)', message: expect.any(String) });
             });
