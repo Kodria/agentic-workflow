@@ -311,6 +311,18 @@ describe('admitPlan', () => {
             expect(`${report.diagnostics[0].code} ${report.diagnostics[0].message}`.match(/ADMISSION_[A-Z_]+/g)).toEqual(['ADMISSION_SENSORS_BLOCKED']);
         });
 
+        it.each([
+            ['trims a padded reason and remedy', '  read-only-observation-unavailable  ', '  declare it in .awm/admission.json.  ', 'Sensor verdict is not-certified (read-only-observation-unavailable): declare it in .awm/admission.json.'],
+            ['drops a whitespace-only reason', '   ', 'declare it in .awm/admission.json.', 'Sensor verdict is not-certified.'],
+            ['drops a whitespace-only remedy', 'some-reason', '   ', 'Sensor verdict is not-certified (some-reason).'],
+        ])('%s', async (_name, reason, remedy, message) => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', reason, remedy, projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({ code: 'ADMISSION_SENSORS_BLOCKED', message });
+        });
+
         it('keeps the bare verdict for a failing run', async () => {
             const report = await admitPlan({ ...base(), sensors: {
                 overall: 'fail', sensors: [], mode: 'project-sensors', reason: 'configured-v3', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
