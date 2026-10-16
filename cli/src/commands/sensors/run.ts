@@ -1,7 +1,5 @@
-import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import crypto from 'crypto';
 import { SensorManifest, RunOutput, PreparedSensorExecution } from './types';
 import { readBaseline } from './baseline';
 import { applyBaseline, executePrepared } from './result';
@@ -29,6 +27,15 @@ import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
 import { resolveSensorProject, softRecoverInvalidProject } from './project';
+import {
+    admissionConfigRemedy,
+    createExclusionPolicy,
+    filesystemSnapshot,
+    gitVerifier,
+    loadAdmissionConfig,
+    snapshotUnavailableRemedy,
+    type ExclusionPolicy,
+} from './read-only-observation';
 
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
@@ -56,53 +63,6 @@ export type RunOptions = {
      */
     readOnly?: boolean;
 };
-
-const READ_ONLY_MAX_ENTRIES = 250_000;
-const READ_ONLY_MAX_BYTES = 1024 * 1024 * 1024;
-
-/**
- * A git status only sees tracked and non-ignored paths, while a sensor can
- * mutate ignored runtime files (notably `.awm/`) just as easily. Hash the
- * actual project tree instead. The scan is deliberately bounded: inability to
- * observe the whole declared project means no admission certificate.
- */
-function filesystemSnapshot(root: string): string | null {
-    try {
-        const digest = crypto.createHash('sha256');
-        let entriesSeen = 0;
-        let bytesSeen = 0;
-        const visit = (directory: string, relative: string): void => {
-            const entries = fs.readdirSync(directory, { withFileTypes: true })
-                .sort((left, right) => left.name.localeCompare(right.name));
-            for (const entry of entries) {
-                // Git's internal bookkeeping changes as a consequence of normal
-                // observation, not project sensor execution. Everything else,
-                // including ignored/untracked `.awm`, is evidence-relevant.
-                if (relative === '' && entry.name === '.git') continue;
-                if (++entriesSeen > READ_ONLY_MAX_ENTRIES) throw new Error('snapshot-entry-limit');
-                const child = path.join(directory, entry.name);
-                const childRelative = relative === '' ? entry.name : `${relative}/${entry.name}`;
-                const stat = fs.lstatSync(child);
-                digest.update(`${childRelative}\0${stat.mode}\0${stat.size}\0`);
-                if (stat.isDirectory()) {
-                    digest.update('directory\0');
-                    visit(child, childRelative);
-                } else if (stat.isFile()) {
-                    if ((bytesSeen += stat.size) > READ_ONLY_MAX_BYTES) throw new Error('snapshot-byte-limit');
-                    digest.update('file\0');
-                    digest.update(fs.readFileSync(child));
-                } else if (stat.isSymbolicLink()) {
-                    digest.update(`symlink\0${fs.readlinkSync(child)}\0`);
-                } else {
-                    digest.update(`special\0${stat.rdev}\0`);
-                }
-            }
-        };
-        visit(root, '');
-        return digest.digest('hex');
-    } catch { return null; }
-}
-
 
 async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveParsedPackCompatibility>> | null> {
     try {
@@ -227,9 +187,20 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     }
 
     const manifestDir = configured.projectRoot;
-    const beforeReadOnly = opts.readOnly ? filesystemSnapshot(manifestDir) : undefined;
-    if (opts.readOnly && beforeReadOnly === null) {
-        return { sensors: [], overall: 'not_certified', projectRoot: configured.projectRoot, manifestPath: configured.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: 'run admission from a readable git worktree' };
+    // Admission-only: `.awm/admission.json` is never read for ordinary runs.
+    let readOnlyPolicy: ExclusionPolicy | undefined;
+    let beforeReadOnly: string | undefined;
+    if (opts.readOnly) {
+        const admissionConfig = loadAdmissionConfig(manifestDir);
+        if (!admissionConfig.ok) {
+            return { sensors: [], overall: 'not_certified', projectRoot: configured.projectRoot, manifestPath: configured.manifestPath, mode: 'invalid', reason: 'admission-config-invalid', remedy: admissionConfigRemedy(admissionConfig) };
+        }
+        readOnlyPolicy = createExclusionPolicy(admissionConfig.config, gitVerifier(manifestDir));
+        const before = filesystemSnapshot(manifestDir, readOnlyPolicy);
+        if (!before.ok) {
+            return { sensors: [], overall: 'not_certified', projectRoot: configured.projectRoot, manifestPath: configured.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: snapshotUnavailableRemedy(before.failure), readOnlyObservation: readOnlyPolicy.evidence() };
+        }
+        beforeReadOnly = before.digest;
     }
     const parsed = configured.manifest;
     const authority = { projectRoot: configured.projectRoot, manifestPath: configured.manifestPath };
@@ -394,8 +365,14 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         ...(drift?.drift ? { packDrift: drift.drift } : {}),
         ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };
-    if (opts.readOnly && filesystemSnapshot(manifestDir) !== beforeReadOnly) {
-        return { ...output, overall: 'not_certified', reason: 'read-only-mutation-detected', remedy: 'sensor execution changed the worktree; repair it before using this evidence for admission' };
+    if (readOnlyPolicy) {
+        // Same policy instance: cached verdicts keep both passes consistent.
+        const after = filesystemSnapshot(manifestDir, readOnlyPolicy);
+        const readOnlyObservation = readOnlyPolicy.evidence();
+        if (!after.ok || after.digest !== beforeReadOnly) {
+            return { ...output, overall: 'not_certified', reason: 'read-only-mutation-detected', remedy: 'sensor execution changed the worktree; repair it before using this evidence for admission', readOnlyObservation };
+        }
+        return { ...output, readOnlyObservation };
     }
     return output;
 }

@@ -274,6 +274,39 @@ describe('admitPlan', () => {
         });
     });
 
+    describe('the sensor-blocked diagnostic', () => {
+        const base = () => ({ plan: valid as PlanValidationReport, provider: 'codex' as const, cwd: process.cwd(), enabledAgents: ['codex'] as const, verifySensors: true });
+
+        it('carries the sensor reason and remedy when the verdict is not-certified', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'invalid', reason: 'read-only-observation-unavailable',
+                remedy: 'declare heavy directories in .awm/admission.json.', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({
+                code: 'ADMISSION_SENSORS_BLOCKED',
+                message: 'Sensor verdict is not-certified (read-only-observation-unavailable): declare heavy directories in .awm/admission.json.',
+            });
+            expect(report.diagnostics[0].message.match(/ADMISSION_[A-Z_]+/g)).toBeNull();
+        });
+
+        it('keeps the reason alone when the run has no remedy', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'not_certified', sensors: [], mode: 'native-gate', reason: 'native-gate-declared', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0].message).toBe('Sensor verdict is not-certified (native-gate-declared).');
+        });
+
+        it('keeps the bare verdict for a failing run', async () => {
+            const report = await admitPlan({ ...base(), sensors: {
+                overall: 'fail', sensors: [], mode: 'project-sensors', reason: 'configured-v3', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json',
+            } as any });
+
+            expect(report.diagnostics[0]).toEqual({ code: 'ADMISSION_SENSORS_BLOCKED', message: 'Sensor verdict is fail.' });
+        });
+    });
+
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
         const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
