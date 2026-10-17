@@ -15,6 +15,14 @@ const MAX_EXCLUDES = 64;
 const MAX_PATH = 1024;
 const MAX_IDENTITY = 300;
 
+/**
+ * Every `git log` whose output is parsed must start with these. User and repository config would otherwise change that
+ * output: `log.showSignature` prints verification text before each signed commit's formatted output, and
+ * `i18n.logOutputEncoding` re-encodes it. (`log.decorate`, `log.mailmap`, notes and colour only affect placeholders or
+ * default formats we do not use.)
+ */
+export const LOG_SAFETY_ARGS: readonly string[] = ['--no-show-signature', '--encoding=UTF-8'];
+
 /** Runs git without a shell and returns its stdout, or null when it fails, times out, overflows or the input is invalid. */
 export function runGit(cwd: string, args: string[]): string | null {
     if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
@@ -71,7 +79,9 @@ export function isAncestor(root: string, ancestor: string, descendant: string): 
 /** Paths differing between two revisions, renames reported as delete + add, verbatim (untrusted). Null on failure. */
 export function changedFiles(root: string, from: string, to = 'HEAD'): string[] | null {
     if (!isSafeRef(from) || !isSafeRef(to)) return null;
-    const out = runGit(root, ['diff', '--no-renames', '--name-only', '-z', '--end-of-options', from, to, '--']);
+    // --no-renames: diff.renames would report a rename as one path. --no-relative: diff.relative would make paths relative to
+    // the cwd and drop those outside it. -z: core.quotePath never applies. diff.noprefix and colour do not affect --name-only.
+    const out = runGit(root, ['diff', '--no-renames', '--no-relative', '--name-only', '-z', '--end-of-options', from, to, '--']);
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 

@@ -1,6 +1,6 @@
 import path from 'path';
 import { determineBump, GIT_LOG_FORMAT, parseCommits, RS, type Commit } from '../../release/core';
-import { changedFiles, isSafeRelativePath, runGit } from './git';
+import { LOG_SAFETY_ARGS, changedFiles, isSafeRelativePath, runGit } from './git';
 import { esc, clipMessage, isSingleLine } from './text-safety';
 import { RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './types';
 
@@ -79,7 +79,7 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     // (`merge -s ours`), silently dropping real commits from the range.
     // -z ends every commit with NUL, which a message cannot contain: each record is exactly one commit, so a message that
     // embeds the parser's own separator cannot be read as a second commit.
-    const raw = runGit(root, ['log', '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
+    const raw = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
     const commits = raw.split('\0').flatMap((record) => parseCommits(record.split(RS).join('')));
     const derived = deriveFromCommits(commits);

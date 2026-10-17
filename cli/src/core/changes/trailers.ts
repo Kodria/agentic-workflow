@@ -1,4 +1,4 @@
-import { isSafeRevision, runGit } from './git';
+import { LOG_SAFETY_ARGS, isSafeRevision, runGit } from './git';
 
 export const OPT_OUT_TRAILER = 'Change-Record';
 
@@ -17,6 +17,6 @@ export function hasOptOut(root: string, revArgs: string[]): boolean {
     const counts = revArgs.filter((a) => typeof a === 'string' && COUNT_RE.test(a));
     const revs = revArgs.filter((a) => !counts.includes(a));
     if (counts.length > 1 || revs.length === 0 || !revs.every(isSafeRevision)) return false;
-    const out = runGit(root, ['log', FORMAT, ...counts, '--end-of-options', ...revs, '--']);
+    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, FORMAT, ...counts, '--end-of-options', ...revs, '--']);
     return out !== null && out.split('\0').some((value) => value.trim().toLowerCase() === 'none');
 }

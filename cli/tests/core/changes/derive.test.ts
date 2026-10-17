@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { makeRepo, type TestRepo } from './helpers';
-import { isSafeRef, isSafeRevision, isSafeRelativePath, resolveBase, mergeBase, isAncestor, changedFiles, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, isSafeRelativePath, resolveBase, mergeBase, isAncestor, changedFiles, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 import { deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
 import { hasOptOut } from '../../../src/core/changes/trailers';
 
@@ -15,6 +15,25 @@ const UNSAFE_REFS = ['--upload-pack=x', '-x', '-', 'a..b', 'a b', 'main\n', 'x\n
 const c = (type: string, scope: string | null, breaking = false) => ({ type, scope, breaking, subject: 's' });
 const noNewFile = (name: string) => expect(fs.existsSync(path.join(repo.root, name))).toBe(false);
 const nonRepoDir = () => fs.mkdtempSync(path.join(repo.home, 'plain-'));
+
+/** A commit carrying a forged `gpgsig` header, written straight into the object store (no gpg needed). */
+function commitForgedSigned(message: string, file = 'signed.ts'): string {
+    fs.writeFileSync(path.join(repo.root, file), '1');
+    repo.git('add', '-A');
+    const body = [`tree ${repo.git('write-tree')}`, `parent ${repo.git('rev-parse', 'HEAD')}`, 'author t <t@t> 1700000000 +0000', 'committer t <t@t> 1700000000 +0000',
+        'gpgsig -----BEGIN PGP SIGNATURE-----', ' ', ' forged', ' -----END PGP SIGNATURE-----', '', message, ''].join('\n');
+    const bodyFile = path.join(repo.home, 'forged-commit.txt');
+    fs.writeFileSync(bodyFile, body);
+    const sha = repo.git('hash-object', '-t', 'commit', '-w', bodyFile);
+    repo.git('reset', '-q', '--hard', sha);
+    return sha;
+}
+
+/** Repo-local config (the helper only isolates the global one): git prints verification text before each signed commit. */
+function showSignaturesInLog(): void {
+    repo.git('config', 'log.showSignature', 'true');
+    repo.git('config', 'gpg.program', process.execPath); // any program that writes to stderr; the output is what matters, not a real gpg
+}
 
 function branch(): string {
     repo.git('checkout', '-q', '-b', 'feat/x');
@@ -472,6 +491,42 @@ describe('derivation', () => {
         expect(result.diagnostic.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/);
         expect(result.diagnostic.message).toContain('abc\\ndef');
         expect(result.diagnostic.message.length).toBeLessThanOrEqual(300);
+    });
+});
+
+describe('user git configuration does not change what is parsed', () => {
+    test('LOG_SAFETY_ARGS switches signature display off and fixes the encoding', () => {
+        expect([...LOG_SAFETY_ARGS]).toEqual(['--no-show-signature', '--encoding=UTF-8']);
+    });
+    test('R3.3 a signed breaking commit is derived even with log.showSignature on', () => {
+        const base = branch();
+        showSignaturesInLog();
+        commitForgedSigned('feat(zzz)!: signed');
+        expect(repo.git('log', '-1', '--format=%s')).not.toBe('feat(zzz)!: signed'); // the config really pollutes plain git log
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'zzz', semver: 'major', breaking: true, modules: ['.'] } });
+    });
+    test('hasOptOut sees a signed Change-Record: none commit even with log.showSignature on', () => {
+        const base = branch();
+        showSignaturesInLog();
+        commitForgedSigned('docs: signed\n\nChange-Record: none');
+        expect(repo.git('log', '-1', '--format=%s')).not.toBe('docs: signed');
+        expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
+    });
+    test('R3.3 a non-ASCII scope survives i18n.logOutputEncoding', () => {
+        const base = branch();
+        repo.git('config', 'i18n.logOutputEncoding', 'ISO-8859-1');
+        repo.commit({ 'a.ts': '1' }, 'feat(mañana): x');
+        expect(repo.git('log', '-1', '--format=%s')).not.toBe('feat(mañana): x'); // the config really re-encodes plain git log
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'mañana', semver: 'minor', breaking: false, modules: ['.'] } });
+    });
+    test('R3.4 changed paths stay repo-relative with diff.relative on, from a subdirectory too', () => {
+        const base = branch();
+        repo.git('config', 'diff.relative', 'true');
+        repo.commit({ 'cli/src/a.ts': '1', 'top.ts': '1' }, 'feat(c): top and sub');
+        const sub = path.join(repo.root, 'cli');
+        expect(changedFiles(sub, base)?.slice().sort()).toEqual(['cli/src/a.ts', 'top.ts']);
+        expect(deriveFields(sub, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'c', semver: 'minor', breaking: false, modules: ['.', 'cli/src'] } });
     });
 });
 
