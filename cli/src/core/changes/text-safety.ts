@@ -7,6 +7,8 @@ const SINGLE_LINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}\\u2028\\u2029]`);
 const SINGLE_LINE_UNSAFE_ALL = new RegExp(SINGLE_LINE_UNSAFE.source, 'g');
 const MULTILINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}]`);
 
+/** Stand-in returned by the escaping and clipping helpers for non-string input (they never throw). */
+export const NON_STRING = '<non-string>';
 export const MAX_MESSAGE = 300;
 const MAX_ECHO_CODE_POINTS = 80;
 const MAX_ECHO_ESCAPED = 240;
@@ -20,18 +22,24 @@ const unicodeEscape = (c: string): string => `\\u${c.charCodeAt(0).toString(16).
 
 /** JSON-string escaping (without the quotes) plus the line breaks and controls JSON leaves alone. Does not clip. */
 export function escapeText(text: string): string {
+    if (typeof text !== 'string') return NON_STRING;
     return JSON.stringify(text).slice(1, -1).replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
 }
 
 /** Cuts at `maxUnits` UTF-16 units, dropping a trailing high surrogate so a pair is never split. The only cut of untrusted text by unit count. */
 export function sliceNoSplit(text: string, maxUnits: number): string {
-    if (text.length <= maxUnits) return text;
-    const last = text.charCodeAt(maxUnits - 1);
-    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? maxUnits - 1 : maxUnits);
+    // Non-string text, or a limit that is not a finite number of at least 1, yields '' (never throws); fractions are floored.
+    if (typeof text !== 'string' || typeof maxUnits !== 'number' || !Number.isFinite(maxUnits)) return '';
+    const limit = Math.floor(maxUnits);
+    if (limit < 1) return '';
+    if (text.length <= limit) return text;
+    const last = text.charCodeAt(limit - 1);
+    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit);
 }
 
 /** Attacker-controlled text made safe to embed in a diagnostic: bounded, JSON-escaped, never containing a raw line break or control. */
 export function esc(text: string): string {
+    if (typeof text !== 'string') return NON_STRING;
     const points = [...text];
     const clipped = points.length > MAX_ECHO_CODE_POINTS ? `${points.slice(0, MAX_ECHO_CODE_POINTS).join('')}…` : text;
     const escaped = escapeText(clipped);
@@ -39,9 +47,10 @@ export function esc(text: string): string {
 }
 
 /** Escapes any remaining raw line break or control character (no quoting, no clipping). */
-export const cleanText = (text: string): string => text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
+export const cleanText = (text: string): string => (typeof text === 'string' ? text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape) : NON_STRING);
 
 /** Clips to MAX_MESSAGE UTF-16 units including the ellipsis. */
 export function clipMessage(message: string): string {
+    if (typeof message !== 'string') return NON_STRING;
     return message.length <= MAX_MESSAGE ? message : `${sliceNoSplit(message, MAX_MESSAGE - 1)}…`;
 }

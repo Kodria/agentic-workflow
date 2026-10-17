@@ -1,4 +1,4 @@
-import { MAX_MESSAGE, clipMessage, esc, escapeText, isSafeMultiline, isSingleLine, sliceNoSplit } from '../../../src/core/changes/text-safety';
+import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isSafeMultiline, isSingleLine, sliceNoSplit } from '../../../src/core/changes/text-safety';
 
 const LINE_BREAKS = ['\r', '\n', '\u0085', ' ', ' '];
 
@@ -90,5 +90,41 @@ describe('clipMessage', () => {
             expect(out.length).toBeLessThanOrEqual(MAX_MESSAGE);
             expect(out).not.toMatch(LONE);
         }
+    });
+});
+
+describe('every export tolerates non-string text without throwing', () => {
+    const nonStrings: Array<[string, unknown]> = [['undefined', undefined], ['null', null], ['42', 42], ['{}', {}], ['[]', []], ['a Buffer', Buffer.from('x')], ['NaN', NaN]];
+    test.each(nonStrings)('esc, escapeText, cleanText and clipMessage map %s to the placeholder', (_label, value) => {
+        expect(() => esc(value as string)).not.toThrow();
+        expect(esc(value as string)).toBe(NON_STRING);
+        expect(escapeText(value as string)).toBe(NON_STRING);
+        expect(cleanText(value as string)).toBe(NON_STRING);
+        expect(clipMessage(value as string)).toBe(NON_STRING);
+    });
+    test.each(nonStrings)('sliceNoSplit returns an empty string for text %s', (_label, value) => {
+        expect(() => sliceNoSplit(value as string, 5)).not.toThrow();
+        expect(sliceNoSplit(value as string, 5)).toBe('');
+    });
+    test.each(nonStrings)('isSingleLine and isSafeMultiline are false for %s', (_label, value) => {
+        expect(isSingleLine(value)).toBe(false);
+        expect(isSafeMultiline(value)).toBe(false);
+    });
+    test('the placeholder is itself single-line text', () => {
+        expect(isSingleLine(NON_STRING)).toBe(true);
+    });
+});
+
+describe('sliceNoSplit with a bad limit never throws and never over-returns', () => {
+    test.each([['NaN', NaN], ['-1', -1], ['-Infinity', -Infinity], ['Infinity', Infinity], ['0', 0], ['0.9', 0.9], ['undefined', undefined], ['null', null], ['a string', '3']])('maxUnits %s yields an empty string', (_label, limit) => {
+        expect(() => sliceNoSplit('abc', limit as number)).not.toThrow();
+        expect(sliceNoSplit('abc', limit as number)).toBe('');
+    });
+    test('a fractional limit is floored', () => {
+        expect(sliceNoSplit('abcdef', 2.9)).toBe('ab');
+    });
+    test('a whole-number limit is unchanged', () => {
+        expect(sliceNoSplit('abcdef', 6)).toBe('abcdef');
+        expect(sliceNoSplit('abcdef', 100)).toBe('abcdef');
     });
 });

@@ -250,6 +250,88 @@ describe('validateRecordShape', () => {
         });
     });
 
+    describe('R1.4 required fields and value rules', () => {
+        const REQUIRED = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'verification', 'manual_validation', 'risks', 'rollback'];
+        test.each(REQUIRED)('a missing %s is reported by name', (key) => {
+            const r = check({ [key]: '' });
+            expect(r.record).toBeUndefined();
+            expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'field-invalid', field: key, message: `missing required field "${key}"` }));
+        });
+        test('links and provenance are optional', () => {
+            expect(check({}).diagnostics).toEqual([]);
+        });
+        test('schema must be awm.change-record/v1', () => {
+            expectDiag(check({ schema: 'schema: awm.change-record/v2' }), 'field-invalid', 'schema');
+        });
+        test.each(['"false"', '1', 'null', '[]'])('breaking: %s is not a boolean', (v) => {
+            expectDiag(check({ breaking: `breaking: ${v}` }), 'field-invalid', 'breaking');
+        });
+        test('breaking: true is accepted', () => {
+            expect(check({ breaking: 'breaking: true' }).diagnostics).toEqual([]);
+        });
+        test('verification.overall must be a receipt verdict', () => {
+            expectDiag(check({ verification: `verification:\n  commit: ${SHA}\n  overall: green\n  sensors: {}\n  receipt_digest: ${DIGEST}` }), 'field-invalid', 'verification.overall');
+        });
+        test.each(['pass', 'fail', 'skipped', 'not_certified'])('verification.overall %s is accepted', (overall) => {
+            expect(check({ verification: `verification:\n  commit: ${SHA}\n  overall: ${overall}\n  sensors: {}\n  receipt_digest: ${DIGEST}` }).diagnostics).toEqual([]);
+        });
+        test('title of 120 characters is accepted and 121 is rejected', () => {
+            expect(check({ title: `title: "${'x'.repeat(120)}"` }).diagnostics).toEqual([]);
+            expectDiag(check({ title: `title: "${'x'.repeat(121)}"` }), 'field-invalid', 'title');
+        });
+        test('title length counts code points', () => {
+            expect(check({ title: `title: "${'😀'.repeat(120)}"` }).diagnostics).toEqual([]);
+            expectDiag(check({ title: `title: "${'😀'.repeat(121)}"` }), 'field-invalid', 'title');
+        });
+        test('title must not be blank', () => {
+            expectDiag(check({ title: 'title: "   "' }), 'field-invalid', 'title');
+        });
+        test.each(['"none"', '"a"', '{}', '5'])('risks: %s is not an array', (v) => {
+            expectDiag(check({ risks: `risks: ${v}` }), 'field-invalid', 'risks');
+        });
+        test('risks items must be non-empty strings', () => {
+            expectDiag(check({ risks: 'risks:\n  - ""' }), 'field-invalid', 'risks');
+            expectDiag(check({ risks: 'risks:\n  - 5' }), 'field-invalid', 'risks');
+        });
+        test('risks with entries are accepted', () => {
+            expect(check({ risks: 'risks:\n  - "latency"\n  - "format drift"' }).diagnostics).toEqual([]);
+        });
+        test('links.plan pointing at a directory is rejected', () => {
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
+            try {
+                fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+                expectDiag(check({ links: 'links:\n  plan: docs/plans' }, { root }), 'field-invalid', 'links.plan');
+            } finally { fs.rmSync(root, { recursive: true, force: true }); }
+        });
+        test('a complete provenance block with canonical timestamps is accepted', () => {
+            const r = check({ provenance: 'provenance:\n  agent: "claude-code"\n  model: "claude-sonnet-5-5"\n  session: "session_01"\n  started_at: "2026-10-17T10:00:00.000Z"\n  finished_at: "2026-10-17T11:30:15.250Z"' });
+            expect(r.diagnostics).toEqual([]);
+            expect(r.record?.provenance?.agent).toBe('claude-code');
+        });
+        test.each(['started_at', 'finished_at'])('provenance.%s without milliseconds is rejected', (key) => {
+            expectDiag(check({ provenance: `provenance:\n  ${key}: "2026-10-17T10:00:00Z"` }), 'field-invalid', `provenance.${key}`);
+        });
+        test('provenance must be a mapping', () => {
+            expectDiag(check({ provenance: 'provenance: "x"' }), 'field-invalid', 'provenance');
+        });
+    });
+
+    describe('R1.5 commit and receipt digest', () => {
+        const ver = (commit: string, digest: string) => check({ verification: `verification:\n  commit: "${commit}"\n  overall: pass\n  sensors: {}\n  receipt_digest: "${digest}"` });
+        test('a 40-hex commit is accepted', () => {
+            expect(ver('0123456789abcdef0123456789abcdef01234567', DIGEST).diagnostics).toEqual([]);
+        });
+        test.each([['39 hex', 'a'.repeat(39)], ['41 hex', 'a'.repeat(41)], ['uppercase hex', 'A'.repeat(40)], ['non-hex characters', 'g'.repeat(40)], ['empty', '']])('a commit with %s is rejected', (_label, commit) => {
+            expectDiag(ver(commit, DIGEST), 'field-invalid', 'verification.commit');
+        });
+        test('a sha256 digest is accepted', () => {
+            expect(ver(SHA, 'sha256:' + '0123456789abcdef'.repeat(4)).diagnostics).toEqual([]);
+        });
+        test.each([['63 hex', 'sha256:' + 'b'.repeat(63)], ['65 hex', 'sha256:' + 'b'.repeat(65)], ['uppercase hex', 'sha256:' + 'B'.repeat(64)], ['no sha256: prefix', 'b'.repeat(64)], ['another algorithm', 'sha1:' + 'b'.repeat(64)]])('a digest with %s is rejected', (_label, digest) => {
+            expectDiag(ver(SHA, digest), 'field-invalid', 'verification.receipt_digest');
+        });
+    });
+
     describe('R1.6 body sections', () => {
         test('a missing section is rejected', () => {
             expectDiag(validateRecordShape(NAME, doc(fm(), '## Qué se hizo\nA\n')), 'body-section-missing');
