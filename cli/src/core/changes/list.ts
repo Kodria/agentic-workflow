@@ -1,9 +1,9 @@
 import path from 'path';
-import { LOG_SAFETY_ARGS, addedFilesUnder, repoIdentity, runGit } from './git';
-import { RECORD_FILE_RE } from './parse';
+import { LOG_SAFETY_ARGS, addedFilesUnder, repoIdentity, runGit, runGitBytes } from './git';
+import { isRecordPath } from './parse';
 import { resolveBaseRef, type Failure } from './range';
-import { esc, isObj } from './text-safety';
-import { cleanLine, escapeBidi, parsePr } from './list-parse';
+import { esc, escapeBidi, isObj } from './text-safety';
+import { cleanLine, parsePr } from './list-parse';
 import { hasOptOut } from './trailers';
 import { COMMIT_ID, MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type Diagnostic } from './types';
 import { validateRecordShape } from './validate-shape';
@@ -95,7 +95,6 @@ const cleanDiagnostics = (list: Diagnostic[]): Diagnostic[] => list.map((d) => (
 type Read<T> = { ok: true; value: T } | { ok: false };
 const UNREADABLE: { ok: false } = { ok: false };
 
-const isRecordPath = (rel: string): boolean => path.posix.dirname(rel) === RECORD_DIR && RECORD_FILE_RE.test(path.posix.basename(rel));
 const RECORD_PATHSPEC = `:(top,literal)${RECORD_DIR}`;
 const SEP = '\x1f';
 const GIT_FAILED_RECORD: ListedRecord = { path: RECORD_DIR, diagnostics: [{ code: 'git-failed', message: 'git could not list the records added by this commit' }] };
@@ -190,8 +189,13 @@ function readOne(root: string, rel: string, info: TreeEntry | undefined): Listed
     if (info === undefined) return invalid(rel, 'record-invalid', 'the record is not in the commit');
     if (info.type !== 'blob' || (info.mode !== '100644' && info.mode !== '100755')) return invalid(rel, 'record-invalid', 'the record is not a regular file');
     if (info.size > MAX_RECORD_BYTES) return invalid(rel, 'record-too-large', `record exceeds ${MAX_RECORD_BYTES} bytes`);
-    const text = runGit(root, ['show', '--no-textconv', '--end-of-options', info.oid]);
-    if (text === null) return invalid(rel, 'git-failed', 'git could not read the record');
+    const bytes = runGitBytes(root, ['show', '--no-textconv', '--end-of-options', info.oid]);
+    if (bytes === null) return invalid(rel, 'git-failed', 'git could not read the record');
+    // Strict, as validate reads a record (record-io.ts): a lossy decode would turn bad bytes into U+FFFD and report the record valid.
+    // `ignoreBOM: true` keeps a leading BOM, so the record then fails as invalid in both.
+    let text: string;
+    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+    catch { return invalid(rel, 'record-invalid', `${esc(path.posix.basename(rel))} is not valid UTF-8`); }
     const shape = validateRecordShape(path.posix.basename(rel), text);
     if (shape.record) return { path: rel, ...(cleanValue(shape.record) as ChangeRecord) };
     return { path: rel, diagnostics: cleanDiagnostics(shape.diagnostics) };

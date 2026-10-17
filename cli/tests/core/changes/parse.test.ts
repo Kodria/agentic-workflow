@@ -1,4 +1,4 @@
-import { isValidSlug, isValidRecordFileName, loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
+import { isRecordPath, isValidSlug, isValidRecordFileName, loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
 
 describe('isValidSlug', () => {
     test.each(['a', 'a1', 'a-b-1', '1-2', 'a'.repeat(64)])('accepts %s', (slug) => {
@@ -134,5 +134,13 @@ describe('exported helpers never throw on non-string input', () => {
             expect(message.length).toBeLessThanOrEqual(300);
             expect(message).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
         }
+    });
+});
+
+describe('isRecordPath (the one copy, used by change validate and changes list)', () => {
+    test.each(['docs/changes/2026-10-17-rec.md', 'docs/changes/2026-10-17-a-b-c.md'])('accepts %s', (rel) => expect(isRecordPath(rel)).toBe(true));
+    test.each(['docs/changes/sub/2026-10-17-rec.md', 'docs/changes', 'docs/changes/notes.md', 'docs/changes/2026-10-17-Rec.md', 'other/2026-10-17-rec.md', '/docs/changes/2026-10-17-rec.md', '', 'docs/changes/2026-10-17-rec.md/x'])('rejects %j', (rel) => expect(isRecordPath(rel)).toBe(false));
+    test('never throws on non-string input', () => {
+        for (const v of [undefined, null, 5, {}]) expect(isRecordPath(v as never)).toBe(false);
     });
 });

@@ -6,6 +6,7 @@ import { FIRST, SINCE_48H, UNSAFE, adoptIn, byClass, commitLiterally, historyIn,
 import { MAX_SUBJECT, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 import { resolveBase } from '../../../src/core/changes/git';
 import { resolveRange } from '../../../src/core/changes/range';
+import { runChangeValidate } from '../../../src/commands/change';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
 let repo: TestRepo;
@@ -179,6 +180,29 @@ describe('listChanges: classification (R5.3)', () => {
         expect(bad?.records[0]).toMatchObject({ path: recordPath('2026-10-17-bad') });
         expect(bad?.records[0]).not.toHaveProperty('schema');
         expect((bad?.records[0] as { diagnostics: Array<{ code: string }> }).diagnostics.map((d) => d.code)).toContain('body-section-missing');
+    });
+    test('a record that is not valid UTF-8 gets the verdict validate gives it: record-invalid, so invalid-record (never a lossy read)', () => {
+        adopt();
+        const rel = recordPath(FIRST);
+        fs.mkdirSync(path.dirname(path.join(repo.root, rel)), { recursive: true });
+        // A valid record followed by a byte sequence that is not UTF-8: a lossy decode would turn it into U+FFFD and say nothing.
+        fs.writeFileSync(path.join(repo.root, rel), Buffer.concat([Buffer.from(record(FIRST)), Buffer.from([0xc3, 0x28, 0x0a])]));
+        repo.gitAt('2026-10-16T20:00:00Z', 'add', '-A');
+        repo.gitAt('2026-10-16T20:00:00Z', 'commit', '-q', '-m', 'feat: latin one');
+        const entry = listed().changes[0];
+        expect(entry.classification).toBe('invalid-record');
+        expect(entry.records).toHaveLength(1);
+        const diagnostics = (entry.records[0] as { diagnostics: Array<{ code: string; message: string }> }).diagnostics;
+        expect(diagnostics.map((d) => d.code)).toEqual(['record-invalid']);
+        expect(diagnostics[0].message).toMatch(/is not valid UTF-8/);
+        const validated = runChangeValidate(repo.root, rel, { json: true });
+        const report = JSON.parse(validated.stdout) as { records: Array<{ diagnostics: Array<{ code: string }> }> };
+        expect(report.records[0].diagnostics.map((d) => d.code)).toEqual(['record-invalid']);
+    });
+    test('a record with a byte order mark is read as validate reads it (the BOM is kept, the record then fails as invalid)', () => {
+        adopt();
+        repo.commit({ [recordPath(FIRST)]: `\ufeff${record(FIRST)}` }, 'feat: bom', '2026-10-16T20:00:00Z');
+        expect(listed().changes[0].classification).toBe('invalid-record');
     });
     test('exempt and missing entries have no records', () => {
         history();

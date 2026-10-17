@@ -25,7 +25,8 @@ describe('renderJson (R5.6)', () => {
         expect(lines(out)).toHaveLength(1);
     });
     test('has exactly the documented keys, in order', () => {
-        expect(Object.keys(JSON.parse(renderJson(result())))).toEqual(['repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
+        expect(Object.keys(JSON.parse(renderJson(result())))).toEqual(['schema', 'repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
+        expect(JSON.parse(renderJson(result())).schema).toBe('awm.changes-list/v1');
     });
     test('each change has exactly the documented keys, in order', () => {
         const out = JSON.parse(renderJson(result({ changes: [change()] })));

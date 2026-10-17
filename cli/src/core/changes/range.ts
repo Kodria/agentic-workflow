@@ -11,7 +11,7 @@ import { RECORD_DIR } from './types';
 export interface Failure { code: string; message: string; remedy?: string }
 
 export const REMEDY_BASE = 'pass --base <ref>';
-export const HEAD_MOVED: Failure = { code: 'git-failed', message: 'HEAD moved during derivation' };
+export const HEAD_MOVED: Failure = { code: 'head-moved', message: 'HEAD moved during derivation' };
 
 const KINDS: readonly string[] = ['ok', 'absent', 'unsafe', 'error'];
 

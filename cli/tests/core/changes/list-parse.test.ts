@@ -1,6 +1,6 @@
 import { LINEAR_TIME_BOUND_MS, bad } from './helpers';
 import { NOW, UNSAFE } from './list-fixtures';
-import { cleanLine, escapeBidi, parsePr, parseSince } from '../../../src/core/changes/list-parse';
+import { cleanLine, parsePr, parseSince } from '../../../src/core/changes/list-parse';
 
 // Repo-free tests of the pure parsing of `awm changes list`: nothing here starts git.
 
@@ -116,14 +116,5 @@ describe('cleanLine', () => {
         const start = Date.now();
         expect(cleanLine('\u001b'.repeat(5_000_000), 1024).length).toBe(1024);
         expect(Date.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
-    });
-});
-
-describe('escapeBidi', () => {
-    test.each(['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069'])('escapes %j', (c) => {
-        expect(escapeBidi(`a${c}b`)).toBe(`a\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}b`);
-    });
-    test('leaves other text alone', () => {
-        expect(escapeBidi('plain \u00e9 \u6f22 \u{1F600}')).toBe('plain \u00e9 \u6f22 \u{1F600}');
     });
 });

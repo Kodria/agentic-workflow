@@ -1,8 +1,11 @@
+import path from 'path';
 import yaml from 'js-yaml';
 import { clipMessage, escapeText } from './text-safety';
-import type { Diagnostic } from './types';
+import { RECORD_DIR, type Diagnostic } from './types';
 
 export const RECORD_FILE_RE = /^(\d{4})-(\d{2})-(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
+/** True for a repo-relative, `/`-separated path directly inside `docs/changes/` whose file name looks like a record (`YYYY-MM-DD-<slug>.md`). */
+export const isRecordPath = (rel: string): boolean => typeof rel === 'string' && path.posix.dirname(rel) === RECORD_DIR && RECORD_FILE_RE.test(path.posix.basename(rel));
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function isValidSlug(slug: unknown): slug is string {

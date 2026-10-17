@@ -3,11 +3,6 @@ import { NON_STRING, cleanText, sliceNoSplit } from './text-safety';
 // Pure text and number parsing of `awm changes list`: no git, no I/O, nothing throws. Shared by the reader (list.ts), the
 // renderings (render-list.ts) and the command.
 
-const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
-const hex4 = (c: string): string => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
-/** Bidirectional controls would reorder what a terminal shows around them; they are written as \uXXXX. */
-export const escapeBidi = (text: string): string => text.replace(BIDI, hex4);
-
 /**
  * Untrusted text as one clean line of at most `max` UTF-16 units: controls, line breaks and bidi marks escaped, an ellipsis
  * where it was cut, a surrogate pair never split. Never throws.
@@ -15,7 +10,7 @@ export const escapeBidi = (text: string): string => text.replace(BIDI, hex4);
 export function cleanLine(text: unknown, max: number): string {
     if (typeof text !== 'string') return NON_STRING;
     const raw = sliceNoSplit(text, max);
-    let out = escapeBidi(cleanText(raw));
+    let out = cleanText(raw);
     if (raw.length < text.length || out.length > max) out = `${out.length > max - 1 ? sliceNoSplit(out, max - 1) : out}…`;
     return out;
 }

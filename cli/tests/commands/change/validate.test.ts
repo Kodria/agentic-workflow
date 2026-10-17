@@ -150,6 +150,17 @@ describe('target path safety', () => {
         expectFailure(r, 'path-invalid');
         expect(r.stderr).not.toMatch(rawUnsafe);
     });
+    test.each(['\u202e', '\u2066', '\u200f', '\u061c'])('path-invalid: a bidi control %j in the target is echoed escaped, on stderr and in --json', (c) => {
+        const target = `docs/changes/a${c}b.md`;
+        const escaped = `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+        const plain = runChangeValidate(repo.root, target, {});
+        expectFailure(plain, 'path-invalid');
+        expect(plain.stderr).toContain(escaped);
+        expect(plain.stderr).not.toContain(c);
+        const json = runChangeValidate(repo.root, target, { json: true });
+        expect(json.stdout + json.stderr).toContain(escaped);
+        expect(json.stdout + json.stderr).not.toContain(c);
+    });
     test('path-invalid: an absolute path outside the repository', () => {
         expectFailure(runChangeValidate(repo.root, path.join(repo.home, '2026-10-17-rec.md'), {}), 'path-invalid');
     });
@@ -975,20 +986,20 @@ describe('robustness: never throws, always a CommandResult', () => {
         expect(r.stderr).toContain('TypeError');
         expect(r.stderr).not.toContain('secret');
     });
-    test('a HEAD that moves during validation is git-failed, not a verdict', () => {
+    test('a HEAD that moves during validation is head-moved, not a verdict', () => {
         commitRecord();
         const real = gitModule.headSha;
         let calls = 0;
         jest.spyOn(gitModule, 'headSha').mockImplementation((root: string) => (++calls === 1 ? real(root) : 'f'.repeat(40)));
-        expectFailure(runChangeValidate(repo.root, undefined, {}), 'git-failed');
+        expectFailure(runChangeValidate(repo.root, undefined, {}), 'head-moved');
     });
-    test('a HEAD that moves during an exempt run is git-failed, not an exemption', () => {
+    test('a HEAD that moves during an exempt run is head-moved, not an exemption', () => {
         repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: none');
         const real = gitModule.headSha;
         let calls = 0;
         jest.spyOn(gitModule, 'headSha').mockImplementation((root: string) => (++calls === 1 ? real(root) : 'f'.repeat(40)));
         const r = runChangeValidate(repo.root, undefined, {});
-        expectFailure(r, 'git-failed');
+        expectFailure(r, 'head-moved');
         expect(r.stderr).toContain('HEAD moved');
     });
     test('an unreadable HEAD is git-failed', () => {

@@ -1,5 +1,5 @@
 import path from 'path';
-import { execGit } from './git-env';
+import { execGit, execGitBytes } from './git-env';
 import { isSafeRelativePath, isSingleLine } from './text-safety';
 import { COMMIT_ID } from './types';
 import { gitState } from './worktree';
@@ -28,6 +28,17 @@ export function runGit(cwd: string, args: string[]): string | null {
     if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
     try {
         return execGit(cwd, args, { maxBuffer: MAX_OUTPUT });
+    } catch {
+        return null;
+    }
+}
+
+/** Like runGit, but returns the raw bytes of stdout (for content that must be decoded strictly); null on the same failures. */
+export function runGitBytes(cwd: string, args: string[]): Buffer | null {
+    if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
+    if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
+    try {
+        return execGitBytes(cwd, args, { maxBuffer: MAX_OUTPUT });
     } catch {
         return null;
     }

@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import type { CommandResult } from '../../core/command-result';
 import { fail, failed, inCwd as inCwdShared, line } from '../../core/changes/command';
 import { readJournal } from '../../core/journal/store';
-import { RECORD_FILE_RE, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
+import { isRecordPath, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
 import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot, runGit } from '../../core/changes/git';
 import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
@@ -360,8 +360,6 @@ function repoRelative(root: string, cwd: string, target: string): string | null 
     }
     return null;
 }
-
-const isRecordPath = (rel: string): boolean => path.posix.dirname(rel) === RECORD_DIR && RECORD_FILE_RE.test(path.posix.basename(rel));
 
 /** True only for a real `--json` flag; anything else (including a malformed options value) keeps the stderr form. */
 function wantsJson(rawOpts: unknown): boolean {

@@ -251,13 +251,13 @@ describe('awm change new: generated record is checked before it is written', () 
 
 describe('awm change new: HEAD moving while the command runs', () => {
     freshRepo();
-    test('a HEAD that moves before the record is written is git-failed and nothing is written', () => {
+    test('a HEAD that moves before the record is written is head-moved and nothing is written', () => {
         receiptForHead();
         const moving = () => { repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'); return now(); };
-        expectFailure(run('change-record', {}, { now: moving }), 'git-failed');
+        expectFailure(run('change-record', {}, { now: moving }), 'head-moved');
         expect(recordFiles()).toEqual([]);
     });
-    test('a HEAD that moves before a refresh is written is git-failed and the record is untouched', () => {
+    test('a HEAD that moves before a refresh is written is head-moved and the record is untouched', () => {
         receiptForHead();
         run('change-record');
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
@@ -269,7 +269,7 @@ describe('awm change new: HEAD moving while the command runs', () => {
             repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late');
             return out;
         });
-        expectFailure(run('change-record', { refresh: true }), 'git-failed');
+        expectFailure(run('change-record', { refresh: true }), 'head-moved');
         expect(read()).toBe(before);
     });
 });
@@ -295,10 +295,10 @@ describe('awm change new: HEAD is pinned before the derivation', () => {
         repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late');
         fs.writeFileSync(path.join(repo.root, 'late-untracked.txt'), 'x');
     };
-    test('a commit landing between the pin and the derivation is git-failed, not a record of mixed commits', () => {
+    test('a commit landing between the pin and the derivation is head-moved, not a record of mixed commits', () => {
         receiptForHead();
         onGit('merge-base', 'after', land);
-        expectFailure(run('change-record'), 'git-failed');
+        expectFailure(run('change-record'), 'head-moved');
         expect(recordFiles()).toEqual([]);
     });
     test('the message says HEAD moved during derivation', () => {
@@ -306,10 +306,10 @@ describe('awm change new: HEAD is pinned before the derivation', () => {
         onGit('merge-base', 'after', land);
         expect(run('change-record').stderr).toContain('HEAD moved during derivation');
     });
-    test('a commit landing after the derivation but before the write is git-failed', () => {
+    test('a commit landing after the derivation but before the write is head-moved', () => {
         receiptForHead();
         onGit('status', 'before', () => repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'));
-        expectFailure(run('change-record'), 'git-failed');
+        expectFailure(run('change-record'), 'head-moved');
         expect(recordFiles()).toEqual([]);
     });
 });

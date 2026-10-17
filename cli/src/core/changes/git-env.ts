@@ -66,3 +66,8 @@ export function gitSpawnOptions(cwd: string, extras: GitSpawnExtras = {}) {
 export function execGit(cwd: string, args: string[], extras: GitSpawnExtras = {}): string {
     return execFileSync('git', args, { ...gitSpawnOptions(cwd, extras), stdio: ['ignore', 'pipe', extras.stderr ?? 'pipe'] });
 }
+
+/** Like execGit, but returns the raw bytes of stdout (no decoding): for content that must be checked as UTF-8 strictly. */
+export function execGitBytes(cwd: string, args: string[], extras: GitSpawnExtras = {}): Buffer {
+    return execFileSync('git', args, { ...gitSpawnOptions(cwd, extras), encoding: 'buffer' as const, stdio: ['ignore', 'pipe', extras.stderr ?? 'pipe'] });
+}

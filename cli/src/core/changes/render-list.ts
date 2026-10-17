@@ -8,6 +8,8 @@ import { clipMessage, isObj, sliceNoSplit } from './text-safety';
 const INVALID_TEXT = 'invalid-input: not a list result\n';
 const MAX_VOICE_LINE = 600;
 const MAX_TITLE = 200;
+/** R5.6: the first key of the JSON, so a consumer can tell which contract it is reading. */
+export const LIST_SCHEMA = 'awm.changes-list/v1';
 
 const usable = (r: unknown): r is ListResult => isObj(r) && Array.isArray(r.changes) && typeof r.base === 'string' && typeof r.since === 'string';
 const count = (n: unknown): number => (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : 0);
@@ -24,7 +26,7 @@ export function renderJson(result: ListResult): string {
     try {
         if (!usable(result)) return '{"error":"invalid-input"}\n';
         const changes = result.changes.map((c: ListedChange) => ({ sha: c.sha, subject: c.subject, classification: c.classification, merged_at: c.merged_at, pr: c.pr, release: c.release, records: c.records }));
-        return `${JSON.stringify({ repo: result.repo, base: result.base, since: result.since, adopted: result.adopted, truncated: result.truncated, omitted: result.omitted, changes })}\n`;
+        return `${JSON.stringify({ schema: LIST_SCHEMA, repo: result.repo, base: result.base, since: result.since, adopted: result.adopted, truncated: result.truncated, omitted: result.omitted, changes })}\n`;
     } catch {
         return '{"error":"invalid-input"}\n';
     }

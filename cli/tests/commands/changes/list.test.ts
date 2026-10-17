@@ -244,7 +244,7 @@ describe('awm changes list: formats (R5.6)', () => {
         history();
         const r = run({ since: '48h', format: 'json' });
         expect(r.stdout.split('\n')).toHaveLength(2);
-        expect(Object.keys(JSON.parse(r.stdout))).toEqual(['repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
+        expect(Object.keys(JSON.parse(r.stdout))).toEqual(['schema', 'repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
         expect(JSON.parse(r.stdout).adopted).toBe(true);
     });
     test('voice speaks recorded changes and counts the rest', () => {

@@ -1,4 +1,4 @@
-import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine, isWellFormed, sliceNoSplit } from '../../../src/core/changes/text-safety';
+import { MAX_MESSAGE, NON_STRING, cleanText, escapeBidi, clipMessage, esc, escapeText, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine, isWellFormed, sliceNoSplit } from '../../../src/core/changes/text-safety';
 
 const LINE_BREAKS = ['\r', '\n', '\u0085', ' ', ' '];
 
@@ -211,5 +211,30 @@ describe('isCanonicalIso', () => {
     });
     test.each([[undefined], [null], [0], [{}], [new Date(0)], [Symbol('x')], [{ toString: () => { throw new Error('boom'); } }], [{ toString: () => '2026-10-17T12:00:00.000Z' }]])('rejects the non-string %p without throwing', (v) => {
         expect(isCanonicalIso(v)).toBe(false);
+    });
+});
+
+// Bidirectional controls reorder what a terminal shows around them: every echo of untrusted text escapes them, the same way everywhere.
+const BIDI_CHARS = ['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e', '\u2066', '\u2067', '\u2068', '\u2069'];
+const hex = (c: string): string => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+
+describe('bidi controls are escaped by the shared helpers', () => {
+    test.each(BIDI_CHARS)('escapeBidi escapes %j', (c) => {
+        expect(escapeBidi(`a${c}b`)).toBe(`a${hex(c)}b`);
+    });
+    test('escapeBidi leaves other text alone', () => {
+        expect(escapeBidi('plain \u00e9 \u6f22 \u{1F600}')).toBe('plain \u00e9 \u6f22 \u{1F600}');
+    });
+    test.each([...BIDI_CHARS, '\u2028', '\u2029'])('escapeText, cleanText and esc escape %j', (c) => {
+        expect(escapeText(`a${c}b`)).toBe(`a${hex(c)}b`);
+        expect(cleanText(`a${c}b`)).toBe(`a${hex(c)}b`);
+        expect(esc(`a${c}b`)).toBe(`a${hex(c)}b`);
+    });
+    test('the escaped output of every helper holds no bidi control and no raw line separator', () => {
+        const hostile = `${BIDI_CHARS.join('')}\u2028\u2029x`;
+        for (const out of [escapeText(hostile), cleanText(hostile), esc(hostile)]) expect(out).not.toMatch(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/);
+    });
+    test('they are still valid text for the predicates: isSingleLine is about controls and line breaks, not bidi', () => {
+        expect(isSingleLine('a\u202eb')).toBe(true);
     });
 });

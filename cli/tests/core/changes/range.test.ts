@@ -1,4 +1,5 @@
 import { bad, branchOff, makeRepo, nonRepoDir, type TestRepo } from './helpers';
+import { failed } from '../../../src/core/changes/command';
 import { HEAD_MOVED, headMovedFailure, recordDirProblem, resolveRange } from '../../../src/core/changes/range';
 import type { RecordDir } from '../../../src/core/changes/record-io';
 
@@ -45,6 +46,11 @@ describe('resolveRange', () => {
 
 describe('headMovedFailure', () => {
     withRepo();
+    test('HEAD moving has its own code, and it is an operational failure (exit 2) like the others', () => {
+        expect(HEAD_MOVED.code).toBe('head-moved');
+        expect(failed(HEAD_MOVED)).toMatchObject({ code: 2, stdout: '' });
+        expect(failed(HEAD_MOVED).stderr).toMatch(/^head-moved: HEAD moved during derivation\n$/);
+    });
     test('is null while HEAD is the pinned commit and HEAD_MOVED once it moved', () => {
         branchOff(repo);
         const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
