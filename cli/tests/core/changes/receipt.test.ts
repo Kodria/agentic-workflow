@@ -5,12 +5,13 @@ jest.mock('../../../src/commands/sensors/run', () => ({
 }));
 
 import fs from 'fs';
+import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
-import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
+import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, sensorPairs, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
 import { resolveSensorProject } from '../../../src/commands/sensors/project';
@@ -504,6 +505,22 @@ describe('receipt', () => {
         const head = writeValid();
         mutateFile(head, mutate);
         expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+    });
+    test('R2.2c the digest covers the sensors as name-sorted (code unit) pairs, whatever the insertion order and integer-like names', () => {
+        const base = { schema: 1 as const, commit: 'a'.repeat(40), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', overall: 'pass' as const };
+        const orders = [['9', '10', 'tsc'], ['tsc', '10', '9'], ['10', 'tsc', '9']];
+        const digests = orders.map((names) => computeReceiptDigest({ ...base, sensors: Object.fromEntries(names.map((n) => [n, 'pass' as const])) }));
+        expect(new Set(digests).size).toBe(1);
+        // Pinned: the canonical form is an array of [name, status] pairs sorted by code unit ('10' < '9' < 'tsc'), not JS object order.
+        const canonical = JSON.stringify({ schema: 1, commit: base.commit, ranAt: base.ranAt, cliVersion: base.cliVersion, overall: 'pass', sensors: [['10', 'pass'], ['9', 'pass'], ['tsc', 'pass']] });
+        expect(digests[0]).toBe('sha256:' + crypto.createHash('sha256').update(canonical).digest('hex'));
+    });
+    test('R2.2c a receipt with integer-like sensor names round-trips and its sensors read back as the same pairs', () => {
+        const names = ['9', '10', 'tsc'];
+        const pre = captureReceiptPrecondition(root);
+        expect(finalizeReceipt(pre, { overall: 'pass', sensors: names.map((name) => ({ name, status: 'pass', errors: [] })) } as never)).toBe('');
+        const read = readReceipt(root, g('rev-parse', 'HEAD'));
+        expect(read.ok && sensorPairs(read.receipt.sensors)).toEqual([['10', 'pass'], ['9', 'pass'], ['tsc', 'pass']]);
     });
     test('R2.3 the digest changes with each covered field', () => {
         const base = { schema: 1 as const, commit: 'a'.repeat(40), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', overall: 'pass' as const, sensors: { lint: 'pass' as const } };

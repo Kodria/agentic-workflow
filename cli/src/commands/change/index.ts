@@ -10,7 +10,7 @@ import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOut
 import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
 import { hasOptOut } from '../../core/changes/trailers';
-import { readReceipt } from '../../core/changes/receipt';
+import { readReceipt, sensorPairs } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
 import { isRegularFileInside } from '../../core/changes/fs-safe';
 import { createExclusive, createRecordDir, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
@@ -253,10 +253,8 @@ function isAncestorOfHead(run: ValidateRun, commit: string): boolean {
     return run.ancestors.get(commit) === true;
 }
 
-const sameSensors = (a: Record<string, string>, b: Record<string, string>): boolean => {
-    const keys = Object.keys(a);
-    return keys.length === Object.keys(b).length && keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && a[k] === b[k]);
-};
+/** The same sensors with the same statuses, compared as name-sorted pairs (never by JavaScript object key order). */
+const sameSensors = (a: Record<string, string>, b: Record<string, string>): boolean => JSON.stringify(sensorPairs(a)) === JSON.stringify(sensorPairs(b));
 
 /** A derived value for a message: strings escaped inside quotes (esc), lists bracketed, everything else as JSON; at most MAX_SHOWN_VALUE units. */
 function show(value: unknown): string {

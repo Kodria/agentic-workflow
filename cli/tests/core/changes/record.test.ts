@@ -147,8 +147,10 @@ describe('validateRecordShape', () => {
                 expectDiag(issue(v), 'field-invalid', 'links.issue');
             }
         });
-        test('links.issue keeps accepting a URL with credentials (only `awm change new` refuses to write one)', () => {
-            expect(check({ links: 'links:\n  issue: "https://user@example.com/1"' }).diagnostics).toEqual([]);
+        test.each(['"https://user@example.com/1"', '"https://user:SECRET@example.com/1"', '"https://:SECRET@example.com/1"'])('R1.4 links.issue %s carries credentials and is field-invalid (a record never holds a secret)', (v) => {
+            const result = check({ links: `links:\n  issue: ${v}` });
+            expectDiag(result, 'field-invalid', 'links.issue');
+            expect(JSON.stringify(result.diagnostics)).not.toContain('SECRET');
         });
         (process.platform === 'win32' ? test.skip : test)('links.plan cannot escape the root through a symlinked directory', () => {
             const base = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
@@ -320,6 +322,12 @@ describe('validateRecordShape', () => {
 
     describe('R1.5 commit and receipt digest', () => {
         const ver = (commit: string, digest: string) => check({ verification: `verification:\n  commit: "${commit}"\n  overall: pass\n  sensors: {}\n  receipt_digest: "${digest}"` });
+        test('R1.5 a 64-hex commit (a sha-256 repository) is accepted', () => {
+            expect(ver('0123456789abcdef'.repeat(4), DIGEST).diagnostics).toEqual([]);
+        });
+        test.each([['41 hex', 'a'.repeat(41)], ['63 hex', 'a'.repeat(63)], ['65 hex', 'a'.repeat(65)], ['64 hex with an uppercase letter', `A${'a'.repeat(63)}`]])('R1.5 a commit with %s is rejected', (_label, commit) => {
+            expectDiag(ver(commit, DIGEST), 'field-invalid', 'verification.commit');
+        });
         test('a 40-hex commit is accepted', () => {
             expect(ver('0123456789abcdef0123456789abcdef01234567', DIGEST).diagnostics).toEqual([]);
         });

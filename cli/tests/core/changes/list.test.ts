@@ -204,6 +204,14 @@ describe('listChanges: classification (R5.3)', () => {
         repo.commit({ [recordPath(FIRST)]: `\ufeff${record(FIRST)}` }, 'feat: bom', '2026-10-16T20:00:00Z');
         expect(listed().changes[0].classification).toBe('invalid-record');
     });
+    test('R1.4 a record whose links.issue carries credentials is invalid-record, and list never prints the credentials', () => {
+        adopt();
+        repo.commit({ [recordPath(FIRST)]: record(FIRST, { extra: 'links:\n  issue: "https://user:SECRET@example.com/issues/1"\n' }) }, 'feat: leaky link', '2026-10-16T20:00:00Z');
+        const r = listed();
+        expect(r.changes[0].classification).toBe('invalid-record');
+        expect(JSON.stringify(r)).not.toContain('SECRET');
+        expect(JSON.stringify(r)).toContain('links.issue');
+    });
     test('exempt and missing entries have no records', () => {
         history();
         const r = listed();
@@ -270,9 +278,17 @@ describe('listChanges: classification (R5.3)', () => {
         repo.commit({ [file]: record('2026-10-16-x') }, 'feat: not a record', '2026-10-16T20:00:00Z');
         expect(byClass(listed())['feat: not a record']).toBe('missing');
     });
-    test('a name that matches the pattern but is not a valid date is invalid-record with name-invalid', () => {
+    test('R1.1 a name that has the record shape but an impossible date is a record candidate: invalid-record with name-invalid', () => {
         adopt();
         repo.commit({ [recordPath('2026-13-45-x')]: record('2026-13-45-x') }, 'feat: bad name', '2026-10-16T20:00:00Z');
+        const entry = listed().changes[0];
+        expect(entry.classification).toBe('invalid-record');
+        expect((entry.records[0] as { diagnostics: Array<{ code: string }> }).diagnostics.map((d) => d.code)).toContain('name-invalid');
+    });
+    test('R1.1 a name that has the record shape but a slug over 64 characters is a record candidate: invalid-record with name-invalid', () => {
+        adopt();
+        const id = `2026-10-16-${'a'.repeat(65)}`;
+        repo.commit({ [recordPath(id)]: record(id) }, 'feat: long slug', '2026-10-16T20:00:00Z');
         const entry = listed().changes[0];
         expect(entry.classification).toBe('invalid-record');
         expect((entry.records[0] as { diagnostics: Array<{ code: string }> }).diagnostics.map((d) => d.code)).toContain('name-invalid');
@@ -463,12 +479,32 @@ describe('listChanges: derived fields (R5.5)', () => {
         for (const name of ['v1.0.2', 'v1.0.0', 'v1.0.1']) repo.gitAt('2026-10-16T11:00:00Z', 'tag', '-a', name, '-m', name);
         expect(listed().changes[0].release).toBe('v1.0.0');
     });
-    test('a lightweight tag is dated by its commit', () => {
+    test('R5.5 an annotated tag takes precedence over a lightweight one, even when the lightweight one is dated earlier', () => {
         adopt();
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        repo.git('tag', 'light');
-        repo.gitAt('2026-10-16T09:00:00Z', 'tag', '-a', 'older-annotated', '-m', 'x');
-        expect(listed().changes[0].release).toBe('older-annotated');
+        repo.git('tag', 'v0.0.1'); // dated by its commit, 10:00
+        repo.gitAt('2026-10-16T13:00:00Z', 'tag', '-a', 'v1.0.0', '-m', 'annotated, later');
+        expect(listed().changes[0].release).toBe('v1.0.0');
+    });
+    test('R5.5 among annotated tags the earliest tagger date wins, a lightweight tag never competes', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        repo.git('tag', 'aaa-light');
+        repo.gitAt('2026-10-16T14:00:00Z', 'tag', '-a', 'v2.0.0', '-m', 'late');
+        repo.gitAt('2026-10-16T12:00:00Z', 'tag', '-a', 'v1.0.0', '-m', 'early');
+        expect(listed().changes[0].release).toBe('v1.0.0');
+    });
+    test('R5.5 a lightweight tag is chosen only when no annotated tag contains the commit; ties go by name', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        repo.git('tag', 'zeta');
+        repo.git('tag', 'alpha');
+        repo.git('tag', 'mid');
+        expect(listed().changes[0].release).toBe('alpha');
+        // An annotated tag on a LATER commit also contains it, and now takes precedence.
+        repo.commit({ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z');
+        repo.gitAt('2026-10-16T12:00:00Z', 'tag', '-a', 'v3.0.0', '-m', 'v3');
+        expect(listed().changes.map((c) => c.release)).toEqual(['v3.0.0', 'v3.0.0']);
     });
     test('only tags count: a branch that contains the commit is not a release', () => {
         adopt();

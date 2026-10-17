@@ -31,16 +31,32 @@ export function isFullSelection(opts: SelectionOpts): boolean {
     return Boolean(opts.fast) === Boolean(opts.slow);
 }
 
-function sortedSensors(sensors: Record<string, SensorStatus>): Record<string, SensorStatus> {
-    return Object.fromEntries(Object.keys(sensors).sort().map((k) => [k, sensors[k]]));
+const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The sensors of a receipt or a record as [name, status] pairs sorted by name in UTF-16 code-unit order. JavaScript orders the keys
+ * of an object by itself (integer-like names such as '9' and '10' come first, numerically), so nothing that is digested or
+ * compared relies on that order: it goes through this array.
+ */
+export function sensorPairs(sensors: Record<string, string>): Array<[string, string]> {
+    return Object.entries(sensors).sort(([a], [b]) => byName(a, b));
 }
 
+function sortedSensors(sensors: Record<string, SensorStatus>): Record<string, SensorStatus> {
+    return Object.fromEntries(sensorPairs(sensors)) as Record<string, SensorStatus>;
+}
+
+/**
+ * sha256 over the canonical JSON of the receipt without its digest, `sensors` being the name-sorted pairs of sensorPairs (R2.2c).
+ * The digest is local (receipts are not versioned and are rewritten by every full run), so changing its canonical form only
+ * invalidates receipts written before it; `change new` writes and `change validate` reads the same value.
+ */
 export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): string {
     if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error(esc('invalid receipt: digest body must be an object'));
     if (body.sensors === null || typeof body.sensors !== 'object' || Array.isArray(body.sensors)) throw new Error(esc('invalid receipt: digest body sensors must be an object'));
     const canonical = JSON.stringify({
         schema: body.schema, commit: body.commit, ranAt: body.ranAt, cliVersion: body.cliVersion,
-        overall: body.overall, sensors: sortedSensors(body.sensors),
+        overall: body.overall, sensors: sensorPairs(body.sensors),
     });
     return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
 }

@@ -152,13 +152,19 @@ function readBounded(root: string, shas: string[], field: string, fallback: stri
     return values;
 }
 
-/** The tag with the earliest creator date that contains `sha` (ties by name ascending); `{ ok: false }` when git fails. */
+/**
+ * R5.5: the earliest-created tag that contains `sha`, annotated tags first (their creation time is the tagger date); a lightweight
+ * tag (git records only the commit date for it) is chosen only when no annotated tag contains the commit. Ties go by name ascending.
+ * `{ ok: false }` when git fails.
+ */
 function earliestTag(root: string, sha: string): Read<string | null> {
     // For-each-ref sorts by the LAST --sort first: creation date, then name.
-    const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', '--count=1', '--format=%(refname)', 'refs/tags/']);
+    const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', '--format=%(objecttype) %(refname)', 'refs/tags/']);
     if (out === null) return UNREADABLE;
-    const ref = out.split('\n')[0];
-    if (ref === '') return { ok: true, value: null };
+    const rows = out.split('\n').filter((row) => row !== '');
+    if (rows.length === 0) return { ok: true, value: null };
+    const pick = rows.find((row) => row.startsWith('tag ')) ?? rows[0];
+    const ref = pick.slice(pick.indexOf(' ') + 1);
     const name = ref.slice('refs/tags/'.length);
     // A name longer than the cap is clipped, never an error.
     return ref.startsWith('refs/tags/') && name !== '' ? { ok: true, value: cleanLine(name, MAX_TAG_NAME) } : UNREADABLE;

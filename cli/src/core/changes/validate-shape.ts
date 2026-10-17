@@ -97,7 +97,7 @@ function checkLinks(fm: Obj, root: string | undefined, out: Diagnostic[]): void 
         if (!isSafeRelativePath(plan)) bad(out, 'links.plan', 'links.plan must be a safe single-line repo-relative path');
         else if (root !== undefined && !isRegularFileInside(root, plan)) bad(out, 'links.plan', `links.plan "${esc(plan)}" does not exist as a regular file`);
     }
-    if (issue !== undefined && !isHttpsUrl(issue, { allowCredentials: true })) bad(out, 'links.issue', 'links.issue must be an https URL');
+    if (issue !== undefined && !isHttpsUrl(issue, { allowCredentials: false })) bad(out, 'links.issue', 'links.issue must be an https URL without credentials');
 }
 
 function checkVerification(fm: Obj, out: Diagnostic[]): void {

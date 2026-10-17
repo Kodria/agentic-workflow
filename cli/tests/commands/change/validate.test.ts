@@ -169,11 +169,19 @@ describe('target path safety', () => {
         expectFailure(r, 'path-invalid');
         expect(r.stderr.length).toBeLessThanOrEqual(301);
     });
-    test('a file named like a record with an impossible date is read and reported as name-invalid', () => {
+    test('R1.1 a file with the record shape but an impossible date is a record candidate: read and reported as name-invalid', () => {
         repo.commit({ 'docs/changes/2026-13-40-bad.md': 'x' }, 'docs: bad date');
         const r = run();
         expect(r.code).toBe(2);
         expect(report(r).records[0].path).toBe('docs/changes/2026-13-40-bad.md');
+        diag(r, 'name-invalid', undefined);
+    });
+    test('R1.1 a file with the record shape but a slug over 64 characters is a record candidate: read and reported as name-invalid', () => {
+        const name = `docs/changes/2026-10-17-${'a'.repeat(65)}.md`;
+        repo.commit({ [name]: 'x' }, 'docs: long slug');
+        const r = run();
+        expect(r.code).toBe(2);
+        expect(report(r).records[0].path).toBe(name);
         diag(r, 'name-invalid', undefined);
     });
     test('a missing record file is record-missing', () => {
@@ -484,6 +492,16 @@ describe('R4.4 strict checks', () => {
         const r = run(undefined, { strict: true });
         expect(r.code).toBe(0);
         expect(report(r).state).toBe('valid');
+    });
+    test('R2.2c strict compares the sensors as sorted pairs: integer-like names and a record that lists them in another order still match', () => {
+        commitRecord('rec', 'pass', ['tsc', '9', '10']);
+        expect(run(undefined, { strict: true }).code).toBe(0);
+        // The same sensors, listed in another order in the record's YAML: the verdict is the same.
+        edit(REL, (t) => t.replace(/  sensors:[\s\S]*?(?=  receipt_digest)/, "  sensors: { tsc: pass, '10': pass, '9': pass }\n"));
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): reorder sensors');
+        const r = run(undefined, { strict: true });
+        expect(report(r).state).toBe('valid');
+        expect(r.code).toBe(0);
     });
     test('base mode never reads the receipt', () => {
         commitRecord();
