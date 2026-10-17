@@ -20,6 +20,8 @@ export const MAX_SUBJECT = 1024;
 /** The first-parent history is read in pages of at most this many commits, so no git output approaches the 16 MiB bound. */
 export const PAGE_SIZE = 10_000;
 const MAX_TAG_NAME = 255;
+/** R5.5: how many containing tags (earliest-dated first) are examined for an entry's release. */
+export const TAG_LOOKUP_LIMIT = 500;
 const MAX_IDENTITY = 300;
 /** The largest instant a Date can hold, in seconds. */
 const MAX_EPOCH_SECONDS = 8.64e12;
@@ -157,11 +159,14 @@ function readBounded(root: string, shas: string[], field: string, fallback: stri
 /**
  * R5.5: the earliest-created tag that contains `sha`, annotated tags first (their creation time is the tagger date); a lightweight
  * tag (git records only the commit date for it) is chosen only when no annotated tag contains the commit. Ties go by name ascending.
+ * Bounded: only the TAG_LOOKUP_LIMIT earliest-dated containing tags are examined (a commit contained in thousands of tags would
+ * otherwise cost an output proportional to them for every entry); the rules above apply to that list, so an annotated tag dated
+ * after that many earlier ones is not seen. Documented limit of R5.5.
  * `{ ok: false }` when git fails.
  */
 function earliestTag(root: string, sha: string): Read<string | null> {
     // For-each-ref sorts by the LAST --sort first: creation date, then name.
-    const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', '--format=%(objecttype) %(refname)', 'refs/tags/']);
+    const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', `--count=${TAG_LOOKUP_LIMIT}`, '--format=%(objecttype) %(refname)', 'refs/tags/']);
     if (out === null) return UNREADABLE;
     const rows = out.split('\n').filter((row) => row !== '');
     if (rows.length === 0) return { ok: true, value: null };

@@ -550,6 +550,44 @@ describe('listChanges: derived fields (R5.5)', () => {
         repo.gitAt('2026-10-16T12:00:00Z', 'tag', '-a', 'v3.0.0', '-m', 'v3');
         expect(listed().changes.map((c) => c.release)).toEqual(['v3.0.0', 'v3.0.0']);
     });
+    describe('R5.5 the tag lookup is bounded: only the 500 earliest-dated containing tags are examined per entry', () => {
+        /** Lightweight tags pointing at `sha`, created with one fast-import process. */
+        const lightTags = (sha: string, names: string[]): void => {
+            repo.gitInput(names.map((n) => `reset refs/tags/${n}\nfrom ${sha}\n`).join('\n'), 'fast-import', '--quiet');
+        };
+        const NAMES = Array.from({ length: 600 }, (_, i) => `t${String(i).padStart(4, '0')}`);
+        test('the for-each-ref call asks for at most 500 tags', () => {
+            adopt();
+            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
+            const spy = spyOnGit();
+            listed();
+            spy.restore();
+            const lookups = spy.calls.filter((a) => a.includes('for-each-ref'));
+            expect(lookups).toHaveLength(1);
+            expect(lookups[0]).toContain('--count=500');
+        });
+        test('600 lightweight tags on the commit: the earliest by date then name is the release', () => {
+            adopt();
+            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
+            expect(listed().changes[0].release).toBe('t0000');
+        });
+        test('the earliest annotated tag among the first 500 still wins over 600 lightweight tags', () => {
+            adopt();
+            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
+            repo.gitAt('2026-10-16T09:00:00Z', 'tag', '-a', 'v1.0.0', '-m', 'early annotated');
+            expect(listed().changes[0].release).toBe('v1.0.0');
+        });
+        test('documented limit: an annotated tag created after 500 earlier-dated tags is not examined, so the lightweight one is reported', () => {
+            adopt();
+            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
+            repo.gitAt('2026-10-16T13:00:00Z', 'tag', '-a', 'v9.9.9', '-m', 'late annotated');
+            expect(listed().changes[0].release).toBe('t0000');
+        });
+    });
     test('only tags count: a branch that contains the commit is not a release', () => {
         adopt();
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
