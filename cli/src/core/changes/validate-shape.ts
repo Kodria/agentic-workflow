@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
-import { clipMessage, cleanText, esc, isSafeMultiline, isSingleLine } from './text-safety';
+import { clipMessage, cleanText, esc, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
 import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, PENDING_MARKER, RECORD_SCHEMA, type ChangeRecord, type Diagnostic } from './types';
 
 const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
@@ -33,13 +33,8 @@ function finalize(list: Diagnostic[]): Diagnostic[] {
 const isSensorName = (k: string): boolean => k.length > 0 && [...k].length <= 128 && isSingleLine(k);
 const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
 
-function isSafeRelative(p: string): boolean {
-    if (!isSingleLine(p) || p.length === 0 || path.isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.includes('\\')) return false;
-    return p.split('/').every((s) => s !== '' && s !== '.' && s !== '..');
-}
-
 function isModulePath(m: unknown): boolean {
-    return typeof m === 'string' && m === m.trim() && (m === '.' || isSafeRelative(m));
+    return m === '.' || isSafeRelativePath(m);
 }
 
 const URL_WHITESPACE = /\s/;
@@ -123,7 +118,7 @@ function checkLinks(fm: Obj, root: string | undefined, out: Diagnostic[]): void 
     unknownKeys(fm.links, ['plan', 'issue'], 'links.', out);
     const { plan, issue } = fm.links;
     if (plan !== undefined) {
-        if (typeof plan !== 'string' || !isSafeRelative(plan)) bad(out, 'links.plan', 'links.plan must be a safe single-line repo-relative path');
+        if (!isSafeRelativePath(plan)) bad(out, 'links.plan', 'links.plan must be a safe single-line repo-relative path');
         else if (root !== undefined && !isRegularFileInside(root, plan)) bad(out, 'links.plan', `links.plan "${esc(plan)}" does not exist as a regular file`);
     }
     if (issue !== undefined && !isHttpsIssueUrl(issue)) bad(out, 'links.issue', 'links.issue must be an https URL');

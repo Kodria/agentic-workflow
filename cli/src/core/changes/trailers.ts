@@ -4,18 +4,46 @@ export const OPT_OUT_TRAILER = 'Change-Record';
 
 // Raw messages (%B), NUL-terminated by -z: a message cannot contain NUL, so one commit is exactly one record. Git's own
 // %(trailers) is not used: it honours trailer.separators and trailer.<token>.key from the user's config, so what counts as
-// an opt-out would differ per machine.
+// an opt-out would differ per machine. Messages are untrusted and unbounded, so everything below is an index scan: no regex
+// that can backtrack over a long run of blanks.
 const FORMAT = '--format=%B';
-const OPT_OUT_LINE = new RegExp(`^${OPT_OUT_TRAILER}:[ \\t]*none[ \\t]*$`, 'i');
-const BLANK_LINE = /\r?\n[ \t]*\r?\n/;
+const KEY = `${OPT_OUT_TRAILER}:`.toLowerCase();
+const VALUE = 'none';
 const COUNT_RE = /^-\d{1,4}$/;
 const MAX_ARGS = 16;
 
+const isBlank = (c: string): boolean => c === ' ' || c === '\t';
+
+/** True when every character of `line` is a space, tab or CR (a blank line separating paragraphs). */
+function isBlankLine(line: string): boolean {
+    for (let i = 0; i < line.length; i++) if (!isBlank(line[i]) && line[i] !== '\r') return false;
+    return true;
+}
+
+/** `Change-Record:` + optional spaces/tabs + `none` + optional spaces/tabs (+ the CR of a CRLF), key and value case-insensitive. */
+function isOptOutLine(line: string): boolean {
+    let end = line.length;
+    if (end > 0 && line[end - 1] === '\r') end--;
+    if (end < KEY.length + VALUE.length || line.slice(0, KEY.length).toLowerCase() !== KEY) return false;
+    let i = KEY.length;
+    while (i < end && isBlank(line[i])) i++;
+    if (line.slice(i, i + VALUE.length).toLowerCase() !== VALUE) return false;
+    i += VALUE.length;
+    while (i < end && isBlank(line[i])) i++;
+    return i === end;
+}
+
 /** DD-6: a line of the final paragraph (never the subject's) that is exactly `Change-Record: none`. No folding, no other separator. */
 function optsOut(message: string): boolean {
-    const paragraphs = message.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '').split(BLANK_LINE);
-    if (paragraphs.length < 2) return false;
-    return paragraphs[paragraphs.length - 1].split(/\r?\n/).some((line) => OPT_OUT_LINE.test(line));
+    const lines = message.split('\n');
+    let paragraphs = 0; let start = 0; let inside = false;
+    for (let i = 0; i < lines.length; i++) {
+        if (isBlankLine(lines[i])) inside = false;
+        else if (!inside) { inside = true; start = i; paragraphs++; }
+    }
+    if (paragraphs < 2) return false;
+    for (let i = start; i < lines.length; i++) if (isOptOutLine(lines[i])) return true;
+    return false;
 }
 
 /**

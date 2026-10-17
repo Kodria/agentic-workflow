@@ -1,7 +1,6 @@
-import path from 'path';
 import { execFileSync } from 'child_process';
 import { isSingleLine } from './text-safety';
-import { RUNTIME_STATE_EXCLUDES, gitState } from './worktree';
+import { gitChildEnv, gitState } from './worktree';
 
 // Every function here takes values that may be influenced by a user or by repository content (refs, paths, remote URLs).
 // None of them throws: git failures and invalid input come back as null / false / true (fail closed) so that callers
@@ -11,9 +10,8 @@ const OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'pipe'] as [
 const SAFE_REF = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
 const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const MAX_REF = 255;
-const MAX_EXCLUDES = 64;
-const MAX_PATH = 1024;
 const MAX_IDENTITY = 300;
+const MAX_REMOTE_URL = 2048;
 
 /**
  * Every `git log` whose output is parsed must start with these. User and repository config would otherwise change that
@@ -23,25 +21,12 @@ const MAX_IDENTITY = 300;
  */
 export const LOG_SAFETY_ARGS: readonly string[] = ['--no-show-signature', '--encoding=UTF-8'];
 
-/**
- * Variables that change how pathspecs are read (`:/`, `:(exclude)` ...) and so the meaning of every range/count we ask for:
- * literal/glob/noglob/icase would turn a plain exclusion into a literal name, a glob or a case-insensitive match. They are
- * removed from the child's environment; everything else (GIT_CONFIG_*, GIT_AUTHOR_*, HOME ...) is passed through untouched.
- */
-const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
-
-function childEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    for (const name of PATHSPEC_ENV) delete env[name];
-    return env;
-}
-
 /** Runs git without a shell and returns its stdout, or null when it fails, times out, overflows or the input is invalid. */
 export function runGit(cwd: string, args: string[]): string | null {
     if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
     if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
     try {
-        return execFileSync('git', args, { ...OPTS, cwd, env: childEnv() });
+        return execFileSync('git', args, { ...OPTS, cwd, env: gitChildEnv() });
     } catch {
         return null;
     }
@@ -55,15 +40,9 @@ export function isSafeRef(ref: unknown): ref is string {
 /** A safe ref, or `a..b` / `a...b` made of two safe refs. */
 export function isSafeRevision(rev: unknown): rev is string {
     if (typeof rev !== 'string') return false;
+    if (rev.length > 2 * MAX_REF + 3) return false;
     const parts = rev.split(/\.\.\.?/);
     return parts.length <= 2 && parts.every(isSafeRef);
-}
-
-/** A repo-relative path a record can hold: single line, no backslash, no empty / `.` / `..` segment, not absolute, not padded. */
-export function isSafeRelativePath(p: unknown): p is string {
-    if (!isSingleLine(p) || p.length === 0 || p.length > MAX_PATH || p !== p.trim()) return false;
-    if (path.isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.includes('\\')) return false;
-    return p.split('/').every((s) => s !== '' && s !== '.' && s !== '..');
 }
 
 function isCommitRef(root: string, ref: unknown): ref is string {
@@ -99,23 +78,13 @@ export function changedFiles(root: string, from: string, to = 'HEAD'): string[] 
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 
-function isSafeExcludeList(excludes: unknown): excludes is string[] {
-    return Array.isArray(excludes) && excludes.length <= MAX_EXCLUDES && excludes.every(isSafeRelativePath);
-}
-
 /**
  * Whether the tree differs from HEAD outside RUNTIME_STATE_EXCLUDES and `extraExcludes` (untracked files count).
- * Unknown state counts as dirty: an unreadable repository must never look clean.
+ * Unknown state, or an unsafe exclusion, counts as dirty: an unreadable repository must never look clean.
  */
 export function isDirtyOutside(root: string, extraExcludes: string[]): boolean {
-    if (!isSafeExcludeList(extraExcludes)) return true;
-    const state = gitState(root, true);
-    if (state.kind !== 'ok') return true;
-    if (!state.dirty || extraExcludes.length === 0) return state.dirty;
-    // gitState has no parameter for extra exclusions, so the narrowed question is asked with the same exclusion list plus theirs.
-    const specs = [...RUNTIME_STATE_EXCLUDES, ...extraExcludes].map((p) => `:(exclude,literal)${p}`);
-    const out = runGit(state.root, ['status', '--porcelain', '--untracked-files=normal', '--', '.', ...specs]);
-    return out === null || out.trim().length > 0;
+    const state = gitState(root, true, extraExcludes);
+    return state.kind !== 'ok' || state.dirty;
 }
 
 /** Repository root with native separators; null outside a repository (with a commit). */
@@ -129,18 +98,38 @@ export function headSha(root: string): string | null {
     return state.kind === 'ok' ? state.commit : null;
 }
 
-/** `host/owner/name` from remote.origin.url with credentials stripped; null when absent, unparseable or not single-line. */
+/** Removes any run of `/` from the start and the end of `s` (index scan: linear, unlike /\/+$/). */
+function trimSlashes(s: string): string {
+    let start = 0; let end = s.length;
+    while (start < end && s[start] === '/') start++;
+    while (end > start && s[end - 1] === '/') end--;
+    return s.slice(start, end);
+}
+
+/** `name` without one trailing `.git`. */
+const withoutDotGit = (s: string): string => (s.endsWith('.git') ? s.slice(0, -4) : s);
+
+/** `user@host:path` (scp-style); null when the text is not of that form. The host is lowercased like in the URL form. */
+function scpIdentity(url: string): string | null {
+    const at = url.indexOf('@');
+    if (at < 1 || url.slice(0, at).includes('/')) return null;
+    const colon = url.indexOf(':', at + 1);
+    if (colon < 0) return null;
+    const host = url.slice(at + 1, colon);
+    if (host === '' || host.includes('/')) return null;
+    const repo = withoutDotGit(trimSlashes(url.slice(colon + 1)));
+    return repo === '' ? null : `${host.toLowerCase()}/${repo}`;
+}
+
+/** `host/owner/name` from remote.origin.url with credentials stripped; null when absent, unparseable, too long or not single-line. */
 export function repoIdentity(root: string): string | null {
     const url = runGit(root, ['config', '--get', 'remote.origin.url'])?.trim();
-    if (!url) return null;
-    let identity: string | null = null;
-    const scp = /^[^@/]+@([^:/]+):(.+?)(?:\.git)?\/?$/.exec(url);
-    if (scp) {
-        identity = `${scp[1]}/${scp[2]}`;
-    } else {
+    if (!url || url.length > MAX_REMOTE_URL) return null;
+    let identity = scpIdentity(url);
+    if (identity === null) {
         try {
             const u = new URL(url);
-            const p = u.pathname.replace(/^\/+/, '').replace(/\.git$/, '').replace(/\/+$/, '');
+            const p = withoutDotGit(trimSlashes(u.pathname));
             identity = u.hostname && p ? `${u.hostname}/${p}` : null;
         } catch {
             identity = null;

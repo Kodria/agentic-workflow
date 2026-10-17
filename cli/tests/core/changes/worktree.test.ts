@@ -93,6 +93,37 @@ describe('worktree state', () => {
         const pre = gitState(root, true);
         expect(pre.kind === 'ok' && pre.dirty).toBe(false);
     });
+    test('extra exclusions hide changes under them, on top of the runtime-state ones', () => {
+        fs.mkdirSync(path.join(root, 'docs/changes'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'docs/changes/r.md'), 'r');
+        const without = gitState(root, true); const withExtra = gitState(root, true, ['docs/changes']);
+        expect(without.kind === 'ok' && without.dirty).toBe(true);
+        expect(withExtra.kind === 'ok' && withExtra.dirty).toBe(false);
+        fs.writeFileSync(path.join(root, 'other.ts'), 'x');
+        const stillDirty = gitState(root, true, ['docs/changes']);
+        expect(stillDirty.kind === 'ok' && stillDirty.dirty).toBe(true);
+    });
+    test('extra exclusions keep the runtime-state exclusions', () => {
+        fs.mkdirSync(path.join(root, '.awm/journal'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm/journal/j.json'), 'x');
+        const state = gitState(root, true, ['docs/changes']);
+        expect(state.kind === 'ok' && state.dirty).toBe(false);
+    });
+    test.each([['docs/changes'], [[7]], [['../out']], [['a\nb']], [['/abs']], [[' pad']], [Array.from({ length: 65 }, (_, i) => `d${i}`)]])('unsafe extra exclusions %j are a failure, never a throw', (extra) => {
+        expect(gitState(root, true, extra as never)).toEqual({ kind: 'failed' });
+    });
+    test('GIT_*_PATHSPECS variables in the environment do not change the exclusions', () => {
+        fs.mkdirSync(path.join(root, 'docs/changes'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'docs/changes/r.md'), 'r');
+        fs.mkdirSync(path.join(root, '.awm/journal'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm/journal/j.json'), 'x');
+        const saved = process.env.GIT_LITERAL_PATHSPECS;
+        process.env.GIT_LITERAL_PATHSPECS = '1';
+        try {
+            const state = gitState(root, true, ['docs/changes']);
+            expect(state.kind === 'ok' && state.dirty).toBe(false);
+        } finally { if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS; else process.env.GIT_LITERAL_PATHSPECS = saved; }
+    });
     test('a non-string or empty cwd is a failure, never a throw', () => {
         expect(gitState(undefined as never, true)).toEqual({ kind: 'failed' });
         expect(gitState('', true)).toEqual({ kind: 'failed' });

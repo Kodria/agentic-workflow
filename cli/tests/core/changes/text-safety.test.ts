@@ -1,4 +1,4 @@
-import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isSafeMultiline, isSingleLine, sliceNoSplit } from '../../../src/core/changes/text-safety';
+import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isSafeMultiline, isSafeRelativePath, isSingleLine, sliceNoSplit } from '../../../src/core/changes/text-safety';
 
 const LINE_BREAKS = ['\r', '\n', '\u0085', ' ', ' '];
 
@@ -126,5 +126,23 @@ describe('sliceNoSplit with a bad limit never throws and never over-returns', ()
     test('a whole-number limit is unchanged', () => {
         expect(sliceNoSplit('abcdef', 6)).toBe('abcdef');
         expect(sliceNoSplit('abcdef', 100)).toBe('abcdef');
+    });
+});
+
+describe('isSafeRelativePath', () => {
+    test.each(['a', 'a/b', 'docs/changes', '.awm/journal', 'src/file name.ts', 'ñandú/x', '.hidden/..dots', 'a'.repeat(1024)])('accepts %j', (p) => {
+        expect(isSafeRelativePath(p)).toBe(true);
+    });
+    test.each([
+        ['empty', ''], ['dot', '.'], ['dot-dot', '..'], ['parent segment', '../a'], ['inner parent', 'a/../b'], ['dot segment', 'a/./b'], ['empty segment', 'a//b'],
+        ['trailing slash', 'a/'], ['absolute', '/a'], ['drive letter', 'C:/a'], ['drive letter, no slash', 'C:a'], ['backslash', 'a\\b'],
+        ['leading space', ' a'], ['trailing space', 'a '], ['leading tab', '\ta'], ['newline', 'a\nb'], ['carriage return', 'a\rb'], ['NUL', 'a\u0000b'],
+        ['ESC', 'a\u001bb'], ['DEL', 'a\u007fb'], ['C1 control', 'a\u0085b'], ['line separator', 'a\u2028b'], ['paragraph separator', 'a\u2029b'],
+        ['over-length', 'a'.repeat(1025)], ['trailing no-break space', 'a\u00a0'],
+    ])('rejects %s', (_label, p) => {
+        expect(isSafeRelativePath(p)).toBe(false);
+    });
+    test.each([[undefined], [null], [7], [{}], [['a']], [true]])('rejects the non-string %p without throwing', (p) => {
+        expect(isSafeRelativePath(p)).toBe(false);
     });
 });

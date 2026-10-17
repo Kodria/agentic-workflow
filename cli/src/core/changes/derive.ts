@@ -1,7 +1,7 @@
 import path from 'path';
 import { determineBump, GIT_LOG_FORMAT, parseCommits, RS, type Commit } from '../../release/core';
-import { LOG_SAFETY_ARGS, changedFiles, isSafeRelativePath, runGit } from './git';
-import { esc, clipMessage, isSingleLine } from './text-safety';
+import { LOG_SAFETY_ARGS, changedFiles, runGit } from './git';
+import { esc, clipMessage, isSafeRelativePath, isSingleLine } from './text-safety';
 import { RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './types';
 
 // Pathspecs relative to the repository top, so the result does not depend on the directory git runs in.
@@ -70,21 +70,22 @@ const fail = (code: string, message: string): Derived => ({ ok: false, diagnosti
 export function deriveFields(root: string, mergeBaseSha: string | null): Derived {
     if (typeof root !== 'string' || root.length === 0) return fail('invalid-input', 'repository root must be a non-empty string');
     if (typeof mergeBaseSha !== 'string' || !COMMIT_ID.test(mergeBaseSha)) return fail('invalid-input', `merge-base must be a full commit id, got "${esc(mergeBaseSha as string)}"`);
-    const range = `${mergeBaseSha}..HEAD`;
-    const counted = runGit(root, ['rev-list', '--no-merges', '--full-history', '--count', '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
-    const count = counted === null ? NaN : Number(counted.trim());
-    if (!Number.isSafeInteger(count)) return fail('git-failed', `git could not list the commits in ${range}`);
-    if (count === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
+    // HEAD is read once: the log and the diff below both use this sha, so a HEAD that moves meanwhile cannot mix snapshots.
+    const head = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'])?.trim();
+    if (head === undefined || !COMMIT_ID.test(head)) return fail('git-failed', 'git could not read HEAD');
+    const range = `${mergeBaseSha}..${head}`;
     // --full-history: with a pathspec git would otherwise prune the side of a merge whose tree equals the other parent
     // (`merge -s ours`), silently dropping real commits from the range.
     // -z ends every commit with NUL, which a message cannot contain: each record is exactly one commit, so a message that
     // embeds the parser's own separator cannot be read as a second commit.
     const raw = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
-    const commits = raw.split('\0').flatMap((record) => parseCommits(record.split(RS).join('')));
+    const records = raw.split('\0').filter((record) => record !== '');
+    if (records.length === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
+    const commits = records.flatMap((record) => parseCommits(record.split(RS).join('')));
     const derived = deriveFromCommits(commits);
     if (derived === null) return fail('no-conventional-commits', 'no commit in the range uses a conventional-commit subject (type(scope): subject)');
-    const files = changedFiles(root, mergeBaseSha, 'HEAD');
+    const files = changedFiles(root, mergeBaseSha, head);
     if (files === null) return fail('git-failed', `git could not list the files changed in ${range}`);
     return { ok: true, fields: { ...derived, modules: deriveModules(files) } };
 }

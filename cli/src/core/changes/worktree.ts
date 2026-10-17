@@ -1,5 +1,6 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { isSafeRelativePath } from './text-safety';
 
 /** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
 export const RUNTIME_STATE_EXCLUDES: readonly string[] = ['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json'];
@@ -7,8 +8,23 @@ export const RUNTIME_STATE_EXCLUDES: readonly string[] = ['.awm/sensors/runs', '
 export const REASON_NOT_REPO = 'not inside a git repository with a commit';
 export const REASON_GIT_FAILED = 'git command failed or timed out';
 
+const MAX_EXTRA_EXCLUDES = 64;
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: 15000 };
+
+/**
+ * Variables that change how pathspecs are read (`:/`, `:(exclude)` ...) and so the meaning of every range/count/status we ask
+ * for: literal/glob/noglob/icase would turn a plain exclusion into a literal name, a glob or a case-insensitive match. They are
+ * removed from the child's environment; everything else (GIT_CONFIG_*, GIT_AUTHOR_*, HOME ...) is passed through untouched.
+ */
+const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+
+/** The environment every git child of the change-record code runs in. */
+export function gitChildEnv(): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    for (const name of PATHSPEC_ENV) delete env[name];
+    return env;
+}
 
 export type GitState =
     | { kind: 'ok'; root: string; commit: string; dirty: boolean }
@@ -23,21 +39,23 @@ function gitFailure(error: unknown): GitState {
 /**
  * Repository root, HEAD and whether the tree differs from it, excluding RUNTIME_STATE_EXCLUDES.
  * `untracked` selects the pre-run measure (untracked files count, forced past any `status.showUntrackedFiles` config)
- * or the post-run recheck (tracked changes only). The root is returned with native separators: git prints
- * forward slashes on Windows. Never throws.
+ * or the post-run recheck (tracked changes only). `extraExcludes` (default none) are repo-relative paths ignored in addition
+ * to RUNTIME_STATE_EXCLUDES; any that is not a safe relative path makes the result `failed`. The root is returned with native
+ * separators: git prints forward slashes on Windows. Never throws.
  */
-export function gitState(cwd: string, untracked: boolean): GitState {
+export function gitState(cwd: string, untracked: boolean, extraExcludes: readonly string[] = []): GitState {
     if (typeof cwd !== 'string' || cwd.length === 0) return { kind: 'failed' };
+    if (!Array.isArray(extraExcludes) || extraExcludes.length > MAX_EXTRA_EXCLUDES || !extraExcludes.every(isSafeRelativePath)) return { kind: 'failed' };
     let root: string; let commit: string;
     try {
-        root = path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd }).trim());
-        commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root }).trim();
+        root = path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd, env: gitChildEnv() }).trim());
+        commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root, env: gitChildEnv() }).trim();
     } catch (error) {
         return gitFailure(error);
     }
     try {
-        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`)];
-        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root, maxBuffer: MAX_GIT_OUTPUT });
+        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
+        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root, env: gitChildEnv(), maxBuffer: MAX_GIT_OUTPUT });
         return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
     } catch {
         return { kind: 'failed' };

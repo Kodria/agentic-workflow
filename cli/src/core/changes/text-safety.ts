@@ -46,6 +46,19 @@ export function esc(text: string): string {
     return escaped.length > MAX_ECHO_ESCAPED ? `${sliceNoSplit(escaped, MAX_ECHO_ESCAPED)}…` : escaped;
 }
 
+const MAX_RELATIVE_PATH = 1024;
+
+/**
+ * A repo-relative path a record, a pathspec or a module name can safely hold: single line (no control character, no
+ * U+2028/U+2029), 1..1024 UTF-16 units, not padded with whitespace, no backslash, not absolute (a leading `/` is an empty
+ * segment, `C:` a drive letter; backslashes are refused), and no empty, `.` or `..` segment. Linear time; never throws.
+ */
+export function isSafeRelativePath(p: unknown): p is string {
+    if (!isSingleLine(p) || p.length === 0 || p.length > MAX_RELATIVE_PATH || p !== p.trim()) return false;
+    if (/^[A-Za-z]:/.test(p) || p.includes('\\')) return false;
+    return p.split('/').every((s) => s !== '' && s !== '.' && s !== '..');
+}
+
 /** Escapes any remaining raw line break or control character (no quoting, no clipping). */
 export const cleanText = (text: string): string => (typeof text === 'string' ? text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape) : NON_STRING);
 
