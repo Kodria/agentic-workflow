@@ -1,8 +1,7 @@
-import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
@@ -247,13 +246,9 @@ describe('git functions in a repository', () => {
     test('isCommittedClean never takes the optional index lock (status would otherwise refresh and write the index)', () => {
         branch();
         repo.commit({ 'docs/changes/r.md': 'one' }, 'docs: r');
-        const real = childProcess.execFileSync;
-        const calls: string[][] = [];
-        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
-            calls.push(args);
-            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
-        }) as never);
-        try { isCommittedClean(repo.root, 'docs/changes/r.md'); } finally { spy.mockRestore(); }
+        const git = spyOnGit();
+        try { isCommittedClean(repo.root, 'docs/changes/r.md'); } finally { git.restore(); }
+        const { calls } = git;
         expect(calls).toHaveLength(1);
         expect(calls[0][0]).toBe('--no-optional-locks');
         expect(calls[0]).toEqual(expect.arrayContaining(['status', '--porcelain', '-z', '--untracked-files=no', '--ignore-submodules=none']));
@@ -325,17 +320,12 @@ describe('git functions in a repository', () => {
         expect(headSha(sub)).toBe(repo.git('rev-parse', 'HEAD'));
     });
     test('repoRoot and headSha never run git status, so a slow or failing status cannot hide a readable HEAD', () => {
-        const real = childProcess.execFileSync;
-        const seen: string[] = [];
-        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
-            seen.push(...args);
-            if (args[0] === 'status') throw Object.assign(new Error('status must not run'), { code: 'ETIMEDOUT' });
-            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
-        }) as never);
+        const git = spyOnGit((args) => { if (args[0] === 'status') throw Object.assign(new Error('status must not run'), { code: 'ETIMEDOUT' }); });
         try {
             expect(fs.realpathSync.native(repoRoot(repo.root) as string)).toBe(fs.realpathSync.native(repo.root));
             expect(headSha(repo.root)).toMatch(/^[0-9a-f]{40}$/);
-        } finally { spy.mockRestore(); }
+        } finally { git.restore(); }
+        const seen = git.calls.flat();
         expect(seen).not.toContain('status');
         expect(seen).toContain('rev-parse');
     });

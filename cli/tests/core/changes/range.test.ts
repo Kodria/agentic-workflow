@@ -3,10 +3,14 @@ import { HEAD_MOVED, headMovedFailure, recordDirProblem, resolveRange } from '..
 import type { RecordDir } from '../../../src/core/changes/record-io';
 
 let repo: TestRepo;
-beforeEach(() => { repo = makeRepo(); });
-afterEach(() => repo.cleanup());
+/** A repository for the groups that need one (the pure recordDirProblem tests need none). */
+function withRepo(): void {
+    beforeEach(() => { repo = makeRepo(); });
+    afterEach(() => repo.cleanup());
+}
 
 describe('resolveRange', () => {
+    withRepo();
     test('returns the pinned HEAD and the merge base of the default base', () => {
         const main = branchOff(repo);
         const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
@@ -40,6 +44,7 @@ describe('resolveRange', () => {
 });
 
 describe('headMovedFailure', () => {
+    withRepo();
     test('is null while HEAD is the pinned commit and HEAD_MOVED once it moved', () => {
         branchOff(repo);
         const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
@@ -53,9 +58,10 @@ describe('headMovedFailure', () => {
 });
 
 describe('recordDirProblem', () => {
+    const nonOk = (kind: 'absent' | 'unsafe' | 'error') => ({ kind }) as Exclude<RecordDir, { kind: 'ok' }>;
     const dir = (kind: RecordDir['kind']): RecordDir => (kind === 'ok' ? { kind, dir: '/x' } : { kind } as RecordDir);
     test('a usable or absent directory is no problem for reading and writing', () => {
-        for (const purpose of ['read', 'write', 'inspect'] as const) {
+        for (const purpose of ['read', 'write'] as const) {
             expect(recordDirProblem(dir('ok'), purpose)).toBeNull();
             expect(recordDirProblem(dir('absent'), purpose)).toBeNull();
         }
@@ -63,14 +69,18 @@ describe('recordDirProblem', () => {
     test('a link or a non-directory is unsafe-path, worded for the purpose', () => {
         expect(recordDirProblem(dir('unsafe'), 'read')).toEqual({ code: 'unsafe-path', message: 'docs/changes or its parent is a symlink or not a directory; refusing to read' });
         expect(recordDirProblem(dir('unsafe'), 'write')).toEqual({ code: 'unsafe-path', message: 'docs/changes or its parent is a symlink or not a directory; refusing to write' });
-        expect(recordDirProblem(dir('unsafe'), 'create')).toMatchObject({ code: 'unsafe-path' });
+        expect(recordDirProblem(nonOk('unsafe'), 'create')).toMatchObject({ code: 'unsafe-path' });
     });
     test('an unreadable directory is io-failed', () => {
         expect(recordDirProblem(dir('error'), 'read')).toEqual({ code: 'io-failed', message: 'could not inspect docs/changes' });
-        expect(recordDirProblem(dir('error'), 'create')).toEqual({ code: 'io-failed', message: 'could not create docs/changes' });
+        expect(recordDirProblem(nonOk('error'), 'create')).toEqual({ code: 'io-failed', message: 'could not create docs/changes' });
+    });
+    test.each([[null], [undefined], ['ok'], [7], [[]], [{}], [{ kind: 'weird' }], [{ kind: 7 }]])('a value that is not a directory state (%p) is invalid-input, never a throw', (value) => {
+        for (const purpose of ['read', 'write', 'create'] as const) {
+            expect(recordDirProblem(bad(value), purpose as 'read')).toEqual({ code: 'invalid-input', message: 'the record directory state is not valid' });
+        }
     });
     test('after a create attempt an absent directory is io-failed too', () => {
-        expect(recordDirProblem(dir('absent'), 'create')).toEqual({ code: 'io-failed', message: 'could not create docs/changes' });
-        expect(recordDirProblem(dir('ok'), 'create')).toBeNull();
+        expect(recordDirProblem(nonOk('absent'), 'create')).toEqual({ code: 'io-failed', message: 'could not create docs/changes' });
     });
 });

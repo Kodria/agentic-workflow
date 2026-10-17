@@ -1,9 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import childProcess from 'child_process';
 import { Command } from 'commander';
-import { bad, cloneRepo, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
+import { bad, cloneRepo, makeRepo, nonRepoDir, posixOnly, spyOnGit, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, runChangeValidate, type ValidateOpts } from '../../../src/commands/change';
 import * as deriveModule from '../../../src/core/changes/derive';
 import * as gitModule from '../../../src/core/changes/git';
@@ -807,11 +806,7 @@ describe('R4.3 committed-record verdict (record-uncommitted)', () => {
     });
     test('a git failure while checking the record fails closed as record-uncommitted', () => {
         commitRecord();
-        const real = childProcess.execFileSync;
-        jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
-            if (args.includes('status')) throw Object.assign(new Error('boom'), { code: 'ETIMEDOUT' });
-            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
-        }) as never);
+        spyOnGit((args) => { if (args.includes('status')) throw Object.assign(new Error('boom'), { code: 'ETIMEDOUT' }); });
         const r = run();
         expect(r.code).toBe(2);
         expect(diag(r, 'record-uncommitted', undefined).message).toContain('could not');
@@ -827,14 +822,9 @@ describe('one derivation, one ancestry check and one late-file listing per verif
         return /commit: ([0-9a-f]{40})/.exec(text)?.[1] as string;
     }
     function gitCalls(fn: () => void): string[][] {
-        const calls: string[][] = [];
-        const real = childProcess.execFileSync;
-        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
-            if (cmd === 'git') calls.push(args);
-            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
-        }) as never);
-        try { fn(); } finally { spy.mockRestore(); }
-        return calls;
+        const git = spyOnGit();
+        try { fn(); } finally { git.restore(); }
+        return git.calls;
     }
     test('both records are valid, and git derives, checks ancestry and lists late files once', () => {
         const verified = twoRecordsOneCommit();

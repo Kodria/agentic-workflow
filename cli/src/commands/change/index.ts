@@ -152,10 +152,8 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     if (movedBeforeWrite) return failed(movedBeforeWrite);
 
     if (dir.kind === 'absent') dir = createRecordDir(root);
-    const createProblem = recordDirProblem(dir, 'create');
-    if (createProblem) return failed(createProblem);
-    // The directory is now `<root>/docs/changes`, a real directory (inspectRecordDir / createRecordDir walked every level).
-    const written = createExclusive(path.join(root, ...RECORD_DIR.split('/'), `${id}.md`), content);
+    if (dir.kind !== 'ok') return failed(recordDirProblem(dir, 'create'));
+    const written = createExclusive(path.join(dir.dir, `${id}.md`), content);
     if (written === 'exists') return fail('record-exists', `${id}.md already exists`, 'use --refresh to update derived fields');
     if (written === 'error') return fail('io-failed', `could not write ${RECORD_DIR}/${id}.md`);
     return { code: 0, stdout: `Created ${RECORD_DIR}/${id}.md\n`, stderr: '' };
@@ -337,12 +335,13 @@ function validateOne(run: ValidateRun, rel: string, requireCommitted: boolean): 
     const name = path.posix.basename(rel);
     /** A record that cannot even be read: one diagnostic. */
     const single = (code: string, message: string): RecordReport => finish(rel, [{ code, message }]);
-    const dirProblem = recordDirProblem(run.dir, 'read');
-    if (dirProblem) return single(dirProblem.code, dirProblem.message);
-    if (run.dir.kind === 'absent') return single('record-missing', `${RECORD_DIR}/ does not exist`);
+    const { dir } = run;
+    if (dir.kind !== 'ok') {
+        const dirProblem = recordDirProblem(dir, 'read');
+        return dirProblem ? single(dirProblem.code, dirProblem.message) : single('record-missing', `${RECORD_DIR}/ does not exist`);
+    }
     if (!isRegularFileInside(run.root, rel)) return single('record-missing', `${esc(rel)} is not a regular file in the working tree`);
-    // The directory is `<root>/docs/changes`: inspectRecordDir walked each level and found a real directory.
-    const read = readRecord(path.join(run.root, ...RECORD_DIR.split('/'), name), name);
+    const read = readRecord(path.join(dir.dir, name), name);
     if (!read.ok) return single(read.tooLarge === true ? 'record-too-large' : read.code, read.message);
 
     const diagnostics: Diagnostic[] = [];

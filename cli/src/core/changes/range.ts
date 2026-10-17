@@ -1,6 +1,6 @@
 import { headSha, isSafeRef, mergeBase, resolveBase } from './git';
 import type { RecordDir } from './record-io';
-import { esc } from './text-safety';
+import { esc, isObj } from './text-safety';
 import { RECORD_DIR } from './types';
 
 // What `awm change new` and `awm change validate` (and the commands after them) share: the commit range of the branch, the check
@@ -12,6 +12,8 @@ export interface Failure { code: string; message: string; remedy?: string }
 
 export const REMEDY_BASE = 'pass --base <ref>';
 export const HEAD_MOVED: Failure = { code: 'git-failed', message: 'HEAD moved during derivation' };
+
+const KINDS: readonly string[] = ['ok', 'absent', 'unsafe', 'error'];
 
 export type Range = { ok: true; head: string; mergeBase: string } | { ok: false; failure: Failure };
 
@@ -40,7 +42,10 @@ export function headMovedFailure(root: string, head: string): Failure | null {
  * The failure an unusable record directory stands for, or null when it is usable (or, for read and write, absent: the caller
  * decides what absence means). `create` is for the result of a creation attempt, where absent is a failure too.
  */
-export function recordDirProblem(dir: RecordDir, purpose: 'read' | 'write' | 'create' | 'inspect'): Failure | null {
+export function recordDirProblem(dir: Exclude<RecordDir, { kind: 'ok' }>, purpose: 'create'): Failure;
+export function recordDirProblem(dir: RecordDir, purpose: 'read' | 'write'): Failure | null;
+export function recordDirProblem(dir: RecordDir, purpose: 'read' | 'write' | 'create'): Failure | null {
+    if (!isObj(dir) || !KINDS.includes(dir.kind)) return { code: 'invalid-input', message: 'the record directory state is not valid' };
     if (dir.kind === 'unsafe') return { code: 'unsafe-path', message: `${RECORD_DIR} or its parent is a symlink or not a directory; refusing to ${purpose === 'read' ? 'read' : 'write'}` };
     if (dir.kind === 'error' || (dir.kind === 'absent' && purpose === 'create')) return { code: 'io-failed', message: `could not ${purpose === 'create' ? 'create' : 'inspect'} ${RECORD_DIR}` };
     return null;

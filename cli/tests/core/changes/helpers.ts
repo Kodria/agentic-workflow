@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import childProcess, { execFileSync } from 'child_process';
 
 // Git's identity and config isolation travel in an explicit environment object for the helper's own git calls.
 // HOME, AWM_HOME and the git config variables are also overridden on `process.env` (and restored), so that code under
@@ -93,6 +93,21 @@ export const LINEAR_TIME_BOUND_MS = 5000;
 
 /** Casts a deliberately wrong value to whatever the function under test declares. */
 export const bad = (v: unknown) => v as never;
+
+/**
+ * Spies on every git child the code under test spawns (`child_process.execFileSync`): records each argv in `calls` and then runs
+ * the real git, unless `intercept` throws (to simulate a failing or timed-out git). Undo with `restore()` (or `jest.restoreAllMocks`).
+ */
+export function spyOnGit(intercept?: (args: string[]) => void): { calls: string[][]; restore: () => void } {
+    const calls: string[][] = [];
+    const real = childProcess.execFileSync as (...a: unknown[]) => unknown;
+    const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+        if (cmd === 'git') calls.push(args);
+        intercept?.(args);
+        return real(cmd, args, opts);
+    }) as never);
+    return { calls, restore: () => spy.mockRestore() };
+}
 
 /** Sets variables on process.env (the environment runGit hands to git) for the duration of `fn`. */
 export function withEnv<T>(vars: Record<string, string>, fn: () => T): T {
