@@ -98,3 +98,26 @@ export function showSignaturesInLog(repo: TestRepo): void {
     repo.git('config', 'log.showSignature', 'true');
     repo.git('config', 'gpg.program', process.execPath); // any program that writes to stderr; the output is what matters, not a real gpg
 }
+
+/** Runs git in `cwd` and returns trimmed stdout (the caller decides on identity and config isolation). */
+export type GitRunner = (cwd: string, ...args: string[]) => string;
+
+/**
+ * Offline fixture: a nested repository at `relPath` registered as a gitlink of the repository at `root`, hidden by
+ * `.gitmodules` `ignore = all` and the repo-local `diff.ignoreSubmodules=all`, then committed. Returns helpers to run git
+ * inside it and to commit there (which moves the checkout away from the recorded gitlink).
+ */
+export function makeHiddenSubmodule(root: string, run: GitRunner, relPath = 'vendor/sm') {
+    const dir = path.join(root, ...relPath.split('/'));
+    fs.mkdirSync(dir, { recursive: true });
+    const inSm = (...args: string[]) => run(dir, ...args);
+    const commitInSm = (name: string): string => { fs.writeFileSync(path.join(dir, name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
+    inSm('init', '-q', '-b', 'main');
+    const first = commitInSm('one');
+    fs.writeFileSync(path.join(root, '.gitmodules'), `[submodule "${relPath}"]\n\tpath = ${relPath}\n\turl = ./nowhere\n\tignore = all\n`);
+    run(root, 'config', 'diff.ignoreSubmodules', 'all');
+    run(root, 'add', '.gitmodules');
+    run(root, 'update-index', '--add', '--cacheinfo', `160000,${first},${relPath}`);
+    run(root, 'commit', '-q', '-m', 'chore: add submodule');
+    return { dir, inSm, commitInSm };
+}

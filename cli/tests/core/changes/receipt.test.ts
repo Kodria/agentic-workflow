@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
+import { makeHiddenSubmodule } from './helpers';
 import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, shouldRun } from '../../../src/commands/sensors/run';
@@ -339,23 +340,15 @@ describe('receipt', () => {
         expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or tracked files changed/);
     });
     describe('a submodule (hidden by .gitmodules ignore=all and diff.ignoreSubmodules=all)', () => {
-        const sm = () => path.join(root, 'vendor', 'sm');
-        const inSm = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: sm(), encoding: 'utf8', env: gitEnv() }).trim();
-        const commitInSm = (name: string): string => { fs.writeFileSync(path.join(sm(), name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
+        let sm = ''; let commitInSm: (name: string) => string = () => '';
         beforeEach(() => {
-            fs.mkdirSync(sm(), { recursive: true });
-            inSm('init', '-q', '-b', 'main');
-            const first = commitInSm('one');
-            fs.writeFileSync(path.join(root, '.gitmodules'), '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n');
-            g('config', 'diff.ignoreSubmodules', 'all');
-            g('add', '.gitmodules');
-            g('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
-            g('commit', '-q', '-m', 'chore: add submodule');
+            const hidden = makeHiddenSubmodule(root, (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: gitEnv() }).trim());
+            sm = hidden.dir; commitInSm = hidden.commitInSm;
         });
         test('R2.2 a sensor writing an untracked file inside a clean submodule still gets a receipt', () => {
             const pre = captureReceiptPrecondition(root);
             expect(pre.eligible).toBe(true);
-            fs.writeFileSync(path.join(sm(), 'coverage.out'), 'x');
+            fs.writeFileSync(path.join(sm, 'coverage.out'), 'x');
             expect(finalizeReceipt(pre, output as never)).toBe('');
             expect(readReceipt(root, g('rev-parse', 'HEAD')).ok).toBe(true);
         });
@@ -366,7 +359,7 @@ describe('receipt', () => {
         });
         test('R2.2 a sensor that modifies tracked content inside the submodule withholds the receipt', () => {
             const pre = captureReceiptPrecondition(root);
-            fs.writeFileSync(path.join(sm(), 'one'), 'changed');
+            fs.writeFileSync(path.join(sm, 'one'), 'changed');
             expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or tracked files changed/);
         });
         test('R2.1 a submodule moved before the run makes the tree ineligible', () => {

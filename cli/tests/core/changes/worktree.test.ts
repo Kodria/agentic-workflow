@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
+import { makeHiddenSubmodule } from './helpers';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from '../../../src/core/changes/worktree';
 
 const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'];
@@ -126,18 +127,10 @@ describe('worktree state', () => {
     });
     describe('a submodule change is a change whatever the configuration says', () => {
         // Offline: vendor/sm is a nested repository registered as a gitlink, hidden by .gitmodules `ignore = all` and diff.ignoreSubmodules=all.
-        const sm = () => path.join(root, 'vendor', 'sm');
-        const inSm = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: sm(), encoding: 'utf8', env: gitEnv() }).trim();
-        const commitInSm = (name: string): string => { fs.writeFileSync(path.join(sm(), name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
+        let sm = ''; let commitInSm: (name: string) => string = () => '';
         const registerHiddenSubmodule = () => {
-            fs.mkdirSync(sm(), { recursive: true });
-            inSm('init', '-q', '-b', 'main');
-            const first = commitInSm('one');
-            fs.writeFileSync(path.join(root, '.gitmodules'), '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n');
-            g('config', 'diff.ignoreSubmodules', 'all');
-            g('add', '.gitmodules');
-            g('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
-            g('commit', '-q', '-m', 'chore: add submodule');
+            const hidden = makeHiddenSubmodule(root, (cwd, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: gitEnv() }).trim());
+            sm = hidden.dir; commitInSm = hidden.commitInSm;
         };
         test('a clean tree holding a submodule is clean', () => {
             registerHiddenSubmodule();
@@ -146,7 +139,7 @@ describe('worktree state', () => {
         });
         test('an untracked file inside a clean submodule: the post-run recheck ignores it, the pre-run measure counts it', () => {
             registerHiddenSubmodule();
-            fs.writeFileSync(path.join(sm(), 'coverage.out'), 'x'); // what a sensor leaves behind
+            fs.writeFileSync(path.join(sm, 'coverage.out'), 'x'); // what a sensor leaves behind
             const post = gitState(root, false); const pre = gitState(root, true);
             expect(post.kind === 'ok' && post.dirty).toBe(false);
             // git reports the submodule itself as modified (untracked content) in the normal-untracked mode, so the pre-run measure is dirty.
@@ -154,7 +147,7 @@ describe('worktree state', () => {
         });
         test.each([[true], [false]])('modified tracked content inside a submodule makes the tree dirty (untracked=%p)', (untracked) => {
             registerHiddenSubmodule();
-            fs.writeFileSync(path.join(sm(), 'one'), 'changed');
+            fs.writeFileSync(path.join(sm, 'one'), 'changed');
             const state = gitState(root, untracked);
             expect(state.kind === 'ok' && state.dirty).toBe(true);
         });

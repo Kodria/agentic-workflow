@@ -2,7 +2,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
 import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
@@ -214,17 +214,7 @@ describe('git functions in a repository', () => {
         expect(isDirtyOutside(repo.root, ['docs/changes'])).toBe(false);
     });
     test('dirtiness: a submodule checked out at another commit is dirty even with ignore=all and diff.ignoreSubmodules=all', () => {
-        const sm = path.join(repo.root, 'vendor', 'sm');
-        fs.mkdirSync(sm, { recursive: true });
-        const inSm = (...args: string[]) => repo.git('-C', sm, ...args);
-        const commitInSm = (name: string): string => { fs.writeFileSync(path.join(sm, name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
-        inSm('init', '-q', '-b', 'main');
-        const first = commitInSm('one');
-        fs.writeFileSync(path.join(repo.root, '.gitmodules'), '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n');
-        repo.git('config', 'diff.ignoreSubmodules', 'all');
-        repo.git('add', '.gitmodules');
-        repo.git('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
-        repo.git('commit', '-q', '-m', 'chore: add submodule');
+        const { commitInSm } = makeHiddenSubmodule(repo.root, (cwd, ...args) => repo.git('-C', cwd, ...args));
         expect(isDirtyOutside(repo.root, [])).toBe(false);
         commitInSm('two');
         expect(isDirtyOutside(repo.root, [])).toBe(true);
