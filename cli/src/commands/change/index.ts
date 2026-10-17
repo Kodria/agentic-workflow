@@ -23,6 +23,13 @@ export interface NewOpts { base?: string; plan?: string; issue?: string; model?:
 
 const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
 const REMEDY_SPLIT = 'split the change into smaller ones';
+const REMEDY_SENSORS = 'reduce the sensors listed in .awm/sensors.json (the sensor receipt makes the record too large)';
+
+/** R3.4: the remedy that names the cause of an oversized record: the sensor receipt when it outweighs the module list, else the change itself. */
+function tooLargeRemedy(fields: DerivedFields, verification: Verification): string {
+    const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+    return bytes(verification.sensors) > bytes(fields.modules) ? REMEDY_SENSORS : REMEDY_SPLIT;
+}
 const MAX_PROVENANCE_VALUE = 200;
 const MAX_ISSUE_URL = 2048;
 const CREATION_ONLY_FLAGS = ['plan', 'issue', 'model', 'session'] as const;
@@ -128,7 +135,7 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     const content = renderSkeleton({ id, fields: derived.fields, verification, links, provenance: provenance(root, opts) });
     if (content === null) return fail('skeleton-invalid', 'the record skeleton could not be rendered');
     // R3.4: a change touching thousands of directories (or a huge receipt) outgrows the record bound: say so, instead of a validation code.
-    if (Buffer.byteLength(content, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `the generated record would exceed ${MAX_RECORD_BYTES} bytes`, REMEDY_SPLIT);
+    if (Buffer.byteLength(content, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `the generated record would exceed ${MAX_RECORD_BYTES} bytes`, tooLargeRemedy(derived.fields, verification));
     // Backstop: the only thing wrong with a skeleton may be its pending markers.
     const problem = validateRecordShape(`${id}.md`, content, { root }).diagnostics.find((d) => d.code !== 'pending-content');
     if (problem) return fail('skeleton-invalid', `the generated record failed validation: ${esc(problem.code)}${problem.field ? ` (${esc(problem.field)})` : ''}`);
@@ -154,7 +161,7 @@ function refresh({ dir, existing, slug, fields, verification, head, root }: Refr
     const current = readRecord(target, name);
     if (!current.ok) return fail(current.code, current.message);
     const next = refreshDerived(current.text, fields, verification);
-    if (next !== null && Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `${esc(name)} would exceed ${MAX_RECORD_BYTES} bytes once refreshed`, REMEDY_SPLIT);
+    if (next !== null && Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `${esc(name)} would exceed ${MAX_RECORD_BYTES} bytes once refreshed`, tooLargeRemedy(fields, verification));
     if (next === null) return fail('record-invalid', `${esc(name)} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
     const moved = headMovedFailure(root, head);
     if (moved) return failed(moved);

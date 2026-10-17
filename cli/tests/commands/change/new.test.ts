@@ -23,6 +23,8 @@ const now = () => new Date('2026-10-17T12:00:00.000Z');
 const pass = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }] };
 const RECEIPT_TIME = '2026-10-17T11:00:00.000Z';
 const REMEDY = 'commit your work, then run awm sensors run';
+const REMEDY_SPLIT = 'split the change into smaller ones';
+const REMEDY_SENSORS = 'reduce the sensors listed in .awm/sensors.json (the sensor receipt makes the record too large)';
 
 function receiptForHead(): void {
     writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: pass as never }));
@@ -240,11 +242,12 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
 
 describe('awm change new: generated record is checked before it is written (R3.4 size bound)', () => {
     freshRepo();
-    test('R3.4 a receipt that makes the record exceed 64 KiB fails with record-too-large and a remedy, and writes nothing', () => {
+    test('R3.4 a receipt that makes the record exceed 64 KiB fails with record-too-large and a remedy naming the sensors, and writes nothing', () => {
         const sensors = Array.from({ length: 700 }, (_, i) => ({ name: `sensor-${String(i).padStart(4, '0')}-${'x'.repeat(100)}`, status: 'pass' as const, errors: [] }));
         writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors } as never }));
         const r = run('change-record');
-        expectFailure(r, 'record-too-large', 'split the change into smaller ones');
+        // The receipt, not the directories, is the cause: the remedy says so (R3.4).
+        expectFailure(r, 'record-too-large', REMEDY_SENSORS);
         expect(recordFiles()).toEqual([]);
     });
     test('R3.4 a change touching thousands of directories fails with record-too-large (not a cryptic skeleton-invalid) and writes nothing', () => {
@@ -253,9 +256,72 @@ describe('awm change new: generated record is checked before it is written (R3.4
         importCommits(repo, [{ message: 'feat(vendor): import vendored packages', files, date: '2026-10-17T10:00:00Z' }]);
         receiptForHead();
         const r = run('change-record');
-        expectFailure(r, 'record-too-large', 'split the change into smaller ones');
+        expectFailure(r, 'record-too-large', REMEDY_SPLIT);
         expect(r.stderr).not.toContain('skeleton-invalid');
         expect(recordFiles()).toEqual([]);
+    });
+});
+
+describe('awm change new: the 65536-byte boundary of the record (R3.4, R1.8)', () => {
+    freshRepo();
+    // The record grows by exactly one byte per character of a sensor name (ASCII), while the number of sensors is fixed. Filler
+    // sensors of 100 characters move the size in steps of about 111 bytes, less than the 127 bytes one variable name can add, so
+    // some filler count has the limit inside the variable name's range.
+    const sensorList = (fillers: number, variable: number) => [
+        ...Array.from({ length: fillers }, (_, i) => ({ name: `f${String(i).padStart(4, '0')}${'x'.repeat(95)}`, status: 'pass' as const, errors: [] })),
+        { name: `v${'x'.repeat(variable - 1)}`, status: 'pass' as const, errors: [] },
+    ];
+    const setReceipt = (fillers: number, variable: number): void => {
+        writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors: sensorList(fillers, variable) } as never }));
+    };
+    /** Largest n in [lo, hi] for which `fits(n)` holds, `fits` being true up to a point and false after it. */
+    const largest = (lo: number, hi: number, fits: (n: number) => boolean): number => {
+        let a = lo; let b = hi;
+        while (a < b) { const mid = Math.ceil((a + b) / 2); if (fits(mid)) a = mid; else b = mid - 1; }
+        return a;
+    };
+    /** Runs `attempt` for a receipt of (fillers, variable); `bytes` is the size of the file it wrote, null when it failed as too large. */
+    function findBoundary(attempt: () => { bytes: number | null }): { fillers: number; variable: number; atLimit: number | null; oneMore: number | null } {
+        const fits = (fillers: number, variable: number): number | null => { setReceipt(fillers, variable); return attempt().bytes; };
+        const fillers = largest(0, 700, (k) => fits(k, 1) !== null);
+        const variable = largest(1, 128, (l) => fits(fillers, l) !== null);
+        return { fillers, variable, atLimit: fits(fillers, variable), oneMore: variable < 128 ? fits(fillers, variable + 1) : -1 };
+    }
+    test('change new: a record of exactly 65536 bytes is written, one of 65537 is record-too-large', () => {
+        const attempt = (): { bytes: number | null } => {
+            const r = run('change-record');
+            if (r.code === 0) { const bytes = fs.statSync(file()).size; fs.rmSync(file()); return { bytes }; }
+            expect(r.stderr).toContain('record-too-large');
+            return { bytes: null };
+        };
+        const found = findBoundary(attempt);
+        expect(found.variable).toBeLessThan(128);
+        expect(found.atLimit).toBe(65536);
+        expect(found.oneMore).toBeNull();
+    });
+    test('change new --refresh: a refreshed record of exactly 65536 bytes is written, one of 65537 is record-too-large', () => {
+        setReceipt(0, 1);
+        expect(run('change-record').code).toBe(0);
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
+        const original = read();
+        const attempt = (): { bytes: number | null } => {
+            const r = run('change-record', { refresh: true });
+            if (r.code === 0) { const bytes = fs.statSync(file()).size; fs.writeFileSync(file(), original); return { bytes }; }
+            expect(r.stderr).toContain('record-too-large');
+            expect(read()).toBe(original);
+            return { bytes: null };
+        };
+        const found = findBoundary(attempt);
+        expect(found.variable).toBeLessThan(128);
+        expect(found.atLimit).toBe(65536);
+        expect(found.oneMore).toBeNull();
+    });
+    test('the remedy names the cause: a receipt that is too large asks to reduce the sensors, in new and in refresh alike', () => {
+        setReceipt(0, 1);
+        run('change-record');
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
+        setReceipt(700, 100);
+        expectFailure(run('change-record', { refresh: true }), 'record-too-large', REMEDY_SENSORS);
     });
 });
 
@@ -805,7 +871,7 @@ describe('awm change new --refresh (R3.11)', () => {
         importCommits(repo, [{ message: 'feat(vendor): import vendored packages', files, date: '2026-10-17T10:30:00Z' }]);
         receiptForHead();
         const before = read();
-        expectFailure(run('change-record', { refresh: true }), 'record-too-large', 'split the change into smaller ones');
+        expectFailure(run('change-record', { refresh: true }), 'record-too-large', REMEDY_SPLIT);
         expect(read()).toBe(before);
     });
     test('a record already over 64 KiB on disk is record-invalid and untouched (it cannot be read for a rewrite)', () => {
