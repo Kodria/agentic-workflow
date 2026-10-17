@@ -104,7 +104,9 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   const section = renderChangelog(version, io.today(), commits);
   io.writeChangelog(section + '\n' + io.readChangelog());
   io.run('git', ['add', 'cli/package.json', 'cli/package-lock.json', 'CHANGELOG.md']);
-  io.run('git', ['commit', '-m', `chore(release): v${version} [skip ci]`]);
+  // R6.1 (#217): the bump commit carries the Change Record opt-out trailer so
+  // `awm changes list` reports it as `exempt`, never as `missing`.
+  io.run('git', ['commit', '-m', `chore(release): v${version} [skip ci]`, '-m', 'Change-Record: none']);
   io.run('git', ['tag', '-a', `v${version}`, '-m', `v${version}`]);
 
   // OIDC mode: GitHub inyecta ACTIONS_ID_TOKEN_REQUEST_URL con id-token:write

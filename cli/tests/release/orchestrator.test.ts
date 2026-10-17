@@ -49,6 +49,7 @@ describe('release — happy path', () => {
     expect(calls).toContain('WRITE_PKG 2.2.0');
     const joined = calls.join('\n');
     expect(joined).toMatch(/git commit .*chore\(release\): v2.2.0/);
+    expect(joined).toMatch(/git commit .*chore\(release\): v2\.2\.0 \[skip ci\] -m Change-Record: none/);
     expect(joined).toMatch(/git tag -a v2.2.0/);
     expect(joined).toMatch(/npm publish/);
     expect(joined).toMatch(/git push origin main/);

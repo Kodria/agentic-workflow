@@ -1,0 +1,111 @@
+// The one place that defines which characters are unsafe in record text (R1.4) and how attacker-controlled text is
+// echoed in diagnostics (R1.8). Pure: imports nothing from this module's siblings.
+
+// Control characters are C0 (includes \t \n \r), DEL and C1 (includes U+0085). U+2028/U+2029 are line breaks but not controls.
+const CONTROL_CLASS = '\\u0000-\\u001f\\u007f-\\u009f';
+const SINGLE_LINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}\\u2028\\u2029]`);
+// What an echo of untrusted text escapes: the above plus the bidirectional controls (marks, embeddings, isolates), which would
+// reorder what a terminal shows around them. They are escaped, not rejected: isSingleLine and friends are about controls only.
+const BIDI = '\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069';
+const ESCAPE_ALL = new RegExp(`[${CONTROL_CLASS}\\u2028\\u2029${BIDI}]`, 'g');
+const BIDI_ALL = new RegExp(`[${BIDI}]`, 'g');
+const MULTILINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}]`);
+
+/** Stand-in returned by the escaping and clipping helpers for non-string input (they never throw). */
+export const NON_STRING = '<non-string>';
+export const MAX_MESSAGE = 300;
+const MAX_ECHO_CODE_POINTS = 80;
+const MAX_ECHO_ESCAPED = 240;
+
+/** A string with no line break and no control character. */
+export const isSingleLine = (text: unknown): text is string => typeof text === 'string' && !SINGLE_LINE_UNSAFE.test(text);
+/** A string whose only control characters are `\n` and `\t`. */
+export const isSafeMultiline = (text: unknown): text is string => typeof text === 'string' && !MULTILINE_UNSAFE.test(text.replace(/[\n\t]/g, ''));
+
+const unicodeEscape = (c: string): string => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+
+/** Bidirectional controls written as \\uXXXX (nothing else is touched). */
+export const escapeBidi = (text: string): string => text.replace(BIDI_ALL, unicodeEscape);
+
+/** JSON-string escaping (without the quotes) plus the line breaks and controls JSON leaves alone. Does not clip. */
+export function escapeText(text: string): string {
+    if (typeof text !== 'string') return NON_STRING;
+    return JSON.stringify(text).slice(1, -1).replace(ESCAPE_ALL, unicodeEscape);
+}
+
+/** Cuts at `maxUnits` UTF-16 units, dropping a trailing high surrogate so a pair is never split. The only cut of untrusted text by unit count. */
+export function sliceNoSplit(text: string, maxUnits: number): string {
+    // Non-string text, or a limit that is not a finite number of at least 1, yields '' (never throws); fractions are floored.
+    if (typeof text !== 'string' || typeof maxUnits !== 'number' || !Number.isFinite(maxUnits)) return '';
+    const limit = Math.floor(maxUnits);
+    if (limit < 1) return '';
+    if (text.length <= limit) return text;
+    const last = text.charCodeAt(limit - 1);
+    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit);
+}
+
+/** Attacker-controlled text made safe to embed in a diagnostic: bounded, JSON-escaped, never containing a raw line break or control. */
+export function esc(text: string): string {
+    if (typeof text !== 'string') return NON_STRING;
+    const points = [...text];
+    const clipped = points.length > MAX_ECHO_CODE_POINTS ? `${points.slice(0, MAX_ECHO_CODE_POINTS).join('')}…` : text;
+    const escaped = escapeText(clipped);
+    return escaped.length > MAX_ECHO_ESCAPED ? `${sliceNoSplit(escaped, MAX_ECHO_ESCAPED)}…` : escaped;
+}
+
+const MAX_RELATIVE_PATH = 1024;
+
+/**
+ * A repo-relative path a record, a pathspec or a module name can safely hold: single line (no control character, no
+ * U+2028/U+2029), 1..1024 UTF-16 units, not padded with whitespace, no backslash, not absolute (a leading `/` is an empty
+ * segment, `C:` a drive letter; backslashes are refused), and no empty, `.` or `..` segment. Linear time; never throws.
+ */
+export function isSafeRelativePath(p: unknown): p is string {
+    if (!isSingleLine(p) || p.length === 0 || p.length > MAX_RELATIVE_PATH || p !== p.trim()) return false;
+    if (/^[A-Za-z]:/.test(p) || p.includes('\\')) return false;
+    return p.split('/').every((s) => s !== '' && s !== '.' && s !== '..');
+}
+
+/** A plain object (not null, not an array). */
+export const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Round-trips through UTF-8: false for a lone surrogate, which would not survive being written to a file. */
+export const isWellFormed = (s: unknown): s is string => typeof s === 'string' && Buffer.from(s, 'utf8').toString('utf8') === s;
+
+/** A canonical ISO-8601 instant: exactly what `Date.prototype.toISOString` prints (UTC, milliseconds, `Z`). Never throws. */
+export function isCanonicalIso(v: unknown): v is string {
+    if (typeof v !== 'string') return false;
+    const time = Date.parse(v);
+    return !Number.isNaN(time) && new Date(time).toISOString() === v;
+}
+
+export interface HttpsUrlOptions {
+    /** `https://user:pw@host/` is accepted only when true. */
+    allowCredentials: boolean;
+    /** Upper bound on the length in UTF-16 units; none when omitted. */
+    maxLength?: number;
+}
+
+/**
+ * An https URL a record can hold: one line, no whitespace, `https://` followed by a real authority (the first character is not
+ * `/ ? # \ @`), parseable by WHATWG URL with a host. Linear time; never throws.
+ */
+export function isHttpsUrl(v: unknown, opts: HttpsUrlOptions): v is string {
+    if (!isSingleLine(v) || /\s/.test(v) || !/^https:\/\/[^/?#\\@]/.test(v)) return false;
+    if (opts.maxLength !== undefined && v.length > opts.maxLength) return false;
+    try {
+        const u = new URL(v);
+        return u.hostname.length > 0 && (opts.allowCredentials || (u.username === '' && u.password === ''));
+    } catch {
+        return false;
+    }
+}
+
+/** Escapes any remaining raw line break, control character or bidi control (no quoting, no clipping). */
+export const cleanText = (text: string): string => (typeof text === 'string' ? text.replace(ESCAPE_ALL, unicodeEscape) : NON_STRING);
+
+/** Clips to MAX_MESSAGE UTF-16 units including the ellipsis. */
+export function clipMessage(message: string): string {
+    if (typeof message !== 'string') return NON_STRING;
+    return message.length <= MAX_MESSAGE ? message : `${sliceNoSplit(message, MAX_MESSAGE - 1)}…`;
+}

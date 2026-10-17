@@ -959,7 +959,7 @@ awm sensors run [--fast | --slow | --all] [--changed] [--base <ref>] [--json]
 
 > The completion gate is the **full** run (no flag). Do not use `--slow` as the gate — it skips lint/typecheck, where most new findings surface.
 
-`awm sensors run` only ever **reads** your project. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
+`awm sensors run` never changes what it measures. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. Its one write is the local [sensor receipt](#sensor-receipt) below, a side effect that changes neither stdout nor the exit code. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
 
 Each prepared sensor includes additive `execution` evidence in JSON:
 `execution.timeoutMs`, `timeoutSource`, and `elapsedMs`, plus
@@ -983,6 +983,43 @@ The JSON is written before the process exit is set, so non-pass automation can
 still parse the evidence. A baseline can only suppress findings from a sensor
 that produced its own verdict; it never certifies an incomplete execution.
 
+#### Sensor receipt
+
+A clean, complete run on a committed tree leaves a receipt that [`awm change`](#awm-change-new-slug) later binds to a Change Record. The receipt is written to `.awm/sensors/runs/<full-commit-sha>.json` (mode `0600`, replaced atomically), next to a `.gitignore` containing `*` that the command creates with the directory, so `git add -A` can never commit receipts. It holds `schema`, `commit`, `ranAt`, `cliVersion`, `overall`, `sensors` (name to status, sorted by name) and a `digest` that readers recompute; a receipt whose digest or shape does not match is treated as absent (`receipt-invalid`). A `fail` verdict is recorded too; only `overall: pass` satisfies `change validate --strict`.
+
+```json
+{
+  "schema": 1,
+  "commit": "a7fb2d2236ab8e38ad7c31e0f5cdaa1bb461e694",
+  "ranAt": "2026-10-17T18:01:47.913Z",
+  "cliVersion": "9.19.0",
+  "overall": "pass",
+  "sensors": {
+    "smoke": "pass"
+  },
+  "digest": "sha256:f04ce0c78efd03ae74054fe5ec94edfdd7bd7062231d2d4e7c82fc322af9425a"
+}
+```
+
+No receipt is written, and stdout and the exit code stay exactly as above, when:
+
+- the selection is partial (`--fast` or `--slow` alone, or `--changed`; `--all` and no flag are full). This case is silent.
+- the working tree has any uncommitted or untracked change before the run, apart from the local state under `.awm/sensors/runs`, `.awm/journal`, `.awm/ledger`, `.awm/evidence` and `.awm/track.json`. A modified tracked `.awm/sensors.json` does count.
+- HEAD moved or a tracked file changed during the run. Untracked files that sensors create (build or coverage output) do not prevent it.
+- no sensor ran, every sensor was skipped, the manifest had schema-invalid entries, the manifest is on the `generic` fallback over a real stack (`packDrift`), or the verdict is `not_certified`: a receipt certifies the whole declared sensor set or nothing.
+- the manifest that ran is not the repository root's `.awm/sensors.json`, for example when run from a package directory of a monorepo.
+
+For a full selection, each of these prints one line on **stderr**, for example:
+
+```text
+no sensor receipt written: working tree has uncommitted changes (commit them first)
+no sensor receipt written: the manifest that ran is not the repository root's .awm/sensors.json (a receipt certifies a whole commit)
+no sensor receipt written: every sensor was skipped, so the run certified nothing
+no sensor receipt written: no sensor ran, so there is nothing to certify
+```
+
+Only `awm sensors run` writes receipts. The read-only sensor run behind `awm plan admit --verify-sensors` and `awm preflight --verify-sensors` does not. Receipts are not pruned: one small file per clean full run.
+
 ### `awm sensors status`
 
 Report static readiness: `READY`, `DEGRADED` (a declared prerequisite is
@@ -998,6 +1035,220 @@ Snapshot current findings as an accepted baseline (`.awm/sensors.baseline.json`)
 ### `awm sensors install`
 
 Install the **`PostToolUse`** hook in `~/.claude/settings.json` so fast sensors run automatically after each file edit. This installs **only the per-edit *trigger*, not the sensors** — the checks and the completion gate are identical on every agent. **Claude Code only:** OpenCode has no hooks, so it has nothing to install here; it runs the same sensors at the completion gate (`awm sensors run`, via `verification-before-completion`). The difference is *cadence* (Claude gets an extra early loop), not *coverage*.
+
+---
+
+## Change Records (what each change did, verified)
+
+A **Change Record** is one file per change, `docs/changes/YYYY-MM-DD-<slug>.md`, that pairs fields the CLI derives from git and from a [sensor receipt](#sensor-receipt) with narrative the author writes. `awm change new` creates it, `awm change validate` checks it, and `awm changes list` answers what merged, what was released and what has no record. The concept and its opt-out are explained in [How AWM works](framework.md#change-records). All three commands run inside a git repository, never write outside `docs/changes/`, and report every failure as `code: message` on **stderr** with exit `2` (`validate` prints its verdict report on stdout instead, see below).
+
+### `awm change new <slug>`
+
+Create the record skeleton for the current branch.
+
+```
+awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m>] [--session <s>] [--refresh]
+```
+
+| Flag | Description |
+|---|---|
+| `--base <ref>` | Base branch. Default: `origin/HEAD`, then `main`, then `master`. |
+| `--plan <path>` | Repo-relative path of the plan file to link (`links.plan`); must be an existing regular file inside the repository. |
+| `--issue <url>` | `https` issue URL to link (`links.issue`); credentials in the URL are rejected. |
+| `--model <model>` | Provenance: model identifier (one line, at most 200 characters). |
+| `--session <session>` | Provenance: session id or URL, same limits. The record is committed, so avoid internal URLs in public repositories. |
+| `--refresh` | Recompute only the derived fields and `verification` of the existing record. Cannot be combined with `--plan`, `--issue`, `--model` or `--session`. |
+
+`<slug>` matches `[a-z0-9]+(-[a-z0-9]+)*` and is at most 64 characters; the date in the file name is today's UTC date. The derived fields come from the non-merge commits of `merge-base(base, HEAD)..HEAD` that touch at least one path outside `docs/changes/`, so committing the record never changes them:
+
+- `type`, `breaking`, `semver`: from the conventional-commit subjects, with the release parser. `semver` is `major` if any commit is breaking, else `minor` if any is `feat`, else `patch` if any is `fix` or `perf`, else `none`.
+- `scope`: the most frequent scope, or `null`.
+- `modules`: the sorted parent directories of the changed files, cut to three segments (`.` for root files).
+- `verification`: `commit`, `overall`, `sensors` and `receipt_digest` copied from the receipt of HEAD.
+- `provenance`: `agent`, `started_at` and `finished_at` from the branch journal when present; `model` and `session` only from the flags.
+
+The command requires a committed tree (changes under `docs/changes/` and the local `.awm` state excepted) and a valid receipt for HEAD, so the order is: commit, `awm sensors run`, `awm change new`.
+
+```text
+$ awm change new add-b --issue https://github.com/o/r/issues/1 --model sonnet-5
+Created docs/changes/2026-10-17-add-b.md
+```
+
+The skeleton (trimmed) has every narrative field set to the marker `<!-- awm:pending -->`, which `validate` rejects until the author replaces it. The body headings are in Spanish and fixed:
+
+```yaml
+---
+schema: awm.change-record/v1
+id: 2026-10-17-add-b
+title: <!-- awm:pending -->
+summary_short: <!-- awm:pending -->
+type: feat
+scope: demo
+semver: minor
+breaking: false
+modules:
+  - pkg/.awm
+  - src
+links:
+  issue: https://github.com/o/r/issues/1
+verification:
+  commit: b8526c39b085ded68bbb2a480af70a4367cc8fba
+  overall: pass
+  sensors:
+    smoke: pass
+  receipt_digest: sha256:9fd04fb086e68c586c0bef92794e7746e64b97a2a8514f007e936f909797a4e8
+manual_validation:
+  - step: <!-- awm:pending -->
+    expected: <!-- awm:pending -->
+risks:
+  - <!-- awm:pending -->
+rollback: <!-- awm:pending -->
+provenance:
+  model: sonnet-5
+---
+
+## Qué se hizo
+## Qué se probó
+## Qué falta validar
+## Riesgos y rollback
+```
+
+`--refresh` rewrites only the lines of `type`, `scope`, `semver`, `breaking`, `modules` and `verification` (after new commits and a new `awm sensors run`) and leaves every other byte alone; it prints `Refreshed docs/changes/<file>`. A record is never overwritten without it.
+
+Failures (all exit `2`, with a `remedy:` line when there is one):
+
+| Code | Cause and remedy |
+|---|---|
+| `slug-invalid`, `flag-invalid`, `invalid-input` | Bad slug, flag value or flag combination. |
+| `not-a-git-repo` | Run inside a git repository. |
+| `base-unresolved` | No base found; pass `--base <ref>`. |
+| `no-commits`, `no-conventional-commits` | No commit outside `docs/changes/`, or none with a `type(scope): subject` subject; a type is never invented. |
+| `tree-dirty` | Uncommitted changes outside `docs/changes/`; commit, then run `awm sensors run`. |
+| `receipt-missing`, `receipt-invalid` | No valid receipt for HEAD; commit your work, then run `awm sensors run`. |
+| `record-exists` | A record for that slug exists under any date; use `--refresh`. |
+| `record-missing`, `record-ambiguous`, `record-invalid`, `record-changed` | `--refresh` found no record, several, an unparseable one, or the file changed while it was being refreshed (run again). |
+| `record-too-large` | The record would exceed 65 536 bytes; the remedy names the cause, a change touching too many directories (split it) or a sensor list too large (reduce it). |
+| `unsafe-path` | `docs/changes` or its parent is a symlink; nothing is written. |
+| `head-moved`, `io-failed`, `git-failed`, `internal-error` | HEAD moved while deriving, or a git or filesystem operation failed; run again. |
+
+### `awm change validate [path]`
+
+Check the record(s) of the current branch. Read-only.
+
+```
+awm change validate [path] [--base <ref>] [--strict] [--json]
+```
+
+| Flag | Description |
+|---|---|
+| `[path]` | Validate that one record, as it is in the working tree. Without it, validate every record **added** in `merge-base(base, HEAD)..HEAD` (at most 50; more yields `too-many-records`). |
+| `--base <ref>` | As for `change new`. |
+| `--strict` | Also require the receipt of `verification.commit` to exist, match the record, and say `pass`. |
+| `--json` | Print one JSON line instead of the text report. |
+
+Exit `0` when valid, `2` when invalid. The text report:
+
+```text
+$ awm change validate --strict
+Change Record validation: valid
+- docs/changes/2026-10-17-add-b.md: valid
+```
+
+`--json` prints `{"state": ..., "records": [{"path", "state", "diagnostics": [{"code", "message", "field"?}]}]}` on one line; `state` is `valid`, `invalid` or `exempt`:
+
+```json
+{"state":"invalid","records":[{"path":"docs/changes/2026-10-17-add-b.md","state":"invalid","diagnostics":[{"code":"code-changed-after-verification","message":"1 file changed after b8526c39b085: src/c.js"}]}]}
+```
+
+An operational failure under `--json` (`not-a-git-repo`, `base-unresolved`, `path-invalid`, `git-failed`, ...) is reported in the same shape, with `state: invalid` and one record named `docs/changes`; without `--json` it is the stderr form of `change new`.
+
+**Opt-out.** A branch that adds no record is `invalid` with `record-missing`, unless a commit in the range has the trailer `Change-Record: none` in the final paragraph of its message; then the state is `exempt` and the exit `0`:
+
+```text
+$ awm change validate
+Change Record validation: exempt (Change-Record: none)
+```
+
+The trailer is read from the message itself, so git's `trailer.*` settings do not matter; a `Change-Record: none` line followed by another paragraph does not count.
+
+What is checked, in this order (the checks that read record fields run only once the shape is valid):
+
+| Code | Meaning |
+|---|---|
+| `record-missing` | No record added and no opt-out trailer; or the named file is not a regular file in the working tree. |
+| `record-uncommitted` | Without `[path]`: the record has uncommitted changes, so the verdict would not describe the committed file. |
+| `name-invalid`, `frontmatter-missing`, `yaml-invalid`, `yaml-alias`, `unknown-field`, `field-invalid`, `body-section-missing`, `record-too-large`, `input-invalid` | The record does not follow the format `awm.change-record/v1` (allowed keys, field rules, the four body sections in order, at most 64 KiB, YAML without anchors or aliases). |
+| `pending-content` | A `<!-- awm:pending -->` marker is left. |
+| `derived-mismatch` | `type`, `scope`, `semver`, `breaking` or `modules` differ from what git derives now; one diagnostic per field, showing both values. |
+| `verification-commit-foreign` | `verification.commit` is neither HEAD nor an ancestor of it. |
+| `code-changed-after-verification` | Files outside `docs/changes/` changed after `verification.commit` (up to 20 listed); run `awm sensors run`, then `awm change new <slug> --refresh`. |
+| `receipt-missing`, `receipt-invalid`, `verification-mismatch`, `verification-not-passing` | `--strict` only: no valid receipt for `verification.commit`, the receipt differs from the record's `verification`, or its verdict is not `pass`. |
+| `too-many-records`, `diagnostics-truncated` | Output bounds: 50 records per run, 20 diagnostics per record. |
+
+`--strict` can only pass on a machine that holds the receipt (receipts are local); plain `validate` is the mode a CI job can run.
+
+### `awm changes list`
+
+Show what merged into the base branch, with each change's record and derived release state. Read-only.
+
+```
+awm changes list [--since <window>] [--base <ref>] [--format text|json|voice]
+```
+
+| Flag | Description |
+|---|---|
+| `--since <window>` | `<n>h`, `<n>d` (n of at least 1) or an ISO date `YYYY-MM-DD`. Default `24h`. Invalid: `since-invalid`. |
+| `--base <ref>` | Base branch, resolved as in `change new`. |
+| `--format <format>` | `text` (default), `json` or `voice`. Invalid: `format-invalid`. |
+
+The command reads the first-parent history of the base ref and the record contents from that ref (never the working tree), so run `git fetch` first if `origin/HEAD` is stale. Each commit in the window is classified, first match wins:
+
+| Classification | Meaning |
+|---|---|
+| `recorded` | The commit adds a valid record. |
+| `invalid-record` | It adds a record that fails the format checks (shape only; linked files are not checked). |
+| `exempt` | A commit of that change carries `Change-Record: none`. The release bump commit does. |
+| `missing` | None of the above. |
+
+Commits older than the first commit that ever added a record are not listed. If no record ever existed, the output says so and the exit is `0`.
+
+```text
+$ awm changes list
+WHEN              CLASSIFICATION  SHA       PR      CHANGE
+2026-10-17 18:02  invalid-record  9e2f03f6  #13     feat: bad record (#13)  (body-section-missing)
+2026-10-17 18:02  exempt          3b066d00  -       chore(release): v1.0.0 [skip ci]  [v1.0.0]
+2026-10-17 18:02  missing         b407a9cc  -       fix: hotfix  [v1.0.0]
+2026-10-17 18:02  recorded        6215b024  #12     Add b module  [v1.0.0]
+```
+
+The change column is the record's `title` (the commit subject otherwise), the bracketed name is the release tag, and an invalid row ends with its first diagnostic code. A repository without records prints `empty has not adopted Change Records (no record under docs/changes/ on main).`; an empty window prints `No changes on main since 2099-01-01T00:00:00.000Z.`
+
+`--format voice` prints one Spanish sentence per recorded change, then a closing count:
+
+```text
+demo: Adds the b module. feat, verificado, 1 validaciones manuales pendientes.
+Además: 1 cambio(s) sin record y 1 con record inválido.
+```
+
+`--format json` prints one document, the machine contract of the feature:
+
+```json
+{"schema":"awm.changes-list/v1","repo":"github.com/acme/demo","base":"main","since":"2099-01-01T00:00:00.000Z","adopted":true,"truncated":false,"omitted":0,"changes":[]}
+```
+
+| Field | Meaning |
+|---|---|
+| `schema` | Always `awm.changes-list/v1`. |
+| `repo` | `host/owner/name` from `remote.origin.url`, credentials removed; `null` when there is no parseable remote. |
+| `base`, `since` | The base ref and the window start (UTC instant). |
+| `adopted` | `false` when no record ever existed; `changes` is then empty. |
+| `truncated`, `omitted` | At most the newest 200 changes are returned; when there are more, `truncated` is `true` and `omitted` counts the rest (text and voice end with a notice). Narrow `--since` to see them. |
+| `changes[]` | `sha`, `subject`, `classification`, `merged_at` (committer date, UTC; `null` if unknown), `pr` (number from a trailing `(#n)` in the subject, else `null`), `release` (earliest tag containing the commit, annotated tags first, else `null`) and `records`. |
+| `records` | Empty for `exempt` and `missing`; for `recorded`, `{path, ...full frontmatter}`; for `invalid-record`, `{path, diagnostics}` for every record the commit added (`diagnostics` is empty for the valid ones). |
+
+A shallow clone fails with `shallow-history` (remedy `git fetch --unshallow`), because its oldest commits cannot be told from root commits. In a partial clone the command never fetches missing objects (it sets `GIT_NO_LAZY_FETCH=1`), so an affected change fails closed; that guarantee needs **git 2.43 or newer**, and older versions may fetch lazily. The scan reads history in pages and assumes commit dates do not decrease along the first-parent chain, so a commit dated inside the window beyond a page with none inside it (clock skew) is not listed.
+
+The skills that run this flow for you (declaring the slug in the plan, generating and validating the record before merge, building the PR body from it) are not part of this release; today you run the commands yourself.
 
 ---
 

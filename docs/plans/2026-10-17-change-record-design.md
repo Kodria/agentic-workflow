@@ -1,0 +1,217 @@
+# Change Record per PR Design
+
+**Issue:** [#217](https://github.com/Kodria/agentic-workflow/issues/217)
+
+**Scope:** `agentic-workflow` CLI (`cli/`) plus two skills in `awm-baseline-registry` (`finishing-a-development-branch`, `writing-plans`). Related but out of scope: [#218](https://github.com/Kodria/agentic-workflow/issues/218) (canonical `.awm/` versioning policy).
+
+**Approach:** One immutable, machine-readable Change Record per PR at `docs/changes/YYYY-MM-DD-<slug>.md`. Its deterministic fields are derived by the CLI from git and from a persisted sensor-run receipt. Its narrative fields are written by the agent. A local strict gate enforces it, and query-time derivation answers "what merged / released / is missing a record" without any post-merge writes, git hooks or host-specific CI (brainstorming 2026-10-16/17).
+
+## Problem
+
+Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). The next day it is hard to recall what each PR did, what was actually verified, what still needs manual validation, and what risks remain. Today that information is spread across the plan, the local ledger and evidence, the PR body, the CHANGELOG and deploy logs. None of these is a short, structured summary that a voice, chat or mobile bot can query without reading code.
+
+## Market research summary
+
+- **Per-change fragment files in the repo** are the dominant pattern for "what changed": Changesets (`.changeset/*.md`, frontmatter plus summary), towncrier (`newsfragments/`), changie (`.changes/unreleased/*.yaml`), OpenStack reno (`releasenotes/notes/*.yaml`, with upgrade, known-issues and security sections) and Go `doc/next/*.md`. They exist to avoid merge conflicts on a single file. Their presence is enforced by a bot, a CI check or a test.
+- **Explicit opt-out:** Kubernetes accepts a `NONE` release-note block. GitLab uses a `Changelog:` commit trailer.
+- **Mandatory "what was tested":** Phabricator makes Test Plan a required field.
+- **Risk and rollback:** ITSM change records (ServiceNow) carry implementation, backout and test plans plus risk and impact. No changelog tool covers these.
+- **Agent provenance:** Copilot links commits to agent logs with an `Agent-Logs-Url` trailer. Agent Trace (RFC v0.1) leaves storage open.
+- **Keep, don't consume:** ADR/MADR records (`docs/decisions/`) are kept forever with a status and an index, unlike Changesets and towncrier, which delete fragments on release.
+- **Gap:** no tool combines a changelog fragment, an ITSM-style verification/risk record and agent provenance in one machine-readable artifact. That is what the Change Record fills.
+
+## Decisions
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| DD-1 | The record is a versioned file in the project repo: `docs/changes/YYYY-MM-DD-<slug>.md`, one per PR. | It belongs to the project, not to git or AWM (user decision). A remote bot reads it through the host API without cloning. This matches the fragment pattern of the market. |
+| DD-2 | The record is immutable after merge. `merged`, `merged_at`, `release` and the PR number are derived at query time. No `status`, `links.pr`, `links.release` or `links.deploy` fields exist. | No fragment tool rewrites files after merge. This avoids post-merge commits, CI write permissions and git hooks (AWM has none). |
+| DD-3 | Hybrid, verified generation: the CLI derives `type/scope/semver/breaking/modules/verification`, and the agent writes the narrative. `validate` recomputes the derived fields and rejects any drift. | `verification` must come from evidence, not from the agent's claim. Studies show about half of agentic PRs that touch code under test add no tests. |
+| DD-4 | The gate is local and host-agnostic (`awm change validate --strict` in the finishing skill). CI is optional and not installed by AWM. Bypasses are surfaced at query time as `missing`. | A per-repo CI job is host-specific and silently absent if not configured (user decision). |
+| DD-5 | `verification` is bound to a persisted sensor-run receipt, keyed by commit and local (not versioned). | One sensor run instead of two (vs. re-running in validate), and no dependence on host CI. Option A from brainstorming. |
+| DD-6 | Opt-out is the git trailer `Change-Record: none` (key case-insensitive) in the final paragraph of any commit message of the change, parsed from the message body itself so the result never depends on git's `trailer.*` configuration. | Git-native, so it works on any host. Same precedent as GitLab's `Changelog:` trailer. Limit: a host that squash-merges concatenates the branch's commit messages, so a trailer that was the final paragraph of one commit is no longer the final paragraph of the merge message; the trailer must then be in the final paragraph of the squash message (PR description or edited merge message). |
+| DD-7 | No committed index file. `awm changes list` builds its view on demand from the base branch history. | A committed index would be touched by every PR and reintroduce the merge conflicts that fragments exist to avoid. |
+| DD-8 | No published JSON Schema in this cycle. A hand-written TypeScript validator is the single source of truth, and `awm changes list --format json` is the machine contract. | Two sources of truth drift. This follows the existing `validateCycleEvidence` pattern. |
+| DD-9 | No multi-repo aggregation in this cycle. The JSON output carries a `repo` field derived from `git remote`, so outputs from several repos can be concatenated. | YAGNI (user decision). This is the preparation step only. |
+| DD-10 | `manual_validation` items have no `done` flag. | The record is immutable. Tracking completed manual validations is future work. |
+| DD-11 | Skill changes cover only `finishing-a-development-branch` (generate, validate, PR body) and `writing-plans` (declare intent and acceptance criteria). | The user chose the minimal set. Retro, QA and docs stay unchanged. |
+
+**Accepted risks:**
+- A human PR that skips the skill is not blocked. It is reported as `missing` in `awm changes list`.
+- The receipt is local, so `--strict` can only run where the sensors ran. The base (non-strict) mode is what an optional CI can run.
+
+## Requirements
+
+### R1 — Record format (`awm.change-record/v1`)
+
+- **R1.1 — Location and name:** THE CLI SHALL treat as Change Records exactly the files matching `docs/changes/<YYYY-MM-DD>-<slug>.md`, where `<slug>` matches `^[a-z0-9]+(-[a-z0-9]+)*$` and is at most 64 characters. A file whose name has the shape `YYYY-MM-DD-<slug>.md` but an impossible calendar date or a slug over 64 characters is still treated as a record candidate and reported as invalid (`name-invalid`), never silently ignored.
+- **R1.2 — Frontmatter delimiting:** THE record SHALL start with a YAML frontmatter block delimited by `---` lines. THE CLI SHALL parse it with js-yaml's `CORE_SCHEMA` (a strict subset of the default safe schema: no custom tags, no implicit timestamps, no merge keys) and SHALL reject every YAML anchor and alias, including scalar and unused ones.
+- **R1.3 — Allowed keys:** THE frontmatter SHALL contain only these keys: `schema`, `id`, `title`, `summary_short`, `type`, `scope`, `semver`, `breaking`, `modules`, `links`, `verification`, `manual_validation`, `risks`, `rollback`, `provenance`. IF any other key is present at any level, THEN `validate` SHALL fail with diagnostic `unknown-field` naming the field path.
+- **R1.4 — Field rules:**
+  - `schema` is exactly `awm.change-record/v1`.
+  - `id` equals the file stem.
+  - `title` is 1–120 characters.
+  - `summary_short` is 1–280 characters, with no line breaks (`\r`, `\n`, U+0085, U+2028, U+2029).
+  - `type` is a lowercase conventional-commit type.
+  - `scope` is a non-empty string or `null`.
+  - `semver` is one of `major | minor | patch | none`.
+  - `breaking` is a boolean.
+  - `modules` is a sorted, deduplicated array of repo-relative directory paths using `/`.
+  - `links` is optional and may contain only `plan` (a safe repo-relative path; its existence as a regular file is verified whenever a repository root is available, as in `validate`, and not when records are read from history, as in `list`) and `issue` (an https URL without credentials: `https://user:token@host/` is `field-invalid`, so a credential in the authority of the URL can never be published through `list`; query strings and fragments of an issue URL are legitimate and are not inspected).
+  - `manual_validation` is either a non-empty array of `{step, expected}` objects with non-empty strings, or the object `{none: <non-empty reason>}`.
+  - `risks` is an array of non-empty strings and may be empty.
+  - `rollback` is a non-empty string.
+  - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all non-empty strings. Timestamps are canonical ISO-8601, meaning exactly the form `Date.prototype.toISOString()` produces (UTC with milliseconds, e.g. `2026-10-17T10:00:00.000Z`).
+- **R1.4 (text safety, part of R1.4):** single-line fields (`title`, `summary_short`, `scope`, `type`, `modules` entries, `links.*`, sensor names, `provenance` values) SHALL contain no line break (`\r`, `\n`, U+0085, U+2028, U+2029) and no control character (C0, DEL, C1); `modules` entries SHALL have no leading or trailing whitespace; multi-line fields (`rollback`, `risks` items, `manual_validation` `step`, `expected` and `none`) SHALL contain no control character other than `\n` and `\t`. Violations yield `field-invalid`.
+- **R1.5 — Verification block:** `verification` SHALL contain:
+  - `commit`: a full commit id, 40 lowercase hex characters (64 in a SHA-256 repository);
+  - `overall`: the receipt verdict;
+  - `sensors`: a map from sensor name (a non-empty single-line string of at most 128 characters without control characters) to `pass | fail | inconclusive | skipped`;
+  - `receipt_digest`: `sha256:<64 hex>`.
+- **R1.6 — Body sections:** THE body SHALL contain the headings `## Qué se hizo`, `## Qué se probó`, `## Qué falta validar` and `## Riesgos y rollback`, in that order, each with non-empty content.
+- **R1.7 — No placeholders:** IF the raw frontmatter text, any parsed string value (after YAML unescaping), or any body section contains the literal marker `<!-- awm:pending -->`, THEN `validate` SHALL fail with diagnostic `pending-content`.
+- **R1.8 — Size bound:** IF a record file exceeds 64 KiB, THEN THE CLI SHALL reject it with diagnostic `record-too-large` without parsing it. THE validator SHALL never throw: a non-string `fileName` or `raw` yields diagnostic `input-invalid`; every diagnostic `message` and `field` SHALL be single-line with attacker-controlled text escaped (JSON string escaping), each message is clipped to 300 characters, and at most 50 diagnostics are returned, the last being `diagnostics-truncated` when more existed.
+
+### R2 — Sensor-run receipt
+
+- **R2.1 — When written:** WHEN `awm sensors run` completes with the default full selection (no `--fast`, `--slow` or `--changed`; `--all` is allowed) AND `git status --porcelain` (measured before the run, excluding only the local runtime state `.awm/sensors/runs`, `.awm/journal`, `.awm/ledger`, `.awm/evidence` and `.awm/track.json`) reports no changes, THE CLI SHALL write a receipt to `.awm/sensors/runs/<commit>.json` atomically with mode 0600, also when it replaces an existing receipt file. A modified tracked file elsewhere under `.awm/` (for example `.awm/sensors.json`) makes the tree dirty.
+- **R2.2 — No receipt on partial or dirty runs:** IF the selection is partial or the working tree is dirty or git is unavailable, THEN THE CLI SHALL NOT write a receipt. IF the selection was full, THE CLI SHALL print one stderr line stating why no receipt was written. IF HEAD moved or any tracked file changed during the run (`git status --porcelain --untracked-files=no` after the run, with the same exclusions), THEN THE CLI SHALL NOT write a receipt and SHALL print one stderr line stating why; untracked files created by sensors (build or coverage output) do not prevent the receipt. THE sensor verdict and exit code SHALL be unchanged.
+- **R2.3 — Content:** THE receipt SHALL contain:
+  - `schema: 1`;
+  - `commit`: the HEAD SHA at run start;
+  - `ranAt`: canonical ISO;
+  - `cliVersion`;
+  - `overall`;
+  - `sensors`: name → status, sorted by name;
+  - `digest`: the sha256 of the canonical JSON of all other fields.
+- **R2.2b — Receipt scope and hygiene:** THE CLI SHALL write a receipt only when at least one sensor ran (never for `not_certified`, an empty sensor list or an invalid manifest) and only when the manifest that ran is the repository root's `.awm/sensors.json` (a run of a sub-directory manifest in a monorepo certifies nothing, because the receipt is keyed by commit only; one stderr line says so). WHEN the receipt directory is created, THE CLI SHALL also create `.awm/sensors/runs/.gitignore` containing `*`, so receipts, which are local and not versioned, can never be committed by `git add -A` in a repository that does not ignore them. Receipts are not pruned in this cycle (one small 0600 file per clean full run).
+- **R2.2c — Complete verdicts only:** THE CLI SHALL NOT write a receipt when the run dropped part of the manifest (schema-invalid sensor entries, pack drift): a receipt certifies the whole declared sensor set or nothing. A run in which every sensor was skipped did not certify anything and gets no receipt either. The stderr line states which case applies (no sensor ran / entries were invalid / the verdict was not certified); a `not_certified` verdict that did run sensors is reported as such, not as "no sensor ran". The digest and every comparison of the `sensors` map are computed over the entries sorted by name (code-unit order) as an array of pairs, independent of JavaScript object key order (integer-like names included).
+- **R2.4 — Stable output:** THE stdout JSON of `awm sensors run` SHALL keep its current shape. The receipt is a side effect only.
+- **R2.5 — Tamper detection:** WHEN reading a receipt, THE CLI SHALL recompute the digest. IF it does not match, or if the file fails strict shape validation, THEN THE CLI SHALL treat the receipt as absent and SHALL report diagnostic `receipt-invalid`.
+
+### R3 — `awm change new`
+
+- **R3.1 — Derivation range:** WHEN invoked as `awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m>] [--session <s>]`, THE CLI SHALL resolve the base in this order: `--base`, then `refs/remotes/origin/HEAD`, then `main`, then `master`. It SHALL compute `merge-base(base, HEAD)` and derive the fields from the non-merge commits in `merge-base..HEAD`.
+- **R3.2 — Unresolvable base:** IF no base can be resolved, THEN THE CLI SHALL exit 2 with diagnostic `base-unresolved` and remedy `pass --base <ref>`.
+- **R3.3 — Commit-derived fields:** THE CLI SHALL derive `type`, `breaking` and `semver` with the release parser (`cli/src/release/core.ts`: `parseCommits`, `determineBump`):
+  - the range is every non-merge commit of `merge-base..HEAD` that touches at least one path outside `docs/changes/` (a commit that changes no path at all, such as `git commit --allow-empty`, is ignored, like in the release script which also limits its log by path; full history: a side branch merged with a tree-discarding merge such as `-s ours` still counts, so path-limited history simplification SHALL NOT be used); `breaking` and `semver` are computed over ALL commits the release parser accepts, whatever their type spelling (for example `Feat!:` is breaking);
+  - `semver` is `major` if any commit is breaking, otherwise `minor` if any is `feat`, otherwise `patch` if any is `fix` or `perf`, otherwise `none`;
+  - a commit whose subject line is longer than 1024 UTF-16 units is not treated as a conventional commit (this bounds the work of the release parser's header regex on hostile subjects);
+  - `type` is the type of the highest-impact commit, in the order breaking > feat > fix > perf > first commit, lowercased; a type that is not purely letters after lowercasing (for example `feat2`) is recorded as `other` (`breaking` and `semver` are unaffected);
+  - `scope` is the most frequent non-null scope (ties broken by code-unit order, never by locale, so every machine derives the same value), or `null`.
+- **R3.4 — Modules:** THE CLI SHALL set `modules` to the sorted, unique set of parent directories of the files in `git diff --name-only merge-base..HEAD`, excluding `docs/changes/`. Each path is truncated to at most 3 segments, and root-level files map to `.`. IF the generated record would exceed the 64 KiB bound of R1.8 (for example a change touching thousands of directories), THEN `change new` SHALL fail with diagnostic `record-too-large` and a remedy that names the cause (split the change when the directories are the cause; reduce the sensor list when the receipt is), instead of writing anything.
+- **R3.5 — No commits:** IF `merge-base..HEAD` contains no non-merge commit that touches a path outside `docs/changes/`, THEN THE CLI SHALL exit 2 with diagnostic `no-commits`. IF such commits exist but none has a conventional-commit subject, THEN THE CLI SHALL exit 2 with diagnostic `no-conventional-commits` and SHALL NOT invent a type. Derivation (R3.3, R3.4) ignores commits and files that only touch `docs/changes/`, so committing the record never changes the derived fields. A base or revision argument that is not a safe git revision (leading `-`, `..` outside a validated range, whitespace or control characters, `^`, `~`, `@`, `:`) yields diagnostic `invalid-input`; git is never invoked with it.
+- **R3.6 — Receipt required:** IF no valid receipt exists for HEAD, or the working tree is dirty per `git status --porcelain` excluding `docs/changes/` and the runtime-state paths of R2.1, THEN THE CLI SHALL exit 2 with diagnostic `receipt-missing`, `receipt-invalid` (a receipt that fails R2.5) or `tree-dirty` and remedy `commit your work, then run awm sensors run`.
+- **R3.7 — Verification copy:** THE CLI SHALL copy `commit`, `overall`, `sensors` and `digest` (as `receipt_digest`) from the receipt into `verification`.
+- **R3.8 — Provenance:** THE CLI SHALL fill `provenance.agent` from the branch journal's `admissionContext.provider` and `started_at`/`finished_at` from the journal cycle when present. It SHALL take `model` and `session` only from flags, and SHALL omit any key without a source.
+- **R3.9 — Skeleton:** THE CLI SHALL write narrative fields and body sections containing the `<!-- awm:pending -->` marker, and SHALL print the created path.
+- **R3.10 — No overwrite:** IF the target file exists, or a record for the same slug already exists under any date, and `--refresh` is not given, THEN THE CLI SHALL exit 2 with diagnostic `record-exists`.
+- **R3.11 — Refresh:** WHEN `--refresh` is given for an existing record, THE CLI SHALL recompute only `type`, `scope`, `semver`, `breaking`, `modules` and `verification`. It SHALL leave every other byte of the file unchanged (the lines of the recomputed keys are replaced as a whole, including a comment that shares such a line; a leading BOM is not preserved silently: a file with a BOM is not parseable per R1.2 and fails with `record-invalid`; the recomputed keys are recognised whether written bare, quoted (without YAML escapes inside the quotes) or with spaces before the colon; a spelling that needs YAML unescaping to equal a recomputed key, for example `"t\x79pe"`, is not recognised and fails closed with `record-invalid`, writing nothing), and SHALL fail with `record-invalid` if the existing frontmatter cannot be parsed.
+- **R3.11b — Refresh flags:** IF `--refresh` is combined with `--plan`, `--issue`, `--model` or `--session` (flags that only apply when a record is created), THEN THE CLI SHALL exit 2 with diagnostic `flag-invalid` and write nothing.
+- **R3.12 — Path safety:** THE CLI SHALL validate `<slug>` per R1.1 before building any path. IF the `docs/changes` path or the target is a symlink, THEN it SHALL refuse to write.
+
+### R4 — `awm change validate`
+
+- **R4.1 — Target selection:** WHEN called without a path, THE CLI SHALL validate every record added in `merge-base..HEAD` (resolving the base as in R3.1). WHEN called with a path, it SHALL validate that file only, as it is in the working tree. THE CLI SHALL read at most 50 records per run; WHEN more are added it SHALL validate the first 50 and report a further record `docs/changes` with diagnostic `too-many-records` (fail closed, never a silent pass).
+- **R4.2 — Missing record:** IF no record is added in the range AND no commit in the range has the trailer `Change-Record: none`, THEN `validate` SHALL fail with diagnostic `record-missing`. IF a trailer is present and no record is added, THEN it SHALL pass and report `exempt`.
+- **R4.3 — Base mode:** THE base mode SHALL check:
+  - R1 (shape); an oversize file yields `record-too-large` (R1.8);
+  - WHEN called without a path, that the record has no uncommitted change relative to HEAD (else `record-uncommitted`), so the verdict describes the committed record and not the working tree;
+  - that the recomputed R3.3/R3.4 fields equal the record (else `derived-mismatch`, naming each field);
+  - that `verification.commit` is an ancestor of HEAD or equal to it (else `verification-commit-foreign`);
+  - that `git diff --name-only <verification.commit> HEAD`, excluding `docs/changes/`, is empty (else `code-changed-after-verification`, listing up to 20 paths).
+  The checks that read fields of the record (derived, ancestry, late files, strict) run only when the shape is valid; with an invalid shape the shape diagnostics are the only ones reported, and the rest are reported after they are fixed.
+- **R4.4 — Strict mode:** WHEN `--strict` is given, THE CLI SHALL additionally require:
+  - a valid receipt for `verification.commit` (else `receipt-missing` or `receipt-invalid`);
+  - that the receipt's `digest`, `overall` and `sensors` equal the record (else `verification-mismatch`);
+  - `overall: pass` (else `verification-not-passing`).
+- **R4.5 — Output and exit:** THE CLI SHALL exit 0 when valid and 2 otherwise. It SHALL print a text report, or with `--json` a single JSON line `{state, records:[{path, state, diagnostics:[{code, message, field?}]}]}`. It SHALL cap diagnostics at 20 per record (19 kept plus a final `diagnostics-truncated` whose message counts every omitted diagnostic, including those already dropped by the shape validator's own cap) and pass every message through `esc`/`clipMessage`. WHEN `--json` is given and the command fails operationally (`not-a-git-repo`, `base-unresolved`, `invalid-input`, `path-invalid`, `git-failed`), it SHALL still print one JSON line of the same shape with `state: invalid` and a single record `docs/changes` carrying that diagnostic, and exit 2.
+- **R4.6 — Read-only:** `validate` SHALL NOT write any file.
+
+### R5 — `awm changes list`
+
+- **R5.1 — Source:** THE CLI SHALL read the first-parent history of the base ref (resolved exactly as in R3.1, so the default is the same base `change new` uses; a stale `origin/HEAD` is the user's to refresh with `git fetch`). WHEN the repository is a shallow clone, THE CLI SHALL fail with diagnostic `shallow-history` (exit 2, remedy `git fetch --unshallow`), because the commits at the shallow boundary cannot be told from root commits. It SHALL read record contents from that ref with `git show`, never from the working tree.
+- **R5.2 — Window:** `--since` SHALL accept `<n>h`, `<n>d` (n of 1 to 9 digits, n ≥ 1, as long as the resulting instant is a valid date) or an ISO date (default `24h`). IF the value is invalid, THEN THE CLI SHALL exit 2 with diagnostic `since-invalid`.
+- **R5.3 — Classification:** For each first-parent commit in the window, THE CLI SHALL classify it as:
+  - `recorded` if the commit adds a valid record;
+  - `invalid-record` if it adds a record that fails base-shape validation (R1 only);
+  - `exempt` if any commit of that change carries `Change-Record: none` (the commits of a change are the first-parent commit itself plus, for a merge commit, `<commit>^1..<commit>`; trailers are read via `git log --format=%(trailers:key=Change-Record,valueonly)`);
+  - `missing` otherwise.
+  The first matching rule in this order wins, so a commit that adds a record and also carries the opt-out trailer is `recorded`. A record counts only when the commit adds it (status `A`, renames not followed) under `docs/changes/` with a name accepted by R1.7; a commit that adds several records is `invalid-record` when any of them fails shape validation and `recorded` otherwise. Shape validation here never touches the working tree (no `root` option): link files are not checked.
+- **R5.4 — Adoption point:** THE CLI SHALL classify commits older than the first commit that ever added a record-shaped file (R1.1 shape) under `docs/changes/` as `pre-adoption` and SHALL omit them from output. IF no record-shaped file ever existed (a `docs/changes/README.md` alone does not count; the one-line notice says that no Change Record exists, not that the directory is empty), THEN it SHALL print a single line stating that the repo has not adopted Change Records and SHALL exit 0.
+- **R5.5 — Derived fields:** For each entry, THE CLI SHALL derive:
+  - `merged_at`: the committer date of the commit as a UTC ISO-8601 instant (`%ct` seconds; `null` when the committer date is empty, negative, not a number or not representable, and such a commit is always inside the window, since it cannot be shown to be outside it), which is also the date the window of R5.2 compares against (commits are listed in first-parent order and each is tested individually; a future-dated commit is included);
+  - `pr`: from a trailing `(#<n>)` at the true end of the full subject (however long the subject is), else `null`;
+  - `release`: the earliest-created tag that contains the commit, else `null`; annotated tags (creation time = tagger date) take precedence over lightweight tags (git records no creation time for them, only the commit date), and a lightweight tag is chosen only when no annotated tag contains the commit; only the 500 earliest-dated containing tags are examined per entry, which bounds the output of the tag lookup;
+  - `repo`: `host/owner/name` parsed from `remote.origin.url` with credentials stripped (a host segment that contains `?`, `#` or `@` makes `repo` `null`) and any query (`?…`) or fragment (`#…`) removed, else `null`.
+- **R5.6 — Formats:**
+  - `text`: a human table.
+  - `json`: one JSON document `{schema: "awm.changes-list/v1", repo, base, since, truncated, omitted, changes:[…]}`. Each change is `{sha, subject, classification, merged_at, pr, release, records:[…]}`; `records` is empty for `exempt` and `missing`, holds `{path, …full frontmatter}` for `recorded`, and holds `{path, diagnostics}` for EVERY added record of an `invalid-record` commit (`diagnostics` is empty for those that are valid); the text row of such a commit shows the first failing record and its first diagnostic code. The JSON document also carries `adopted` (boolean): `false` states that no Change Record ever existed (the same fact that text and voice print as one line), and `changes` is then empty. A subject longer than the 1024-unit cap and a tag name longer than 255 characters are clipped, never an error of the run. `subject` is escaped and clipped like any untrusted text.
+  - `voice`: one sentence per change, `"<repo-name>: <summary_short>. <type>, <verificado|sin verificar>, <n> validaciones manuales pendientes."`, followed by a closing count of `missing` and `invalid-record`.
+- **R5.7 — Read-only and bounded:** `list` SHALL NOT write any file in the repository (the CLI's own global update-check state is not a repository file). In a partial clone the CLI SHALL NOT fetch missing objects (it sets `GIT_NO_LAZY_FETCH=1` for every git child, so the affected change fails closed); this guarantee requires a git that honors that variable (2.43 or newer, the version verified); older git versions may still fetch lazily, which is a documented limit, not a defect of the CLI. The first-parent history SHALL be read in pages of at most 10 000 commits, each page continuing from the first parent of the previous page's last commit, so no single git output approaches the 16 MiB bound, whatever the history length. The scan stops at the adoption point (R5.4) or at the first page that contains no commit inside the window, because commit dates are assumed to be non-decreasing along the first-parent chain; a commit dated inside the window that lies beyond such a page (clock skew) is not listed. It SHALL resolve tags with one `git for-each-ref`/`git tag --contains` strategy per entry, bounded to the newest 200 entries of the window (per commit at most 50 added records are read and per run at most 500; a commit whose records were not read because of these bounds is `invalid-record` with the single diagnostic `too-many-records`, failing closed like `validate`; beyond 200 entries `truncated` is true, `omitted` counts the rest, and the text and voice formats end with a notice). The earliest-created tag is decided by creator date, ties broken by tag name ascending. Every record read from history is size-checked before it is read (R1.8) and every path git prints is validated before use.
+
+### R6 — Release script opt-out
+
+- **R6.1:** WHEN `cli/src/release` creates the `chore(release): vX [skip ci]` commit, THE commit message SHALL include the trailer `Change-Record: none`.
+
+### R7 — Skills (awm-baseline-registry)
+
+- **R7.1 — writing-plans:** THE plan header SHALL declare the planned Change Record slug and the acceptance criteria that `manual_validation` will draw from. The skill SHALL state that `type/scope/semver` are derived and are not declared.
+- **R7.2 — finishing-a-development-branch:** Before Option 1 (merge) and Option 2 (push/PR), THE skill SHALL instruct the agent to:
+  1. commit;
+  2. run `awm sensors run`;
+  3. run `awm change new <slug>` (or `--refresh`);
+  4. write every narrative field and section from the plan, QA results and diff;
+  5. commit the record;
+  6. run `awm change validate --strict`, and stop on a non-zero exit.
+  
+  Trivial changes MAY instead use the `Change-Record: none` trailer, with the reason stated in the commit body.
+- **R7.3 — PR body:** For Option 2, THE skill SHALL build the PR body's Summary and Test Plan from the record's `summary_short`, `## Qué se hizo`, `## Qué se probó` and `manual_validation`, and SHALL link the record file.
+- **R7.4 — Version gate:** THE changed skills SHALL declare the minimum CLI version that ships R2–R5. IF the commands are unavailable, THEN the skill SHALL state the limitation and continue without the record, never inventing it.
+
+## Architecture
+
+- **Core module:** `cli/src/core/changes/`, with pure, independently testable units:
+  - `types.ts`: record and receipt types;
+  - `parse.ts`: frontmatter split, safe YAML and size bound;
+  - `validate-shape.ts`: R1;
+  - `derive.ts`: R3.3/R3.4, reusing `release/core.ts`;
+  - `git.ts`: thin `execFileSync` wrappers with no shell, `--` before paths, bounded timeouts;
+  - `receipt.ts`: R2 read, write and digest;
+  - `trailers.ts`;
+  - `list.ts`: R5 classification and derivation;
+  - `render.ts`: text, JSON and voice.
+- **Commands:**
+  - `cli/src/commands/change/index.ts` registers `change new` and `change validate`;
+  - `cli/src/commands/changes/index.ts` registers `changes list`;
+  - both use `register<X>Command(program, deps)` with injectable deps and `CommandResult`/`emit`.
+- **Sensors hook:** `cli/src/commands/sensors/index.ts`, in the `run` action, calls `writeReceiptIfEligible` after `runSensors`. `runSensors` itself stays untouched, so admission and read-only paths are unaffected.
+
+## NFRs
+
+- **Security:**
+  - safe YAML schema;
+  - slug grammar before path joins;
+  - refuse symlinked targets;
+  - credentials stripped from remote URLs in all output;
+  - `provenance.session` documented as optional, with a warning for public repos;
+  - all output through `terminalSafe`.
+- **Portability:** git invoked without a shell; paths normalized to `/`; tests pass on ubuntu, windows and macos (D-005).
+- **Isolation:** tests use tmp git repos with `HOME` and `AWM_HOME` overridden and never touch the real `~/.awm`.
+- **Performance:** `list` makes a bounded number of git calls (one log, one `show` per record, one tag lookup per entry), and the receipt write is a single atomic file.
+
+## Out of scope
+
+- multi-repo feed;
+- deploy tracking;
+- CDEvents/CloudEvents emission;
+- tracking of completed manual validations;
+- CHANGELOG generation from records;
+- published JSON Schema;
+- harness-retro consumption of records;
+- AWM-installed CI;
+- `.awm/` versioning policy (#218).
+
+## Verification note
+
+This document is a design artifact with no executable behavior. Per development-process, it needs only proportional structural verification. The implementation it specifies keeps the normal quality gates.

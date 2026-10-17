@@ -1,0 +1,187 @@
+import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
+import { isRegularFileInside } from './fs-safe';
+import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
+import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, OVERALLS, PENDING_MARKER, RECORD_SCHEMA, isCommitId, isSensorName, isSensorStatus, type ChangeRecord, type Diagnostic } from './types';
+
+const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
+const REQUIRED_KEYS = TOP_KEYS.filter((k) => k !== 'links' && k !== 'provenance');
+const PROVENANCE_KEYS = ['agent', 'model', 'session', 'started_at', 'finished_at'];
+const SEMVER = ['major', 'minor', 'patch', 'none'];
+const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+
+type Obj = Record<string, unknown>;
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+
+/** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */
+function finalize(list: Diagnostic[]): { diagnostics: Diagnostic[]; omitted?: number } {
+    const clean = list.map((d): Diagnostic => {
+        const message = cleanText(d.message);
+        const base: Diagnostic = { code: d.code, message: clipMessage(message) };
+        return d.field === undefined ? base : { ...base, field: cleanText(d.field) };
+    });
+    if (clean.length <= MAX_DIAGNOSTICS) return { diagnostics: clean };
+    const kept = clean.slice(0, MAX_DIAGNOSTICS - 1);
+    const omitted = clean.length - kept.length;
+    return { diagnostics: [...kept, { code: 'diagnostics-truncated', message: `${omitted} more diagnostics omitted` }], omitted };
+}
+
+// ---- Value predicates ----
+
+function isModulePath(m: unknown): boolean {
+    return m === '.' || isSafeRelativePath(m);
+}
+
+function containsPendingString(value: unknown): boolean {
+    if (typeof value === 'string') return value.includes(PENDING_MARKER);
+    if (Array.isArray(value)) return value.some(containsPendingString);
+    if (isObj(value)) return Object.entries(value).some(([k, val]) => k.includes(PENDING_MARKER) || containsPendingString(val));
+    return false;
+}
+
+// ---- Diagnostic helpers ----
+function unknownKeys(obj: Obj, allowed: string[], prefix: string, out: Diagnostic[]): void {
+    for (const key of Object.keys(obj)) {
+        if (!allowed.includes(key)) {
+            const field = prefix + esc(key);
+            out.push({ code: 'unknown-field', field, message: `unknown field "${field}"` });
+        }
+    }
+}
+
+function bad(out: Diagnostic[], field: string, message: string): void {
+    out.push({ code: 'field-invalid', field, message });
+}
+
+// ---- Body ----
+function checkBody(body: string, out: Diagnostic[]): void {
+    const lines = body.split('\n');
+    const headingIdx = lines.map((l, i) => (l.startsWith('## ') ? i : -1)).filter((i) => i >= 0);
+    let cursor = -1;
+    for (const heading of BODY_HEADINGS) {
+        const at = headingIdx.find((i) => i > cursor && lines[i].trimEnd() === heading);
+        if (at === undefined) { out.push({ code: 'body-section-missing', message: `missing or out-of-order section "${heading}"` }); return; }
+        const next = headingIdx.find((i) => i > at) ?? lines.length;
+        if (lines.slice(at + 1, next).join('\n').trim().length === 0) {
+            out.push({ code: 'body-section-missing', message: `section "${heading}" is empty` });
+            return;
+        }
+        cursor = at;
+    }
+}
+
+// ---- Frontmatter sections ----
+function checkIdentity(fm: Obj, fileName: string, out: Diagnostic[]): void {
+    if (fm.schema !== RECORD_SCHEMA) bad(out, 'schema', `schema must be ${RECORD_SCHEMA}`);
+    if (fm.id !== fileName.replace(/\.md$/, '')) bad(out, 'id', 'id must equal the file name without .md');
+    if (!nonEmpty(fm.title) || !isSingleLine(fm.title) || [...fm.title].length > 120) bad(out, 'title', 'title must be 1-120 characters on one line');
+    if (!nonEmpty(fm.summary_short) || !isSingleLine(fm.summary_short) || [...fm.summary_short].length > 280) bad(out, 'summary_short', 'summary_short must be 1-280 characters on one line');
+    if (typeof fm.type !== 'string' || !/^[a-z]+$/.test(fm.type)) bad(out, 'type', 'type must be a lowercase conventional-commit type');
+    if (!(fm.scope === null || (nonEmpty(fm.scope) && isSingleLine(fm.scope)))) bad(out, 'scope', 'scope must be a single-line string or null');
+    if (!SEMVER.includes(fm.semver as string)) bad(out, 'semver', `semver must be one of ${SEMVER.join('|')}`);
+    if (typeof fm.breaking !== 'boolean') bad(out, 'breaking', 'breaking must be a boolean');
+}
+
+function checkModules(fm: Obj, out: Diagnostic[]): void {
+    const mods = fm.modules;
+    if (!Array.isArray(mods) || !mods.every(isModulePath) || JSON.stringify([...new Set(mods as string[])].sort()) !== JSON.stringify(mods)) {
+        bad(out, 'modules', 'modules must be a sorted, unique array of repo-relative directories');
+    }
+}
+
+function checkLinks(fm: Obj, root: string | undefined, out: Diagnostic[]): void {
+    if (fm.links === undefined) return;
+    if (!isObj(fm.links)) { bad(out, 'links', 'links must be a mapping'); return; }
+    unknownKeys(fm.links, ['plan', 'issue'], 'links.', out);
+    const { plan, issue } = fm.links;
+    if (plan !== undefined) {
+        if (!isSafeRelativePath(plan)) bad(out, 'links.plan', 'links.plan must be a safe single-line repo-relative path');
+        else if (root !== undefined && !isRegularFileInside(root, plan)) bad(out, 'links.plan', `links.plan "${esc(plan)}" does not exist as a regular file`);
+    }
+    if (issue !== undefined && !isHttpsUrl(issue, { allowCredentials: false })) bad(out, 'links.issue', 'links.issue must be an https URL without credentials');
+}
+
+function checkVerification(fm: Obj, out: Diagnostic[]): void {
+    const v = fm.verification;
+    if (!isObj(v)) { bad(out, 'verification', 'verification must be a mapping'); return; }
+    unknownKeys(v, ['commit', 'overall', 'sensors', 'receipt_digest'], 'verification.', out);
+    if (!isCommitId(v.commit)) bad(out, 'verification.commit', 'verification.commit must be 40 or 64 lowercase hex characters');
+    if (!(OVERALLS as readonly string[]).includes(v.overall as string)) bad(out, 'verification.overall', `overall must be one of ${OVERALLS.join('|')}`);
+    if (!isObj(v.sensors) || !Object.entries(v.sensors).every(([k, s]) => isSensorName(k) && isSensorStatus(s))) {
+        bad(out, 'verification.sensors', 'sensors must map sensor names to pass|fail|inconclusive|skipped');
+    }
+    if (typeof v.receipt_digest !== 'string' || !DIGEST_RE.test(v.receipt_digest)) bad(out, 'verification.receipt_digest', 'receipt_digest must be sha256:<64 hex>');
+}
+
+const isNarrative = (v: unknown): v is string => nonEmpty(v) && isSafeMultiline(v);
+
+function checkNarrative(fm: Obj, out: Diagnostic[]): void {
+    const mv = fm.manual_validation;
+    if (Array.isArray(mv)) {
+        if (mv.length === 0) bad(out, 'manual_validation', 'manual_validation must not be empty; use {none: <reason>}');
+        mv.forEach((item, i) => {
+            if (!isObj(item)) { bad(out, `manual_validation.${i}`, 'item must be a mapping'); return; }
+            unknownKeys(item, ['step', 'expected'], `manual_validation.${i}.`, out);
+            if (!isNarrative(item.step) || !isNarrative(item.expected)) bad(out, `manual_validation.${i}`, 'step and expected must be non-empty strings without control characters');
+        });
+    } else if (isObj(mv)) {
+        unknownKeys(mv, ['none'], 'manual_validation.', out);
+        if (!isNarrative(mv.none)) bad(out, 'manual_validation.none', 'none must state a non-empty reason without control characters');
+    } else bad(out, 'manual_validation', 'manual_validation must be a list or {none: <reason>}');
+
+    if (!Array.isArray(fm.risks) || !fm.risks.every(isNarrative)) bad(out, 'risks', 'risks must be an array of non-empty strings without control characters');
+    if (!isNarrative(fm.rollback)) bad(out, 'rollback', 'rollback must be a non-empty string without control characters');
+}
+
+function checkProvenance(fm: Obj, out: Diagnostic[]): void {
+    if (fm.provenance === undefined) return;
+    if (!isObj(fm.provenance)) { bad(out, 'provenance', 'provenance must be a mapping'); return; }
+    unknownKeys(fm.provenance, PROVENANCE_KEYS, 'provenance.', out);
+    for (const [k, val] of Object.entries(fm.provenance)) {
+        if (!PROVENANCE_KEYS.includes(k)) continue;
+        const field = `provenance.${esc(k)}`;
+        if (!nonEmpty(val) || !isSingleLine(val)) bad(out, field, `${field} must be a non-empty single-line string`);
+        else if ((k === 'started_at' || k === 'finished_at') && !isCanonicalIso(val)) bad(out, field, `${field} must be canonical ISO-8601`);
+    }
+}
+
+export interface ShapeOptions { root?: string }
+
+/** `omitted` is the number of diagnostics the MAX_DIAGNOSTICS cap dropped (absent when none were); the last diagnostic is then `diagnostics-truncated`. */
+export function validateRecordShape(fileName: string, raw: string, opts: ShapeOptions = {}): { record?: ChangeRecord; diagnostics: Diagnostic[]; omitted?: number } {
+    if (typeof fileName !== 'string' || typeof raw !== 'string') {
+        return { diagnostics: [{ code: 'input-invalid', message: 'fileName and raw must both be strings' }] };
+    }
+    if (Buffer.byteLength(raw, 'utf8') > MAX_RECORD_BYTES) {
+        return { diagnostics: [{ code: 'record-too-large', message: `record exceeds ${MAX_RECORD_BYTES} bytes` }] };
+    }
+    const root = typeof opts?.root === 'string' ? opts.root : undefined;
+    const out: Diagnostic[] = [];
+    if (!isValidRecordFileName(fileName)) out.push({ code: 'name-invalid', message: `file name "${esc(fileName)}" must be YYYY-MM-DD-<slug>.md with a valid date and slug of at most 64 chars` });
+    const stop = (...more: Diagnostic[]) => finalize([...out, ...more]);
+
+    const split = splitRecord(raw);
+    if (!split.ok) return stop(split.diagnostic);
+    if (split.frontmatterText.includes(PENDING_MARKER) || split.body.includes(PENDING_MARKER)) {
+        out.push({ code: 'pending-content', message: 'record still contains <!-- awm:pending --> placeholders' });
+    }
+    checkBody(split.body, out);
+    const loaded = loadFrontmatter(split.frontmatterText);
+    if (!loaded.ok) return stop(loaded.diagnostic);
+    const fm = loaded.value;
+    if (!isObj(fm)) return stop({ code: 'not-an-object', message: 'frontmatter must be a mapping' });
+
+    if (!out.some((d) => d.code === 'pending-content') && containsPendingString(fm)) {
+        out.push({ code: 'pending-content', message: 'record still contains <!-- awm:pending --> placeholders' });
+    }
+    unknownKeys(fm, TOP_KEYS, '', out);
+    for (const key of REQUIRED_KEYS) if (!(key in fm)) bad(out, key, `missing required field "${key}"`);
+    checkIdentity(fm, fileName, out);
+    checkModules(fm, out);
+    checkLinks(fm, root, out);
+    checkVerification(fm, out);
+    checkNarrative(fm, out);
+    checkProvenance(fm, out);
+
+    if (out.length === 0) return { record: fm as unknown as ChangeRecord, diagnostics: [] };
+    return finalize(out);
+}

@@ -49,6 +49,8 @@ import { registerJobCommand } from './commands/job';
 import { registerWatchCommand } from './commands/watch';
 import { registerTrackCommand } from './commands/track';
 import { registerEvidenceCommand } from './commands/evidence';
+import { registerChangeCommand } from './commands/change';
+import { registerChangesCommand } from './commands/changes';
 import { registerProcessCommand } from './commands/process';
 import { registerContextCommand } from './commands/context';
 import { registerModelPolicyCommand } from './commands/model-policy';
@@ -815,6 +817,8 @@ registerJobCommand(program);
 registerWatchCommand(program);
 registerTrackCommand(program);
 registerEvidenceCommand(program);
+registerChangeCommand(program);
+registerChangesCommand(program);
 registerProcessCommand(program);
 registerContextCommand(program);
 

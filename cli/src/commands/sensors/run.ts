@@ -111,7 +111,7 @@ export function detectPackDrift(
     };
 }
 
-function shouldRun(isFast: boolean, opts: RunOptions): boolean {
+export function shouldRun(isFast: boolean, opts: RunOptions): boolean {
     if (opts.all) return true;
     if (opts.fast && opts.slow) return true;
     if (opts.fast) return isFast;
