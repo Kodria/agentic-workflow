@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { hasOptOut } from '../../../src/core/changes/trailers';
 
 describe('hasOptOut', () => {
@@ -115,6 +115,28 @@ describe('hasOptOut', () => {
         commitForgedSigned(repo, 'docs: signed\n\nChange-Record: none');
         expect(repo.git('log', '-1', '--format=%s')).not.toBe('docs: signed');
         expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
+    });
+    // The verification text of a signed commit comes out BEFORE the formatted message when log.showSignature is on. A fake gpg that
+    // ends its text with a blank line turns a subject-only `Change-Record: none` into a "second paragraph": without
+    // --no-show-signature (LOG_SAFETY_ARGS) hasOptOut would exempt a change that never opted out.
+    posixOnly('a signed commit whose verification text ends in a blank line is not read as having a final paragraph (LOG_SAFETY_ARGS)', () => {
+        const gpg = path.join(repo.home, 'fake-gpg.sh');
+        fs.writeFileSync(gpg, '#!/bin/sh\necho "[GNUPG:] GOODSIG 0123456789ABCDEF t <t@t>"\nprintf \'gpg: Signature made today\\ngpg: Good signature from "t"\\n\\n\' >&2\nexit 0\n', { mode: 0o755 });
+        repo.git('config', 'log.showSignature', 'true');
+        repo.git('config', 'gpg.program', gpg);
+        commitForgedSigned(repo, 'Change-Record: none');
+        // The fixture works: an unprotected log really carries the verification text in front of the message.
+        expect(repo.git('log', '-1', '-z', '--format=%B')).toContain('gpg: Good signature from "t"');
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(false);
+    });
+    test('R4.2 a message with CRLF line endings (kept verbatim) still opts out: the trailing CR of the trailer line is ignored', () => {
+        const file = path.join(repo.home, 'crlf.txt');
+        fs.writeFileSync(file, 'docs: crlf\r\n\r\nChange-Record: none\r\n');
+        fs.writeFileSync(path.join(repo.root, 'crlf.ts'), '1');
+        repo.git('add', '-A');
+        repo.git('commit', '-q', '--cleanup=verbatim', '-F', file);
+        expect(repo.git('log', '-1', '--format=%B')).toContain('\r');
         expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
     });
     test.each(['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'])('%s=1 does not change the opt-out result', (name) => {

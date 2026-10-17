@@ -245,6 +245,24 @@ describe('R4.2 missing record and the opt-out trailer', () => {
         expect(r.code).toBe(2);
         diag(r, 'record-missing', undefined);
     });
+    test('R4.2 the trailer counts on ANY commit of the range: only in the first one, with later commits that carry none', () => {
+        repo.git('checkout', '-q', 'main');
+        repo.git('checkout', '-q', '-b', 'feat/first');
+        repo.commit({ 'a1.ts': '1' }, 'docs: a1\n\nChange-Record: none');
+        repo.commit({ 'a2.ts': '1' }, 'docs: a2');
+        repo.commit({ 'a3.ts': '1' }, 'docs: a3');
+        const r = run();
+        expect(r.code).toBe(0);
+        expect(report(r)).toEqual({ state: 'exempt', records: [] });
+    });
+    test('R4.2 the trailer counts on a commit in the middle of the range, not the tip', () => {
+        repo.git('checkout', '-q', 'main');
+        repo.git('checkout', '-q', '-b', 'feat/middle');
+        repo.commit({ 'a1.ts': '1' }, 'docs: a1');
+        repo.commit({ 'a2.ts': '1' }, 'docs: a2\n\nChange-Record: none');
+        repo.commit({ 'a3.ts': '1' }, 'docs: a3');
+        expect(report(run())).toEqual({ state: 'exempt', records: [] });
+    });
     test('trailer-like text in a subject does not exempt', () => {
         repo.commit({ 'b.ts': '1' }, 'docs: Change-Record: none');
         diag(run(), 'record-missing', undefined);

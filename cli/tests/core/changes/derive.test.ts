@@ -2,7 +2,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { changedFiles, mergeBase } from '../../../src/core/changes/git';
 import { deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
 
@@ -22,6 +22,10 @@ describe('deriveFromCommits and deriveModules (no repository)', () => {
         expect(deriveFromCommits([c('docs', null), c('perf', null), c('chore', null)])?.type).toBe('perf');
         expect(deriveFromCommits([c('chore', null), c('docs', null)])?.type).toBe('chore');
         expect(deriveFromCommits([c('fix', null), c('feat', null), c('docs', null, true)])?.type).toBe('docs');
+    });
+    test('R3.3 several breaking commits: the FIRST one gives the type', () => {
+        expect(deriveFromCommits([c('docs', null), c('refactor', null, true), c('chore', null, true)])?.type).toBe('refactor');
+        expect(deriveFromCommits([c('chore', null, true), c('refactor', null, true)])?.type).toBe('chore');
     });
     test('R3.3 the most frequent scope wins, ties break alphabetically, null scopes do not count', () => {
         expect(deriveFromCommits([c('feat', 'a'), c('feat', 'b'), c('feat', 'b')])?.scope).toBe('b');
@@ -136,6 +140,27 @@ describe('deriveFields in a repository', () => {
         expect(before).toEqual({ ok: true, fields: { type: 'feat', scope: 'changes', semver: 'minor', breaking: false, modules: ['cli/src'] } });
         expect(after).toEqual(before);
     });
+    test('R3.3 type order in a real range follows the history, oldest first: the first commit when nothing else outranks it', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'chore(x): first');
+        repo.commit({ 'b.ts': '1' }, 'docs(x): second');
+        repo.commit({ 'c.ts': '1' }, 'test(x): third');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'chore', scope: 'x', semver: 'none', breaking: false, modules: ['.'] } });
+    });
+    test('R3.3 with several breaking commits in a real range the OLDEST breaking one gives the type', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'docs(x): intro');
+        repo.commit({ 'b.ts': '1' }, 'refactor(x)!: first break');
+        repo.commit({ 'c.ts': '1' }, 'chore(x)!: second break');
+        repo.commit({ 'd.ts': '1' }, 'feat(x): later feature');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'refactor', scope: 'x', semver: 'major', breaking: true, modules: ['.'] } });
+    });
+    test('R3.3 a fix after a docs commit outranks it, whatever the order', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'docs(x): intro');
+        repo.commit({ 'b.ts': '1' }, 'fix(x): a fix');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toMatchObject({ ok: true, fields: { type: 'fix', semver: 'patch' } });
+    });
     test('R3.3 a record commit that also touches code still counts', () => {
         const base = branch();
         repo.commit({ 'docs/changes/r.md': 'r', 'cli/src/a.ts': '1' }, 'fix(mixed): code with its record');
@@ -203,8 +228,7 @@ describe('deriveFields in a repository', () => {
         repo.commit({ 'b.ts': '1' }, 'docs(x): fake \u001efeat(forged)!: subject forgery');
         expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'docs', scope: 'x', semver: 'none', breaking: false, modules: ['.'] } });
     });
-    test('R3.4 modules with unrepresentable directory names are dropped from the derived fields', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R3.4 modules with unrepresentable directory names are dropped from the derived fields', () => {
         const base = branch();
         repo.commit({ 'ok/a.ts': '1', 'bad\nname/b.ts': '1' }, 'feat(x): odd');
         expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'x', semver: 'minor', breaking: false, modules: ['ok'] } });
