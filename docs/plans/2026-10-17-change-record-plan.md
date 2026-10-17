@@ -2176,3 +2176,7 @@ The S5 review changed clauses R4.1, R4.3 and R4.5 of the design (read them there
 
 The design clauses R5.3, R5.5, R5.6 and R5.7 now settle what the sketch left open (read them there): first-match precedence and the rule for a commit adding several records; committer date for `merged_at` and for the window; the exact JSON entry shape with `truncated`/`omitted`; tag tie-break; size and path checks on everything read from history. The S6 sketch in the slice above uses the throwing `git()`/`tryGit()` API and unbounded `git tag --contains`; the real API of A8 wins (`runGit` returning `null`, `LOG_SAFETY_ARGS` on every `git log`, `repoIdentity`, `hasOptOut`, `resolveBase`/`isSafeRevision`, `range.ts` helpers) and the R5 clauses win over the sketch. The shared prologue helpers in `cli/src/core/changes/range.ts` (`resolveRange` etc.) are reusable where they fit; `list` reads the base ref, not HEAD, so it does not require a clean tree or a pinned HEAD.
 
+### A11 — S6 specification review (2026-10-17)
+
+The S6 review settled nine points in the design (R5.1 shallow clones and base wording, R5.2 range, R5.3/R5.7 record bounds, R5.5 unusable dates and clipping, R5.6 JSON `adopted` and the shape of `invalid-record` entries, R5.7 repository-only write rule). S6 is reworked to match; read the clauses there.
+
