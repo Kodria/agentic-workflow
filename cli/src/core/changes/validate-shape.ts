@@ -37,19 +37,22 @@ function esc(text: string): string {
     const points = [...text];
     const clipped = points.length > MAX_ECHO_CODE_POINTS ? `${points.slice(0, MAX_ECHO_CODE_POINTS).join('')}…` : text;
     let escaped = JSON.stringify(clipped).slice(1, -1).replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
-    if (escaped.length > MAX_ECHO_ESCAPED) escaped = `${escaped.slice(0, MAX_ECHO_ESCAPED)}…`;
+    if (escaped.length > MAX_ECHO_ESCAPED) escaped = `${sliceNoSplit(escaped, MAX_ECHO_ESCAPED)}…`;
     return escaped;
 }
 
 const cleanText = (text: string): string => text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
 
-/** Clips to MAX_MESSAGE UTF-16 units including the ellipsis, without splitting a surrogate pair. */
+/** Cuts at `maxUnits` UTF-16 units, dropping a trailing high surrogate so a pair is never split. The only cut of untrusted text by unit count. */
+function sliceNoSplit(text: string, maxUnits: number): string {
+    if (text.length <= maxUnits) return text;
+    const last = text.charCodeAt(maxUnits - 1);
+    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? maxUnits - 1 : maxUnits);
+}
+
+/** Clips to MAX_MESSAGE UTF-16 units including the ellipsis. */
 function clipMessage(message: string): string {
-    if (message.length <= MAX_MESSAGE) return message;
-    let end = MAX_MESSAGE - 1;
-    const last = message.charCodeAt(end - 1);
-    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
-    return `${message.slice(0, end)}…`;
+    return message.length <= MAX_MESSAGE ? message : `${sliceNoSplit(message, MAX_MESSAGE - 1)}…`;
 }
 
 /** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */

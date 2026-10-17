@@ -370,6 +370,20 @@ describe('validateRecordShape', () => {
                 expect((d as { message: string }).message).not.toMatch(lone);
             }
         });
+        test('escaping a hostile key never leaves a lone surrogate in message or field', () => {
+            const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+            const keyed = (controls: number, pad: number) => `"${'\\u0001'.repeat(controls)}${'a'.repeat(pad)}😀bbbb": 1`;
+            const run = (controls: number, pad: number) => {
+                const r = validateRecordShape(NAME, doc(`${fm()}\n${keyed(controls, pad)}`));
+                const unknown = r.diagnostics.filter((d) => d.code === 'unknown-field');
+                expect(unknown).toHaveLength(1);
+                expect(unknown[0].message).not.toMatch(lone);
+                expect(unknown[0].field as string).not.toMatch(lone);
+                expect(unknown[0].message.length).toBeLessThanOrEqual(300);
+            };
+            run(39, 5);
+            for (let controls = 30; controls <= 44; controls++) for (let pad = 0; pad <= 7; pad++) run(controls, pad);
+        });
         test('a short message is left unchanged', () => {
             const r = check({ rollback: 'rollback: ""' });
             expect(r.diagnostics).toContainEqual({ code: 'field-invalid', field: 'rollback', message: 'rollback must be a non-empty string without control characters' });
