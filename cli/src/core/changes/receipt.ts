@@ -35,11 +35,12 @@ export function isFullSelection(opts: SelectionOpts): boolean {
 }
 
 function sortedSensors(sensors: Record<string, SensorStatus>): Record<string, SensorStatus> {
-    if (sensors === null || typeof sensors !== 'object') return {};
     return Object.fromEntries(Object.keys(sensors).sort().map((k) => [k, sensors[k]]));
 }
 
 export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): string {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error(esc('invalid receipt: digest body must be an object'));
+    if (body.sensors === null || typeof body.sensors !== 'object' || Array.isArray(body.sensors)) throw new Error(esc('invalid receipt: digest body sensors must be an object'));
     const canonical = JSON.stringify({
         schema: body.schema, commit: body.commit, ranAt: body.ranAt, cliVersion: body.cliVersion,
         overall: body.overall, sensors: sortedSensors(body.sensors),

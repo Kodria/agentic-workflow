@@ -47,7 +47,11 @@ const writeValid = () => {
 const mutateFile = (head: string, mutate: (r: Record<string, unknown>) => void, redigest = false) => {
     const parsed = JSON.parse(fs.readFileSync(runsFile(head), 'utf8'));
     mutate(parsed);
-    if (redigest) { const { digest: _d, ...body } = parsed; parsed.digest = computeReceiptDigest(body); }
+    if (redigest) {
+        const { digest: _d, ...body } = parsed;
+        // computeReceiptDigest refuses a body with non-object sensors; such a fixture keeps its old digest (the shape check rejects it first).
+        try { parsed.digest = computeReceiptDigest(body); } catch { /* keep the old digest */ }
+    }
     fs.writeFileSync(runsFile(head), JSON.stringify(parsed));
 };
 
@@ -414,6 +418,19 @@ describe('receipt', () => {
         expect(computeReceiptDigest({ ...base, overall: 'fail' })).not.toBe(d);
         expect(computeReceiptDigest({ ...base, sensors: { lint: 'fail' } })).not.toBe(d);
         expect(computeReceiptDigest({ ...base, sensors: { a: 'pass', b: 'pass' } })).toBe(computeReceiptDigest({ ...base, sensors: { b: 'pass', a: 'pass' } }));
+    });
+    test.each([
+        ['null', null], ['undefined', undefined], ['a number', 42], ['a string', 'x'], ['an array', []],
+        ['a body whose sensors is null', { schema: 1, commit: 'a'.repeat(40), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1', overall: 'pass', sensors: null }],
+        ['a body whose sensors is a string', { schema: 1, commit: 'a'.repeat(40), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1', overall: 'pass', sensors: 'x' }],
+        ['a body whose sensors is an array', { schema: 1, commit: 'a'.repeat(40), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1', overall: 'pass', sensors: [] }],
+    ])('R2.3 computeReceiptDigest rejects %s with a typed Error, never a TypeError', (_n, body) => {
+        let caught: unknown;
+        try { computeReceiptDigest(body as never); } catch (e) { caught = e; }
+        expect(caught).toBeInstanceOf(Error);
+        expect(caught).not.toBeInstanceOf(TypeError);
+        expect((caught as Error).message).toMatch(/^invalid receipt: digest body (sensors )?must be an object$/);
+        if (!/sensors/.test(_n)) expect((caught as Error).message).toBe('invalid receipt: digest body must be an object');
     });
     test('R2.3 buildReceipt rejects a commit that is not 40 lowercase hex', () => {
         const mk = (commit: string) => () => buildReceipt({ commit, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1', output: output as never });
