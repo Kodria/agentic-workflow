@@ -2,6 +2,7 @@ export const RECORD_SCHEMA = 'awm.change-record/v1';
 export const PENDING_MARKER = '<!-- awm:pending -->';
 export const RECORD_DIR = 'docs/changes';
 export const MAX_RECORD_BYTES = 64 * 1024;
+export const MAX_DIAGNOSTICS = 50;
 export const BODY_HEADINGS = ['## Qué se hizo', '## Qué se probó', '## Qué falta validar', '## Riesgos y rollback'] as const;
 export const DERIVED_KEYS = ['type', 'scope', 'semver', 'breaking', 'modules'] as const;
 

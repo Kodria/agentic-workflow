@@ -1,0 +1,98 @@
+import { isValidSlug, isValidRecordFileName, loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
+
+describe('isValidSlug', () => {
+    test.each(['a', 'a1', 'a-b-1', '1-2', 'a'.repeat(64)])('accepts %s', (slug) => {
+        expect(isValidSlug(slug)).toBe(true);
+    });
+    test.each(['', 'A', 'a_b', 'a--b', '-a', 'a-', 'a b', 'a/b', 'á', 'a'.repeat(65)])('rejects %j', (slug) => {
+        expect(isValidSlug(slug)).toBe(false);
+    });
+    test.each([undefined, null, 7, {}, ['a']])('rejects the non-string %j', (slug) => {
+        expect(isValidSlug(slug)).toBe(false);
+    });
+});
+
+describe('isValidRecordFileName', () => {
+    test('accepts date + slug + .md', () => {
+        expect(isValidRecordFileName('2026-10-17-change-record.md')).toBe(true);
+    });
+    test.each(['2026-10-17-x.txt', '2026-02-30-x.md', 'x.md', '2026-10-17-.md', '2026-10-17-X.md'])('rejects %s', (name) => {
+        expect(isValidRecordFileName(name)).toBe(false);
+    });
+});
+
+describe('splitRecord', () => {
+    test('splits frontmatter from body', () => {
+        expect(splitRecord('---\na: 1\n---\nbody\n')).toEqual({ ok: true, frontmatterText: 'a: 1', body: 'body\n' });
+    });
+    test('normalizes CRLF', () => {
+        expect(splitRecord('---\r\na: 1\r\n---\r\nbody\r\n')).toEqual({ ok: true, frontmatterText: 'a: 1', body: 'body\n' });
+    });
+    test('an empty frontmatter block yields empty text', () => {
+        expect(splitRecord('---\n---\nbody')).toEqual({ ok: true, frontmatterText: '', body: 'body' });
+    });
+    test.each([['empty input', ''], ['no leading delimiter', 'a: 1\n---\nbody'], ['leading blank line', '\n---\na: 1\n---\nbody']])('%s is frontmatter-missing', (_l, raw) => {
+        const r = splitRecord(raw);
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.diagnostic.code).toBe('frontmatter-missing');
+    });
+    test('an unclosed frontmatter block is frontmatter-missing', () => {
+        const r = splitRecord('---\na: 1\nbody');
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.diagnostic.code).toBe('frontmatter-missing');
+    });
+    test('only the first closing delimiter ends the frontmatter', () => {
+        const r = splitRecord('---\na: 1\n---\nx\n---\ny\n');
+        expect(r).toEqual({ ok: true, frontmatterText: 'a: 1', body: 'x\n---\ny\n' });
+    });
+});
+
+describe('loadFrontmatter', () => {
+    test('parses a mapping and keeps timestamps as strings', () => {
+        expect(loadFrontmatter('a: 1\nd: 2026-10-17\nt: 2026-10-17T10:00:00Z')).toEqual({ ok: true, value: { a: 1, d: '2026-10-17', t: '2026-10-17T10:00:00Z' } });
+    });
+    test('empty text loads as undefined and comment-only text as null (both are not mappings)', () => {
+        expect(loadFrontmatter('')).toEqual({ ok: true, value: undefined });
+        expect(loadFrontmatter('# only a comment')).toEqual({ ok: true, value: null });
+    });
+    test('more than one document is yaml-invalid', () => {
+        const r = loadFrontmatter('a: 1\n---\nb: 2');
+        expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');
+    });
+    test('custom tags are yaml-invalid', () => {
+        const r = loadFrontmatter('a: !!js/function "f"');
+        expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');
+    });
+    test('duplicate keys are yaml-invalid', () => {
+        const r = loadFrontmatter('a: 1\na: 2');
+        expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');
+    });
+    test('merge keys are not expanded (CORE_SCHEMA)', () => {
+        expect(loadFrontmatter('a: 1\n<<: {b: 2}')).toEqual({ ok: true, value: { a: 1, '<<': { b: 2 } } });
+    });
+    test('an alias without an anchor is yaml-invalid', () => {
+        const r = loadFrontmatter('a: *x');
+        expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');
+    });
+
+    // Pins the js-yaml listener contract (`state.anchor` on `close`). If a js-yaml upgrade changes it, these fail loudly
+    // instead of silently allowing anchors.
+    describe('anchor detection (js-yaml listener contract)', () => {
+        test.each([
+            ['a scalar anchor', 'a: &x 1'],
+            ['an unused anchor', 'a: &x 1\nb: 2'],
+            ['a collection anchor', 'a: &x [1, 2]'],
+            ['a mapping anchor', 'a: &x\n  b: 1'],
+            ['a key anchor', '&k a: 1'],
+            ['an anchor and its alias', 'a: &x 1\nb: *x'],
+            ['an anchored top-level mapping', '&top\na: 1'],
+            ['an empty anchored node', 'a: &x'],
+        ])('%s is yaml-alias', (_label, text) => {
+            const r = loadFrontmatter(text);
+            expect(!r.ok && r.diagnostic.code).toBe('yaml-alias');
+        });
+        test.each([['double-quoted', 'a: "&x *x"'], ['single-quoted', "a: '&x *x'"], ['block scalar', 'a: |\n  &x *x'], ['inside a word', 'a: x&y']])('%s look-alike text is accepted', (_label, text) => {
+            expect(loadFrontmatter(text).ok).toBe(true);
+        });
+    });
+});
