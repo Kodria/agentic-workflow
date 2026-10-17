@@ -85,7 +85,7 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
     if (fm.schema !== RECORD_SCHEMA) bad(out, 'schema', `schema must be ${RECORD_SCHEMA}`);
     if (fm.id !== fileName.replace(/\.md$/, '')) bad(out, 'id', 'id must equal the file name without .md');
     if (!nonEmpty(fm.title) || [...fm.title].length > 120) bad(out, 'title', 'title must be 1-120 characters');
-    if (!nonEmpty(fm.summary_short) || [...fm.summary_short].length > 280 || /[\r\n]/.test(fm.summary_short)) bad(out, 'summary_short', 'summary_short must be 1-280 characters on one line');
+    if (!nonEmpty(fm.summary_short) || [...fm.summary_short].length > 280 || /[\r\n\u0085\u2028\u2029]/.test(fm.summary_short)) bad(out, 'summary_short', 'summary_short must be 1-280 characters on one line');
     if (typeof fm.type !== 'string' || !/^[a-z]+$/.test(fm.type)) bad(out, 'type', 'type must be a lowercase conventional-commit type');
     if (!(fm.scope === null || nonEmpty(fm.scope))) bad(out, 'scope', 'scope must be a string or null');
     if (!SEMVER.includes(fm.semver as string)) bad(out, 'semver', `semver must be one of ${SEMVER.join('|')}`);

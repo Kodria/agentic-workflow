@@ -74,6 +74,12 @@ describe('validateRecordShape', () => {
         expect(validateRecordShape(NAME, doc(fm({ manual_validation: 'manual_validation:\n  none: "docs only"' }))).diagnostics).toEqual([]);
         expect(codes(validateRecordShape(NAME, doc(fm({ provenance: 'provenance:\n  started_at: "2026-10-17 10:00"' }))))).toContain('field-invalid');
     });
+    test('R1.4 rejects every line-break character in summary_short', () => {
+        for (const ch of ['\\u0085', '\\u2028', '\\u2029']) {
+            expect(codes(validateRecordShape(NAME, doc(fm({ summary_short: `summary_short: "a${ch}b"` }))))).toContain('field-invalid');
+        }
+        expect(validateRecordShape(NAME, doc(fm({ summary_short: 'summary_short: "plain one-line summary"' }))).diagnostics).toEqual([]);
+    });
     test('R1.4 checks links.plan existence when a root is given', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
         try {
