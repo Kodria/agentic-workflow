@@ -177,20 +177,30 @@ function earliestTag(root: string, sha: string): Read<string | null> {
     return ref.startsWith('refs/tags/') && name !== '' ? { ok: true, value: cleanLine(name, MAX_TAG_NAME) } : UNREADABLE;
 }
 
-interface TreeEntry { mode: string; type: string; oid: string; size: number }
+export interface TreeEntry { mode: string; type: string; oid: string; size: number }
 
 /** Mode, type, object id and size of exactly the given paths in the commit's tree, in ONE call. Null when git fails. */
 function readTreeEntries(root: string, sha: string, names: string[]): Map<string, TreeEntry> | null {
     const out = runGit(root, ['ls-tree', '-l', '-z', '--full-tree', '--end-of-options', sha, '--', ...names]);
-    if (out === null) return null;
+    return out === null ? null : parseTreeEntries(out);
+}
+
+/** The pure part of readTreeEntries: parses the NUL-separated output of `git ls-tree -l -z`. Never throws. */
+export function parseTreeEntries(out: string): Map<string, TreeEntry> {
     const entries = new Map<string, TreeEntry>();
+    if (typeof out !== 'string') return entries;
     for (const line of out.split('\0')) {
         const tab = line.indexOf('\t');
         if (tab < 0) continue;
         const [mode, type, oid, size] = line.slice(0, tab).split(' ').filter(Boolean);
         if (mode === undefined || type === undefined || oid === undefined || size === undefined) continue;
-        if (!COMMIT_ID.test(oid) || !/^\d{1,15}$/.test(size)) { entries.set(line.slice(tab + 1), { mode, type: 'unknown', oid, size: 0 }); continue; }
-        entries.set(line.slice(tab + 1), { mode, type, oid, size: Number(size) });
+        const name = line.slice(tab + 1);
+        // A blob whose size git cannot tell is an object that is not in the repository: in a partial clone, with lazy fetch off,
+        // git 2.55 prints `BAD` as its size (and fails the listing in older versions). It is unreadable, not "not a regular
+        // file": a negative size marks it so that the caller reports git-failed. (`-` is what trees and gitlinks show.)
+        if (type === 'blob' && (size === 'BAD' || size === '-') && COMMIT_ID.test(oid)) { entries.set(name, { mode, type, oid, size: -1 }); continue; }
+        if (!COMMIT_ID.test(oid) || !/^\d{1,15}$/.test(size)) { entries.set(name, { mode, type: 'unknown', oid, size: 0 }); continue; }
+        entries.set(name, { mode, type, oid, size: Number(size) });
     }
     return entries;
 }
@@ -201,6 +211,7 @@ const invalid = (rel: string, code: string, message: string): ListedRecord => ({
 function readOne(root: string, rel: string, info: TreeEntry | undefined): ListedRecord {
     if (info === undefined) return invalid(rel, 'record-invalid', 'the record is not in the commit');
     if (info.type !== 'blob' || (info.mode !== '100644' && info.mode !== '100755')) return invalid(rel, 'record-invalid', 'the record is not a regular file');
+    if (info.size < 0) return invalid(rel, 'git-failed', 'git could not read the record');
     if (info.size > MAX_RECORD_BYTES) return invalid(rel, 'record-too-large', `record exceeds ${MAX_RECORD_BYTES} bytes`);
     const bytes = runGitBytes(root, ['show', '--no-textconv', '--end-of-options', info.oid]);
     if (bytes === null) return invalid(rel, 'git-failed', 'git could not read the record');

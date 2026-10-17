@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
-import { makeHiddenSubmodule } from './helpers';
+import { emptyGitConfig, makeHiddenSubmodule } from './helpers';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from '../../../src/core/changes/worktree';
 
 const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'];
@@ -10,7 +10,7 @@ const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 let saved: Record<string, string | undefined> = {};
 let root: string; let home: string;
 // Jest's sandboxed `process.env` is a copy that children do not see, so the child's environment is passed explicitly.
-const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
+const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
 const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: gitEnv() }).trim();
 const real = childProcess.execFileSync;
 let spy: jest.SpyInstance | undefined;
@@ -18,7 +18,7 @@ let spy: jest.SpyInstance | undefined;
 beforeEach(() => {
     saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
-    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
+    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: emptyGitConfig(home), GIT_CONFIG_NOSYSTEM: '1' });
     root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-wt-')));
     g('init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(root, 'a.txt'), 'a');
@@ -50,7 +50,8 @@ describe('worktree state', () => {
         expect(process.env.HOME).not.toBe(ORIGINAL.HOME);
         expect(process.env.AWM_HOME).toBe(path.join(home, '.awm'));
         expect(process.env.AWM_HOME).not.toBe(ORIGINAL.AWM_HOME);
-        expect(process.env.GIT_CONFIG_GLOBAL).toBe(os.devNull);
+        expect(process.env.GIT_CONFIG_GLOBAL).toBe(path.join(home, 'gitconfig'));
+        expect(fs.readFileSync(path.join(home, 'gitconfig'), 'utf8')).toBe('');
         expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1');
     });
     test('the runtime-state exclusion list is exactly the local state paths', () => {

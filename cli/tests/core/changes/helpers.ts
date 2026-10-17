@@ -23,10 +23,20 @@ export interface TestRepo {
     cleanup: () => void;
 }
 
+/**
+ * An empty, real global git config inside `home`. `os.devNull` is not usable for GIT_CONFIG_GLOBAL: on Windows it is `\\.\nul`, which
+ * git cannot open (`fatal: unable to access '\\.\nul': Invalid argument`). A real empty file isolates the developer's config everywhere.
+ */
+export function emptyGitConfig(home: string): string {
+    const file = path.join(home, 'gitconfig');
+    fs.writeFileSync(file, '');
+    return file;
+}
+
 /** The git runner of a repository: identity and config isolation in an explicit environment, optional explicit dates. */
 function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitInput' | 'gitAt' | 'commit'> {
     const env = {
-        ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
+        ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1',
         GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
     };
     const run = (extra: Record<string, string>, args: string[]) =>
@@ -55,7 +65,7 @@ function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitInput' |
 export function makeRepo(): TestRepo {
     const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-')));
-    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
+    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: emptyGitConfig(home), GIT_CONFIG_NOSYSTEM: '1' });
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
     const { git, gitInput, gitAt, commit } = gitApi(root, home);
     const cleanup = () => {

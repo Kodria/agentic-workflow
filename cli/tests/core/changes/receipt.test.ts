@@ -23,7 +23,7 @@ const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 // so both that runs directory and the cwd-relative one are watched. Outside a git repository only the latter exists.
 const checkoutToplevel = (): string | null => {
     try {
-        return path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' } }).trim());
+        return path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).trim());
     } catch { return null; }
 };
 const TOPLEVEL = checkoutToplevel();
@@ -33,7 +33,7 @@ const RUNS_BEFORE = listRuns();
 let repo: TestRepo;
 let root: string; let home: string;
 // Child git processes get an explicit identity and config isolation; the shared makeRepo already points HOME and AWM_HOME at a throwaway home.
-const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
+const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
 const g = (...args: string[]) => repo.git(...args);
 
 beforeEach(() => {
@@ -80,7 +80,8 @@ describe('receipt', () => {
         expect(process.env.HOME).not.toBe(ORIGINAL.HOME);
         expect(process.env.AWM_HOME).toBe(path.join(home, '.awm'));
         expect(process.env.AWM_HOME).not.toBe(ORIGINAL.AWM_HOME);
-        expect(process.env.GIT_CONFIG_GLOBAL).toBe(os.devNull);
+        expect(process.env.GIT_CONFIG_GLOBAL).toBe(path.join(home, 'gitconfig'));
+        expect(fs.readFileSync(path.join(home, 'gitconfig'), 'utf8')).toBe('');
     });
     test('R2.1 full selection on a clean tree writes a 0600 receipt keyed by HEAD', () => {
         const pre = captureReceiptPrecondition(root);

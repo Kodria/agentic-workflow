@@ -5,7 +5,6 @@
 // real tmp git repo: `git add` and `git commit` execute for real with the argv the orchestrator
 // passes (never retyped here); every other command is faked.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { release, ReleaseIO } from '../../src/release/orchestrator';
@@ -21,7 +20,7 @@ describe('release — the bump commit opts out of the Change Record (R6.1)', () 
   it('the commit the orchestrator creates is read as an opt-out and keeps its subject byte-identical', () => {
     // Explicit environment for the child git: identity and config isolation never come from process.env alone.
     const gitEnv = {
-      ...process.env, HOME: repo.home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
+      ...process.env, HOME: repo.home, GIT_CONFIG_GLOBAL: path.join(repo.home, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1',
       GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
     };
     repo.commit({
