@@ -94,6 +94,24 @@ function runsDir(root: string): string {
     return path.join(root, '.awm', 'sensors', 'runs');
 }
 
+const RUNS_IGNORE_FILE = '.gitignore';
+const RUNS_IGNORE_CONTENT = '*\n';
+
+/**
+ * R2.2b: receipts are local and never versioned, so the directory ignores itself (`*` also covers this file): `git add -A` in a
+ * repository that does not ignore `.awm` can then never commit them. Idempotent; a link at the target is refused (writeFileAtomic).
+ */
+function ensureRunsIgnore(root: string): void {
+    const file = path.join(runsDir(root), RUNS_IGNORE_FILE);
+    try {
+        const stat = fs.lstatSync(file);
+        if (stat.isFile() && fs.readFileSync(file, 'utf8') === RUNS_IGNORE_CONTENT) return;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    writeFileAtomic(file, RUNS_IGNORE_CONTENT, 0o644);
+}
+
 function assertNoSymlinkChain(root: string): void {
     let current = root;
     for (const segment of ['.awm', 'sensors', 'runs']) {
@@ -117,6 +135,7 @@ export function writeReceipt(root: string, receipt: SensorReceipt): string {
     assertNoSymlinkChain(root);
     fs.mkdirSync(runsDir(root), { recursive: true, mode: 0o700 });
     assertNoSymlinkChain(root);
+    ensureRunsIgnore(root);
     const file = path.join(runsDir(root), `${receipt.commit}.json`);
     writeFileAtomic(file, content, 0o600);
     // writeFileAtomic keeps the mode of a file it replaces; a receipt is always owner-only.
@@ -173,6 +192,37 @@ export function finalizeReceipt(pre: Precondition, output: Pick<RunOutput, 'over
         if (after.commit !== pre.commit || after.dirty) return 'no sensor receipt written: HEAD or tracked files changed during the run\n';
         writeReceipt(pre.root, buildReceipt({ commit: pre.commit, ranAt: (deps.now ?? (() => new Date()))().toISOString(), cliVersion: (deps.version ?? cliVersion)(), output }));
         return '';
+    } catch (error) {
+        return `no sensor receipt written: ${esc(error instanceof Error ? error.message : String(error))}\n`;
+    }
+}
+
+/** True when `manifestPath` is the repository root's `.awm/sensors.json` (both resolved with realpath.native; a missing file is not it). */
+export function isRootManifest(root: string, manifestPath: unknown): boolean {
+    if (typeof root !== 'string' || root.length === 0 || typeof manifestPath !== 'string' || manifestPath.length === 0) return false;
+    try {
+        return fs.realpathSync.native(path.join(root, '.awm', 'sensors.json')) === fs.realpathSync.native(manifestPath);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * R2.2b: the receipt of a `sensors run`. On top of finalizeReceipt: nothing is written when no sensor ran (an empty list or
+ * `not_certified`, which is also what an absent or invalid manifest gives), nor when the manifest that ran is not the repository
+ * root's (a receipt is keyed by commit only, so the manifests of a monorepo's packages would overwrite each other). Returns ''
+ * on success, or one stderr line. Never throws.
+ */
+export function finalizeRunReceipt(pre: Precondition, output: Pick<RunOutput, 'overall' | 'sensors' | 'manifestPath'>, deps: { now?: () => Date; version?: () => string } = {}): string {
+    try {
+        if (pre === null || typeof pre !== 'object' || !pre.eligible) return finalizeReceipt(pre, output, deps);
+        if (output === null || typeof output !== 'object' || !Array.isArray(output.sensors) || output.sensors.length === 0 || output.overall === 'not_certified') {
+            return 'no sensor receipt written: no sensor ran, so there is nothing to certify\n';
+        }
+        if (!isRootManifest(pre.root, output.manifestPath)) {
+            return "no sensor receipt written: the manifest that ran is not the repository root's .awm/sensors.json (a receipt certifies a whole commit)\n";
+        }
+        return finalizeReceipt(pre, output, deps);
     } catch (error) {
         return `no sensor receipt written: ${esc(error instanceof Error ? error.message : String(error))}\n`;
     }

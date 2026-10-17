@@ -12,7 +12,9 @@ import { Command } from 'commander';
 import { makeHiddenSubmodule } from './helpers';
 import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
-import { runSensors, shouldRun } from '../../../src/commands/sensors/run';
+import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
+import { resolveSensorProject } from '../../../src/commands/sensors/project';
+import { exitCodeForVerdict } from '../../../src/commands/sensors/verdict';
 
 const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL'];
 const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -53,7 +55,12 @@ afterAll(() => {
     expect(listRuns()).toEqual(RUNS_BEFORE);
 });
 
-const output = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }, { name: 'a-typecheck', status: 'pass' as const, errors: [] }] };
+// `manifestPath` is the manifest the run reports (SensorAuthority): the repository root's, by default.
+const output = {
+    overall: 'pass' as const,
+    sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }, { name: 'a-typecheck', status: 'pass' as const, errors: [] }],
+    get manifestPath() { return path.join(root, '.awm', 'sensors.json'); },
+};
 const runsFile = (head: string) => path.join(root, '.awm', 'sensors', 'runs', `${head}.json`);
 const listTree = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.name === '.git' ? [] : e.isDirectory() ? [e.name + '/', ...listTree(path.join(dir, e.name)).map((c) => `${e.name}/${c}`)] : [e.name]));
 const writeValid = () => {
@@ -121,6 +128,54 @@ describe('receipt', () => {
         if (process.platform === 'win32') return;
         writeValid();
         expect(fs.statSync(path.join(root, '.awm', 'sensors', 'runs')).mode & 0o777).toBe(0o700);
+    });
+    describe('R2.2b receipt hygiene: a receipt can never be committed by git add -A', () => {
+        const ignoreFile = () => path.join(root, '.awm', 'sensors', 'runs', '.gitignore');
+        const stagedAfterAddAll = () => { g('add', '-A'); return g('diff', '--cached', '--name-only'); };
+        test('a repository that does not ignore .awm stages nothing under the runs directory', () => {
+            expect(g('ls-files', '--others', '--exclude-standard')).toBe('');
+            expect(finalizeReceipt(captureReceiptPrecondition(root), output as never)).toBe('');
+            expect(stagedAfterAddAll()).toBe('');
+            // ... and the receipt is still there, untracked and ignored.
+            const head = g('rev-parse', 'HEAD');
+            expect(readReceipt(root, head).ok).toBe(true);
+            expect(g('check-ignore', `.awm/sensors/runs/${head}.json`)).toBe(`.awm/sensors/runs/${head}.json`);
+        });
+        test('the runs directory gets .gitignore containing exactly `*`', () => {
+            writeValid();
+            expect(fs.readFileSync(ignoreFile(), 'utf8')).toBe('*\n');
+        });
+        test('writing again is idempotent and keeps the .gitignore (same inode and content)', () => {
+            writeValid();
+            const before = fs.statSync(ignoreFile());
+            writeValid();
+            expect(fs.readFileSync(ignoreFile(), 'utf8')).toBe('*\n');
+            expect(fs.statSync(ignoreFile()).ino).toBe(before.ino);
+        });
+        test('a .gitignore with other content is replaced by `*`', () => {
+            fs.mkdirSync(path.dirname(ignoreFile()), { recursive: true });
+            fs.writeFileSync(ignoreFile(), '!*\n');
+            writeValid();
+            expect(fs.readFileSync(ignoreFile(), 'utf8')).toBe('*\n');
+        });
+        test('a symlinked .gitignore is refused and its target left alone, with no receipt written', () => {
+            if (process.platform === 'win32') return;
+            const target = path.join(root, 'elsewhere.txt');
+            fs.writeFileSync(target, 'keep');
+            fs.mkdirSync(path.dirname(ignoreFile()), { recursive: true });
+            fs.symlinkSync(target, ignoreFile());
+            expect(() => writeValid()).toThrow(/symlink/);
+            expect(fs.readFileSync(target, 'utf8')).toBe('keep');
+            expect(fs.readdirSync(path.dirname(ignoreFile()))).toEqual(['.gitignore']);
+        });
+        test('the dirty-tree logic is unchanged: the runs directory and its .gitignore never make the tree dirty', () => {
+            writeValid();
+            expect(captureReceiptPrecondition(root).eligible).toBe(true);
+            g('add', '-f', '.awm/sensors/runs/.gitignore');
+            g('commit', '-q', '-m', 'chore: force-add the ignore file');
+            fs.writeFileSync(ignoreFile(), 'edited\n');
+            expect(captureReceiptPrecondition(root).eligible).toBe(true);
+        });
     });
     test('R2.1 selection rules', () => {
         expect(isFullSelection({})).toBe(true);
@@ -591,9 +646,23 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
     };
     const written = (spy: jest.SpyInstance) => spy.mock.calls.map((c) => String(c[0])).join('');
     const receiptsDir = () => path.join(root, '.awm', 'sensors', 'runs');
+    const rootManifest = () => path.join(root, '.awm', 'sensors.json');
+    // What `runSensors` reports as the manifest it ran: whatever the real resolver finds from the (mocked) cwd.
+    const resolvedManifest = () => resolveSensorProject(process.cwd()).manifestPath;
+    const commitManifest = (dir: string) => {
+        fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.awm', 'sensors.json'), '{"v":1}');
+        g('add', '-A'); g('commit', '-q', '-m', `chore: manifest in ${path.basename(dir)}`);
+    };
+    const receiptNames = () => fs.readdirSync(receiptsDir()).sort();
     beforeEach(() => {
         process.exitCode = undefined;
-        (runSensors as jest.Mock).mockReset().mockResolvedValue(output);
+        commitManifest(root);
+        (findManifestDir as jest.Mock).mockReset().mockImplementation((start: string) => {
+            const project = resolveSensorProject(start);
+            return project.state === 'configured' ? project.projectRoot : null;
+        });
+        (runSensors as jest.Mock).mockReset().mockImplementation(async () => ({ ...output, manifestPath: resolvedManifest() }));
         stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
         cwd = jest.spyOn(process, 'cwd').mockReturnValue(root);
@@ -605,7 +674,7 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(written(stdout)).toBe(JSON.stringify(output, null, 2) + '\n');
         expect(written(stderr)).toBe('');
         expect(process.exitCode).toBe(0);
-        expect(fs.readdirSync(receiptsDir())).toEqual([`${g('rev-parse', 'HEAD')}.json`]);
+        expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
     });
     test('R2.1 --all is a full selection', async () => {
         await runCli('--all');
@@ -622,7 +691,7 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(written(stderr)).toBe('');
     });
     test('R2.2 a full run on a dirty tree prints one stderr line and keeps verdict and exit code', async () => {
-        (runSensors as jest.Mock).mockResolvedValue({ overall: 'fail', sensors: [{ name: 'lint', status: 'fail', errors: [] }] });
+        (runSensors as jest.Mock).mockResolvedValue({ overall: 'fail', sensors: [{ name: 'lint', status: 'fail', errors: [] }], manifestPath: rootManifest() });
         fs.writeFileSync(path.join(root, 'b.txt'), 'b');
         await runCli();
         expect(written(stderr)).toMatch(/^no sensor receipt written: .*uncommitted.*\n$/);
@@ -631,7 +700,7 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(fs.existsSync(receiptsDir())).toBe(false);
     });
     test('R2.5 a sensor name the receipt cannot hold withholds the receipt but leaves stdout and the exit code unchanged', async () => {
-        const bad = { overall: 'pass', sensors: [{ name: 'a\nb', status: 'pass', errors: [] }] };
+        const bad = { overall: 'pass', sensors: [{ name: 'a\nb', status: 'pass', errors: [] }], manifestPath: rootManifest() };
         (runSensors as jest.Mock).mockResolvedValue(bad);
         await runCli();
         expect(written(stdout)).toBe(JSON.stringify(bad, null, 2) + '\n');
@@ -640,16 +709,71 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(fs.existsSync(receiptsDir())).toBe(false);
     });
     test('R2.2 untracked sensor output during the run still gets a receipt with no stderr', async () => {
-        (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'c.txt'), 'c'); return output; });
+        (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'c.txt'), 'c'); return { ...output, manifestPath: rootManifest() }; });
         await runCli();
         expect(written(stderr)).toBe('');
-        expect(fs.readdirSync(receiptsDir())).toEqual([`${g('rev-parse', 'HEAD')}.json`]);
+        expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
     });
     test('R2.2 a tracked file changed during the run withholds the receipt with one stderr line', async () => {
-        (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'a.txt'), 'fixed'); return output; });
+        (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'a.txt'), 'fixed'); return { ...output, manifestPath: rootManifest() }; });
         await runCli();
         expect(written(stderr)).toMatch(/HEAD or tracked files changed/);
         expect(fs.existsSync(receiptsDir())).toBe(false);
         expect(process.exitCode).toBe(0);
+    });
+
+    describe('R2.2b scope: only the repository root manifest, only when a sensor ran', () => {
+        const stdoutOf = (out: unknown) => JSON.stringify(out, null, 2) + '\n';
+        test('from a sub-directory WITHOUT its own manifest the root manifest runs (the resolver walks up) and certifies the commit', async () => {
+            const sub = path.join(root, 'packages', 'app');
+            fs.mkdirSync(sub, { recursive: true });
+            cwd.mockReturnValue(sub);
+            expect(resolvedManifest()).toBe(rootManifest());
+            await runCli();
+            expect(written(stderr)).toBe('');
+            expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
+        });
+        test('a monorepo sub-manifest run writes no receipt, says so on one stderr line, and leaves stdout and the exit code alone', async () => {
+            const sub = path.join(root, 'packages', 'app');
+            fs.mkdirSync(sub, { recursive: true });
+            commitManifest(sub);
+            cwd.mockReturnValue(sub);
+            expect(fs.realpathSync.native(resolvedManifest())).toBe(fs.realpathSync.native(path.join(sub, '.awm', 'sensors.json')));
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf({ ...output, manifestPath: resolvedManifest() }));
+            expect(process.exitCode).toBe(0);
+            expect(written(stderr)).toMatch(/^no sensor receipt written: the manifest that ran is not the repository root's \.awm\/sensors\.json[^\n]*\n$/);
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('the precondition is anchored at the manifest directory, not at the cwd', async () => {
+            const plain = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plain-')));
+            try {
+                cwd.mockReturnValue(plain); // not a git repository: only the manifest directory leads to one
+                (findManifestDir as jest.Mock).mockReturnValue(root);
+                (runSensors as jest.Mock).mockResolvedValue({ ...output, manifestPath: rootManifest() });
+                await runCli();
+                expect(written(stderr)).toBe('');
+                expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
+            } finally { fs.rmSync(plain, { recursive: true, force: true }); }
+        });
+        test.each([
+            ['an empty sensors list with a pass verdict', { overall: 'pass', sensors: [] }],
+            ['not_certified with an empty list (absent or invalid manifest)', { overall: 'not_certified', sensors: [], mode: 'invalid', reason: 'manifest-malformed' }],
+            ['not_certified although sensors are listed (legacy manifest)', { overall: 'not_certified', sensors: [{ name: 'lint', status: 'pass', errors: [] }] }],
+        ])('%s: no receipt, one stderr line, stdout and exit code unchanged', async (_n, partial) => {
+            const out = { ...partial, manifestPath: rootManifest() };
+            (runSensors as jest.Mock).mockResolvedValue(out);
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf(out));
+            expect(process.exitCode).toBe(exitCodeForVerdict(out.overall as never));
+            expect(written(stderr)).toBe('no sensor receipt written: no sensor ran, so there is nothing to certify\n');
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('an output that does not say which manifest ran certifies nothing (fail closed)', async () => {
+            (runSensors as jest.Mock).mockResolvedValue({ overall: 'pass', sensors: output.sensors });
+            await runCli();
+            expect(written(stderr)).toMatch(/^no sensor receipt written: the manifest that ran is not the repository root's/);
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
     });
 });

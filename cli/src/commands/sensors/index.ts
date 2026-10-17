@@ -11,7 +11,7 @@ import { capabilityRoot } from '../../core/registries';
 import { exitCodeForVerdict } from './verdict';
 import { applySensorBootstrap, planSensorBootstrap, type BootstrapMode } from './bootstrap';
 import { describeUnresolved } from './unresolved';
-import { captureReceiptPrecondition, finalizeReceipt, isFullSelection } from '../../core/changes/receipt';
+import { captureReceiptPrecondition, finalizeRunReceipt, isFullSelection } from '../../core/changes/receipt';
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs
  * before the action, so an invalid value cannot trigger ledger I/O. */
@@ -49,7 +49,8 @@ export function registerSensorsCommand(program: Command): void {
         .option('--changed', 'scope sensors that support it to the files changed vs --base')
         .option('--base <ref>', 'comparison point for --changed (default: HEAD, i.e. uncommitted work)')
         .action(async (opts) => {
-            const pre = isFullSelection(opts) ? captureReceiptPrecondition(process.cwd()) : null;
+            // R2.2b: the receipt belongs to the manifest that runs (the one `runSensors` resolves from this cwd), not to the cwd.
+            const pre = isFullSelection(opts) ? captureReceiptPrecondition(findManifestDir(process.cwd()) ?? process.cwd()) : null;
             const output = await runSensors({
                 fast: opts.fast, slow: opts.slow, all: opts.all,
                 changed: opts.changed, base: opts.base,
@@ -59,7 +60,7 @@ export function registerSensorsCommand(program: Command): void {
             process.stdout.write(JSON.stringify(output, null, 2) + '\n');
             // R2: the receipt is a side effect; it never changes stdout or the exit code.
             if (pre) {
-                const note = finalizeReceipt(pre, output);
+                const note = finalizeRunReceipt(pre, output);
                 if (note) process.stderr.write(note);
             }
             process.exitCode = exitCodeForVerdict(output.overall);
