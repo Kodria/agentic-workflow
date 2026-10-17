@@ -69,11 +69,6 @@ export function resolveBaseCommit(root: string, explicit?: string): { base: stri
     return null;
 }
 
-/** R3.1: the base ref (see resolveBaseCommit). Returns null when none resolves (or the explicit base is unsafe). */
-export function resolveBase(root: string, explicit?: string): string | null {
-    return resolveBaseCommit(root, explicit)?.base ?? null;
-}
-
 /** Full id of the common ancestor of `base` and HEAD; null when there is none or the input is invalid. */
 export function mergeBase(root: string, base: string): string | null {
     if (!isSafeRef(base)) return null;

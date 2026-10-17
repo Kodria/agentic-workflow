@@ -4,7 +4,7 @@ import { pathToFileURL } from 'url';
 import { bad, commitForgedSigned, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, UNSAFE, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, subjects } from './list-fixtures';
 import { MAX_SUBJECT, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
-import { resolveBase } from '../../../src/core/changes/git';
+import { resolveBaseCommit } from '../../../src/core/changes/git';
 import { resolveRange } from '../../../src/core/changes/range';
 import { runChangeValidate } from '../../../src/commands/change';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
@@ -612,7 +612,7 @@ describe('listChanges: shallow clones and the default base (R5.1)', () => {
         repo.commit({ 'a.ts': '1' }, 'fix: ahead of origin', '2026-10-16T10:00:00Z');
         const r = listed();
         expect(r.base).toBe('refs/remotes/origin/HEAD');
-        expect(r.base).toBe(resolveBase(repo.root));
+        expect(r.base).toBe(resolveBaseCommit(repo.root)?.base);
         expect(r.changes).toEqual([]);
         const range = resolveRange(repo.root, undefined);
         expect(range.ok && range.mergeBase).toBe(repo.git('merge-base', 'refs/remotes/origin/HEAD', 'HEAD'));
@@ -620,7 +620,7 @@ describe('listChanges: shallow clones and the default base (R5.1)', () => {
     test('without origin/HEAD both fall back to the local main', () => {
         adopt();
         expect(listed().base).toBe('main');
-        expect(resolveBase(repo.root)).toBe('main');
+        expect(resolveBaseCommit(repo.root)?.base).toBe('main');
     });
 });
 

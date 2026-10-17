@@ -31,6 +31,15 @@ describe('hasOptOut', () => {
         repo.commit({ 'd.ts': '1' }, 'docs: d\n\nChange-Record: none-ish');
         expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(false);
     });
+    test('DD-6 documented limit: a trailer in a mid-message paragraph (a squash-merge body) is NOT an opt-out; only the final paragraph counts', () => {
+        const base = branch();
+        // What a squash merge produces: the squashed commits' messages become the body, so the author's trailer is not last.
+        repo.commit({ 'a.ts': '1' }, 'docs: typo (#12)\n\n* docs: typo\n\nChange-Record: none\n\n* fix: other');
+        expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(false);
+        // The same trailer as the final paragraph (the author edited the squash message) is found.
+        repo.commit({ 'b.ts': '1' }, 'docs: typo (#13)\n\n* docs: typo\n\nChange-Record: none');
+        expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+    });
     test('an opt-out is found among several trailers and among several commits', () => {
         const base = branch();
         repo.commit({ 'a.ts': '1' }, 'docs: a');

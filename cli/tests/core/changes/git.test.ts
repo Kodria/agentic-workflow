@@ -2,11 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
-import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
 const UNSAFE_REFS = ['--upload-pack=x', '-x', '-', 'a..b', 'a b', 'main\n', 'x\ny', 'a\u0000b', 'a;b', '$(id)', 'a`b`', 'main^', 'HEAD~1', 'a:b', '', 'a'.repeat(300), 'ma\u0301in'];
+
+/** The base ref `resolveBaseCommit` picks (R3.1), or null. */
+const baseOf = (root: string, explicit?: string): string | null => resolveBaseCommit(root, explicit)?.base ?? null;
 
 describe('ref and revision predicates (no repository)', () => {
     test('isSafeRef accepts plain ref names only', () => {
@@ -60,50 +63,50 @@ describe('git functions in a repository', () => {
     });
     test('R3.1 resolves base: explicit, origin/HEAD, main, master', () => {
         branch();
-        expect(resolveBase(repo.root)).toBe('main');
-        expect(resolveBase(repo.root, 'main')).toBe('main');
+        expect(baseOf(repo.root)).toBe('main');
+        expect(baseOf(repo.root, 'main')).toBe('main');
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-        expect(resolveBase(repo.root)).toBe('refs/remotes/origin/HEAD');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
     });
     test('R3.1 an explicit base wins over origin/HEAD and main', () => {
         branch();
         repo.git('branch', 'release');
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
-        expect(resolveBase(repo.root, 'release')).toBe('release');
+        expect(baseOf(repo.root, 'release')).toBe('release');
     });
     test('R3.1 main wins over master and master is the last resort', () => {
         repo.git('branch', 'master');
-        expect(resolveBase(repo.root)).toBe('main');
+        expect(baseOf(repo.root)).toBe('main');
         repo.git('branch', '-m', 'main', 'trunk');
-        expect(resolveBase(repo.root)).toBe('master');
+        expect(baseOf(repo.root)).toBe('master');
     });
     test('R3.1 origin/HEAD that points nowhere is skipped', () => {
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');
-        expect(resolveBase(repo.root)).toBe('main');
+        expect(baseOf(repo.root)).toBe('main');
     });
     test('R3.2 unresolvable base returns null', () => {
         repo.git('branch', '-m', 'main', 'trunk');
-        expect(resolveBase(repo.root)).toBeNull();
-        expect(resolveBase(repo.root, 'nope')).toBeNull();
+        expect(baseOf(repo.root)).toBeNull();
+        expect(baseOf(repo.root, 'nope')).toBeNull();
     });
     test.each(UNSAFE_REFS)('R3.2 unsafe explicit base %j returns null without falling back to main', (ref) => {
         repo.commit({ 'second.ts': '1' }, 'feat: second');
-        expect(resolveBase(repo.root, ref)).toBeNull();
+        expect(baseOf(repo.root, ref)).toBeNull();
         noNewFile('x');
     });
     test.each(NOT_STRINGS.filter((v) => v !== undefined))('R3.2 non-string explicit base (%p) returns null', (ref) => {
-        expect(resolveBase(repo.root, bad(ref))).toBeNull();
+        expect(baseOf(repo.root, bad(ref))).toBeNull();
     });
     test('R3.2 a non-string root returns null', () => {
-        expect(resolveBase(bad(null))).toBeNull();
-        expect(resolveBase(nonRepoDir())).toBeNull();
+        expect(baseOf(bad(null))).toBeNull();
+        expect(baseOf(nonRepoDir())).toBeNull();
     });
     test('R3.1 a ref that names a tree rather than a commit is not a base', () => {
         const tree = repo.git('rev-parse', 'HEAD^{tree}');
         repo.git('update-ref', 'refs/tags/treeish', tree);
-        expect(resolveBase(repo.root, 'treeish')).toBeNull();
+        expect(baseOf(repo.root, 'treeish')).toBeNull();
     });
 
     test('mergeBase returns the fork point, not the tip of the base', () => {

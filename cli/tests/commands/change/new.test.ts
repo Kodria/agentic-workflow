@@ -6,6 +6,7 @@ import childProcess from 'child_process';
 import { cloneRepo, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import * as ledgerStore from '../../../src/core/ledger/store';
 import { buildReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
 import * as renderModule from '../../../src/core/changes/render';
@@ -371,6 +372,15 @@ describe('awm change new: provenance (R3.8)', () => {
         receiptForHead();
         run('change-record');
         expect(frontmatter(read())).not.toHaveProperty('provenance');
+    });
+    test('the branch whose journal is read is named by the ledger helper the journal writers use (one helper, not a copy)', () => {
+        writeJournalWith((s) => { s.admissionContext = { provider: 'claude-code' }; });
+        repo.git('checkout', '-q', '-b', 'somewhere-else');
+        const named = jest.spyOn(ledgerStore, 'detectBranch').mockReturnValue('feat/x');
+        receiptForHead();
+        run('change-record');
+        expect(named).toHaveBeenCalledWith(repo.root);
+        expect(frontmatter(read()).provenance).toMatchObject({ agent: 'claude-code' });
     });
     test('a detached HEAD has no journal and is not an error', () => {
         repo.git('checkout', '-q', '--detach');

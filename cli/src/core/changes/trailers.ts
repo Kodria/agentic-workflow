@@ -1,6 +1,6 @@
 import { LOG_SAFETY_ARGS, isSafeRevision, runGit } from './git';
 
-export const OPT_OUT_TRAILER = 'Change-Record';
+const OPT_OUT_TRAILER = 'Change-Record';
 
 // Raw messages (%B), NUL-terminated by -z: a message cannot contain NUL, so one commit is exactly one record. Git's own
 // %(trailers) is not used: it honours trailer.separators and trailer.<token>.key from the user's config, so what counts as

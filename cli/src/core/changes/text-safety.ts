@@ -2,7 +2,7 @@
 // echoed in diagnostics (R1.8). Pure: imports nothing from this module's siblings.
 
 // Control characters are C0 (includes \t \n \r), DEL and C1 (includes U+0085). U+2028/U+2029 are line breaks but not controls.
-export const CONTROL_CLASS = '\\u0000-\\u001f\\u007f-\\u009f';
+const CONTROL_CLASS = '\\u0000-\\u001f\\u007f-\\u009f';
 const SINGLE_LINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}\\u2028\\u2029]`);
 // What an echo of untrusted text escapes: the above plus the bidirectional controls (marks, embeddings, isolates), which would
 // reorder what a terminal shows around them. They are escaped, not rejected: isSingleLine and friends are about controls only.

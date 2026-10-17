@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import type { CommandResult } from '../../core/command-result';
 import { fail, failed, inCwd as inCwdShared, line } from '../../core/changes/command';
 import { readJournal } from '../../core/journal/store';
+import { detectBranch } from '../../core/ledger/store';
 import { isRecordPath, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
 import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot, runGit } from '../../core/changes/git';
 import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
@@ -53,17 +54,11 @@ function flagProblem(opts: Record<string, unknown>, root: string): string | null
 
 // ---- Provenance (R3.8) ----
 
-/** Same branch name the journal writers use (detectBranch), read through runGit. A detached HEAD has no journal of its own. */
-function currentBranch(root: string): string {
-    const name = runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
-    return name && name !== 'HEAD' ? name : '_no-branch';
-}
-
 /** Only keys with a source: the journal (when present and readable) and the flags. Never throws; a bad journal contributes nothing. */
 function provenance(root: string, opts: NewOpts): Record<string, string> {
     const out: Record<string, string> = {};
     try {
-        const state = readJournal(root, currentBranch(root)).state;
+        const state = readJournal(root, detectBranch(root)).state;
         const agent = state?.admissionContext?.provider;
         if (typeof agent === 'string' && isProvenanceValue(agent)) out.agent = agent;
         if (isCanonicalIso(state?.cycle?.startedAt)) out.started_at = state.cycle.startedAt;

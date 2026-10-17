@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
-import { makeHiddenSubmodule } from './helpers';
+import { makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
 import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
@@ -29,26 +29,19 @@ const TOPLEVEL = checkoutToplevel();
 const WATCHED_RUNS = [...new Set([path.resolve('.awm', 'sensors', 'runs'), ...(TOPLEVEL === null ? [] : [path.join(TOPLEVEL, '.awm', 'sensors', 'runs')])])];
 const listRuns = (): Record<string, string[] | null> => Object.fromEntries(WATCHED_RUNS.map((d) => [d, fs.existsSync(d) ? fs.readdirSync(d).sort() : null]));
 const RUNS_BEFORE = listRuns();
-let saved: Record<string, string | undefined> = {};
+let repo: TestRepo;
 let root: string; let home: string;
-// Jest's sandboxed `process.env` is a copy that children do not see, so the child's environment is passed explicitly.
+// Child git processes get an explicit identity and config isolation; the shared makeRepo already points HOME and AWM_HOME at a throwaway home.
 const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
-const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: gitEnv() }).trim();
+const g = (...args: string[]) => repo.git(...args);
 
 beforeEach(() => {
-    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
-    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull });
-    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcpt-')));
-    g('init', '-q', '-b', 'main');
-    fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
-    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
-    g('add', '.'); g('commit', '-q', '-m', 'feat: a');
+    repo = makeRepo();
+    root = repo.root; home = repo.home;
+    // makeRepo's own .gitignore ignores `.awm/`; these tests need a repository that does NOT (R2.2b), so the first commit is replaced.
+    repo.commit({ '.gitignore': 'node_modules\n', 'a.txt': 'a' }, 'feat: a');
 });
-afterEach(() => {
-    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
-    fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true });
-});
+afterEach(() => repo.cleanup());
 
 afterAll(() => {
     for (const k of ENV_KEYS) expect(process.env[k]).toBe(ORIGINAL[k]);
@@ -106,8 +99,7 @@ describe('receipt', () => {
         const r = buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', output: { overall: 'fail', sensors: [{ name: 'lint', status: 'fail', errors: [] }] } as never });
         expect(r).toMatchObject({ schema: 1, commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', overall: 'fail', sensors: { lint: 'fail' } });
     });
-    test('R2.1 a receipt replacing an existing 0666 file ends with mode 0600', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.1 a receipt replacing an existing 0666 file ends with mode 0600', () => {
         const head = g('rev-parse', 'HEAD');
         fs.mkdirSync(path.dirname(runsFile(head)), { recursive: true });
         fs.writeFileSync(runsFile(head), 'stale');
@@ -117,15 +109,13 @@ describe('receipt', () => {
         expect(fs.statSync(runsFile(head)).mode & 0o777).toBe(0o600);
         expect(readReceipt(root, head).ok).toBe(true);
     });
-    test('R2.1 writeReceipt forces mode 0600 on an existing file', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.1 writeReceipt forces mode 0600 on an existing file', () => {
         const head = writeValid();
         fs.chmodSync(runsFile(head), 0o644);
         writeValid();
         expect(fs.statSync(runsFile(head)).mode & 0o777).toBe(0o600);
     });
-    test('R2.1 the receipt directory is 0700', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.1 the receipt directory is 0700', () => {
         writeValid();
         expect(fs.statSync(path.join(root, '.awm', 'sensors', 'runs')).mode & 0o777).toBe(0o700);
     });
@@ -158,8 +148,7 @@ describe('receipt', () => {
             writeValid();
             expect(fs.readFileSync(ignoreFile(), 'utf8')).toBe('*\n');
         });
-        test('a symlinked .gitignore is refused and its target left alone, with no receipt written', () => {
-            if (process.platform === 'win32') return;
+        posixOnly('a symlinked .gitignore is refused and its target left alone, with no receipt written', () => {
             const target = path.join(root, 'elsewhere.txt');
             fs.writeFileSync(target, 'keep');
             fs.mkdirSync(path.dirname(ignoreFile()), { recursive: true });
@@ -466,8 +455,7 @@ describe('receipt', () => {
     test('R2.2 an ineligible or malformed precondition reports a reason without throwing', () => {
         expect(finalizeReceipt(undefined as never, output as never)).toMatch(/^no sensor receipt written: /);
     });
-    test('R2.2 a write failure is reported as a single escaped line and never thrown', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.2 a write failure is reported as a single escaped line and never thrown', () => {
         const pre = captureReceiptPrecondition(root);
         fs.mkdirSync(path.join(root, '.awm', 'sensors'), { recursive: true });
         const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else\n-'));
@@ -578,16 +566,14 @@ describe('receipt', () => {
         fs.writeFileSync(runsFile(head), body);
         expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
     });
-    test('R2.5 a symlinked receipt file is invalid', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.5 a symlinked receipt file is invalid', () => {
         const head = writeValid();
         const real = path.join(root, 'real.json');
         fs.renameSync(runsFile(head), real);
         fs.symlinkSync(real, runsFile(head));
         expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
     });
-    test('R2.5 a receipt read through a symlinked .awm directory is invalid', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('R2.5 a receipt read through a symlinked .awm directory is invalid', () => {
         const head = writeValid();
         const moved = path.join(root, 'moved-awm');
         fs.renameSync(path.join(root, '.awm'), moved);
@@ -601,8 +587,7 @@ describe('receipt', () => {
         expect(readReceipt(undefined as never, 'a'.repeat(40))).toEqual({ ok: false, code: 'receipt-invalid' });
         expect(readReceipt(root, undefined as never)).toEqual({ ok: false, code: 'receipt-invalid' });
     });
-    test('refuses a symlinked runs directory', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refuses a symlinked runs directory', () => {
         const head = g('rev-parse', 'HEAD');
         fs.mkdirSync(path.join(root, '.awm', 'sensors'), { recursive: true });
         const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else-'));
@@ -612,8 +597,7 @@ describe('receipt', () => {
         expect(fs.readdirSync(elsewhere)).toEqual([]);
         fs.rmSync(elsewhere, { recursive: true, force: true });
     });
-    test('a symlink refusal escapes control characters in the path it names', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('a symlink refusal escapes control characters in the path it names', () => {
         const weirdRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-weird\n-'));
         const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else-'));
         try {
@@ -625,8 +609,7 @@ describe('receipt', () => {
             expect(message).not.toMatch(/[\n\r]/);
         } finally { fs.rmSync(weirdRoot, { recursive: true, force: true }); fs.rmSync(elsewhere, { recursive: true, force: true }); }
     });
-    test('refuses a symlinked .awm directory on write', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refuses a symlinked .awm directory on write', () => {
         const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else-'));
         fs.symlinkSync(elsewhere, path.join(root, '.awm'));
         const r = buildReceipt({ commit: g('rev-parse', 'HEAD'), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
