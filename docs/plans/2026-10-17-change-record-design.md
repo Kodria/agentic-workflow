@@ -110,18 +110,20 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
 
 ### R4 — `awm change validate`
 
-- **R4.1 — Target selection:** WHEN called without a path, THE CLI SHALL validate every record added in `merge-base..HEAD` (resolving the base as in R3.1). WHEN called with a path, it SHALL validate that file only.
+- **R4.1 — Target selection:** WHEN called without a path, THE CLI SHALL validate every record added in `merge-base..HEAD` (resolving the base as in R3.1). WHEN called with a path, it SHALL validate that file only, as it is in the working tree. THE CLI SHALL read at most 50 records per run; WHEN more are added it SHALL validate the first 50 and report a further record `docs/changes` with diagnostic `too-many-records` (fail closed, never a silent pass).
 - **R4.2 — Missing record:** IF no record is added in the range AND no commit in the range has the trailer `Change-Record: none`, THEN `validate` SHALL fail with diagnostic `record-missing`. IF a trailer is present and no record is added, THEN it SHALL pass and report `exempt`.
 - **R4.3 — Base mode:** THE base mode SHALL check:
-  - R1 (shape);
+  - R1 (shape); an oversize file yields `record-too-large` (R1.8);
+  - WHEN called without a path, that the record has no uncommitted change relative to HEAD (else `record-uncommitted`), so the verdict describes the committed record and not the working tree;
   - that the recomputed R3.3/R3.4 fields equal the record (else `derived-mismatch`, naming each field);
   - that `verification.commit` is an ancestor of HEAD or equal to it (else `verification-commit-foreign`);
   - that `git diff --name-only <verification.commit> HEAD`, excluding `docs/changes/`, is empty (else `code-changed-after-verification`, listing up to 20 paths).
+  The checks that read fields of the record (derived, ancestry, late files, strict) run only when the shape is valid; with an invalid shape the shape diagnostics are the only ones reported, and the rest are reported after they are fixed.
 - **R4.4 — Strict mode:** WHEN `--strict` is given, THE CLI SHALL additionally require:
   - a valid receipt for `verification.commit` (else `receipt-missing` or `receipt-invalid`);
   - that the receipt's `digest`, `overall` and `sensors` equal the record (else `verification-mismatch`);
   - `overall: pass` (else `verification-not-passing`).
-- **R4.5 — Output and exit:** THE CLI SHALL exit 0 when valid and 2 otherwise. It SHALL print a text report, or with `--json` a single JSON line `{state, records:[{path, state, diagnostics:[{code, message, field?}]}]}`. It SHALL cap diagnostics at 20 per record and pass every message through `terminalSafe`.
+- **R4.5 — Output and exit:** THE CLI SHALL exit 0 when valid and 2 otherwise. It SHALL print a text report, or with `--json` a single JSON line `{state, records:[{path, state, diagnostics:[{code, message, field?}]}]}`. It SHALL cap diagnostics at 20 per record (19 kept plus a final `diagnostics-truncated` whose message counts every omitted diagnostic, including those already dropped by the shape validator's own cap) and pass every message through `esc`/`clipMessage`. WHEN `--json` is given and the command fails operationally (`not-a-git-repo`, `base-unresolved`, `invalid-input`, `path-invalid`, `git-failed`), it SHALL still print one JSON line of the same shape with `state: invalid` and a single record `docs/changes` carrying that diagnostic, and exit 2.
 - **R4.6 — Read-only:** `validate` SHALL NOT write any file.
 
 ### R5 — `awm changes list`

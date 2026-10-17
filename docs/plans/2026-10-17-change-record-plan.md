@@ -2161,3 +2161,14 @@ S1, S2 and S3 are complete and approved (last candidate `6cd253c`). The plan cod
 - **Tests.** Use `makeRepo`, `makeHiddenSubmodule` and `withEnv` from `helpers.ts`; one behavior per test; assert `code` and `field`; bounds for performance tests use `LINEAR_TIME_BOUND_MS`. A command test that spawns the CLI action must override HOME and AWM_HOME and prove the real checkout is untouched.
 - **Review economy.** A reviewer reports every concrete violation it can find in its FIRST pass; later rounds only verify the fixes and look at what the fixes changed.
 
+### A9 — S5 specification review (2026-10-17)
+
+The S5 review changed clauses R4.1, R4.3 and R4.5 of the design (read them there); S5 is reworked to match:
+
+- **Record bound (R4.1).** At most 50 records are read per run; beyond that, a synthetic `docs/changes` record carries `too-many-records`.
+- **Oversize (R4.3).** An oversize record is reported as `record-too-large` (not `record-invalid`); `validate` maps the size error of `readRecord` to that code.
+- **Committed-record verdict (R4.3).** Without a path, a record with uncommitted changes relative to HEAD yields `record-uncommitted` (detected through `runGit` `status --porcelain -z --untracked-files=no -- <path>`; fail closed when git fails). With an explicit path the working-tree file is validated as it is.
+- **Shape first (R4.3).** Derived, ancestry, late-files and strict checks run only when the shape is valid.
+- **Truncation (R4.5).** The `diagnostics-truncated` count includes diagnostics dropped by `validateRecordShape`.
+- **JSON failures (R4.5).** With `--json` an operational failure prints the one-line report shape on stdout (`state: invalid`, record `docs/changes`) and exits 2; without `--json` it keeps the stderr form of `change new`.
+
