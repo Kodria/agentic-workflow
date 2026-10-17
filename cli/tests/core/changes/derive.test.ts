@@ -270,9 +270,36 @@ describe('derivation', () => {
         expect(deriveFromCommits(bad('feat: x'))).toBeNull();
     });
     test('deriveFromCommits ignores entries that are not usable conventional commits', () => {
-        const hostile = [null, 'x', { type: 7, scope: null, breaking: false, subject: 's' }, c('Feat', 'a'), c('feat2', 'a'), c('', 'a'), c('fe-at', 'a')];
+        const hostile = [null, 'x', { type: 7, scope: null, breaking: false, subject: 's' }, c('', 'a'), c('fe-at', 'a'), c('fe at', 'a'), c('fe\nat', 'a')];
         expect(deriveFromCommits(bad(hostile))).toBeNull();
         expect(deriveFromCommits(bad([...hostile, c('fix', 'k')]))).toEqual({ type: 'fix', scope: 'k', semver: 'patch', breaking: false });
+    });
+    test('R3.3 breaking and semver cover every commit the release parser accepts, whatever the type spelling', () => {
+        expect(deriveFromCommits([c('Feat', null, true)])).toEqual({ type: 'feat', scope: null, semver: 'major', breaking: true });
+        expect(deriveFromCommits([c('Feat', null, true), c('fix', 'a')])).toEqual({ type: 'feat', scope: 'a', semver: 'major', breaking: true });
+        expect(deriveFromCommits([c('Refactor', 'core', true)])).toEqual({ type: 'refactor', scope: 'core', semver: 'major', breaking: true });
+    });
+    test('R3.3 a type that is not purely letters after lowercasing is recorded as other', () => {
+        expect(deriveFromCommits([c('feat2', null, true)])).toEqual({ type: 'other', scope: null, semver: 'major', breaking: true });
+        expect(deriveFromCommits([c('fix_x', null, true)])?.type).toBe('other');
+        expect(deriveFromCommits([c('FIX_X', null)])).toEqual({ type: 'other', scope: null, semver: 'none', breaking: false });
+        expect(deriveFromCommits([c('FEAT', null)])?.type).toBe('feat');
+    });
+    test('R3.3 semver follows the release parser: only an exact feat or fix type releases', () => {
+        expect(deriveFromCommits([c('Feat', null)])?.semver).toBe('none');
+        expect(deriveFromCommits([c('Fix', null), c('docs', null)])?.semver).toBe('none');
+    });
+    test('R3.3 the scope tie-break is by UTF-16 code-unit order, not by locale', () => {
+        const saved = process.env.LC_ALL;
+        process.env.LC_ALL = 'sv_SE.UTF-8';
+        try {
+            expect(deriveFromCommits([c('feat', 'a'), c('feat', 'Z')])?.scope).toBe('Z');
+            expect(deriveFromCommits([c('feat', 'f'), c('feat', 'é')])?.scope).toBe('f');
+            expect(deriveFromCommits([c('feat', 'é'), c('feat', 'e')])?.scope).toBe('e');
+            expect(deriveFromCommits([c('feat', 'B'), c('feat', 'b'), c('feat', 'b')])?.scope).toBe('b');
+        } finally {
+            if (saved === undefined) delete process.env.LC_ALL; else process.env.LC_ALL = saved;
+        }
     });
     test('deriveFromCommits treats only a literal true as breaking', () => {
         expect(deriveFromCommits(bad([{ type: 'feat', scope: null, breaking: 'yes', subject: 's' }]))).toEqual({ type: 'feat', scope: null, semver: 'minor', breaking: false });
@@ -339,6 +366,33 @@ describe('derivation', () => {
         repo.commit({ 'other/z.ts': '1' }, 'feat(theirs)!: theirs');
         repo.git('checkout', '-q', 'feat/x');
         expect(deriveFields(repo.root, mergeBase(repo.root, 'main'))).toEqual({ ok: true, fields: { type: 'fix', scope: 'mine', semver: 'patch', breaking: false, modules: ['cli/src'] } });
+    });
+    test('R3.3 a capitalised breaking type from a real commit is major', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'Feat!: remove api');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: null, semver: 'major', breaking: true, modules: ['.'] } });
+    });
+    test('R3.3 a commit with a type the release parser accepts but a record cannot hold is other', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'feat2!: x');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'other', scope: null, semver: 'major', breaking: true, modules: ['.'] } });
+    });
+    test('R3.3 a side branch merged with a tree-discarding merge still counts', () => {
+        const base = branch();
+        repo.commit({ 'a.ts': '1' }, 'fix(a): a');
+        repo.git('checkout', '-q', '-b', 'side', 'main');
+        repo.commit({ 'b.ts': '1' }, 'feat(b)!: big');
+        repo.git('checkout', '-q', 'feat/x');
+        repo.git('merge', '-q', '-s', 'ours', '--no-ff', 'side', '-m', 'chore: merge side, keeping ours');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'a', semver: 'major', breaking: true, modules: ['.'] } });
+    });
+    test('R3.5 code that only sits on a side branch merged with -s ours is not "no commits"', () => {
+        const base = branch();
+        repo.git('checkout', '-q', '-b', 'side', 'main');
+        repo.commit({ 'b.ts': '1' }, 'fix(b): only on the side');
+        repo.git('checkout', '-q', 'feat/x');
+        repo.git('merge', '-q', '-s', 'ours', '--no-ff', 'side', '-m', 'chore: merge side, keeping ours');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'b', semver: 'patch', breaking: false, modules: [] } });
     });
     test('R3.1 merge commits are not derived from', () => {
         const base = branch();

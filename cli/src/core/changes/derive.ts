@@ -8,24 +8,30 @@ import { RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './
 const ALL_FILES = ':/';
 const EXCLUDE_RECORDS = `:(top,exclude,literal)${RECORD_DIR}`;
 const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-const TYPE_RE = /^[a-z]+$/;
+const PARSER_TYPE = /^\w+$/;
+const RECORD_TYPE = /^[a-z]+$/;
 const MODULE_DEPTH = 3;
 
-/** Keeps only commits a record can describe (lowercase type) and a scope that is usable text; anything else is ignored. */
+/** Keeps the commits the release parser can produce (a `\w+` type, any spelling) with a scope that is usable text; anything else is ignored. */
 function usable(commits: unknown): Commit[] {
     if (!Array.isArray(commits)) return [];
     const out: Commit[] = [];
     for (const c of commits as unknown[]) {
         if (typeof c !== 'object' || c === null) continue;
         const { type, scope, breaking, subject } = c as Partial<Commit>;
-        if (typeof type !== 'string' || !TYPE_RE.test(type)) continue;
+        if (typeof type !== 'string' || !PARSER_TYPE.test(type)) continue;
         const cleanScope = typeof scope === 'string' && scope.trim() !== '' && isSingleLine(scope) ? scope.trim() : null;
         out.push({ type, scope: cleanScope, breaking: breaking === true, subject: typeof subject === 'string' ? subject : '' });
     }
     return out;
 }
 
-/** R3.3. Null when no commit is usable. */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * R3.3. `breaking` and `semver` cover every usable commit, with the release parser's exact-type semantics; the recorded type is
+ * the highest-impact commit's type lowercased, or `other` when that is still not purely letters. Null when no commit is usable.
+ */
 export function deriveFromCommits(input: Commit[]): Omit<DerivedFields, 'modules'> | null {
     const commits = usable(input);
     if (commits.length === 0) return null;
@@ -34,9 +40,10 @@ export function deriveFromCommits(input: Commit[]): Omit<DerivedFields, 'modules
         ?? commits.find((c) => c.type === 'perf') ?? commits[0];
     const counts = new Map<string, number>();
     for (const c of commits) if (c.scope) counts.set(c.scope, (counts.get(c.scope) ?? 0) + 1);
-    const scope = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+    const scope = [...counts.entries()].sort((a, b) => b[1] - a[1] || byCodeUnit(a[0], b[0]))[0]?.[0] ?? null;
     const semver: Semver = determineBump(commits) ?? 'none';
-    return { type: pick.type, scope, semver, breaking };
+    const type = pick.type.toLowerCase();
+    return { type: RECORD_TYPE.test(type) ? type : 'other', scope, semver, breaking };
 }
 
 /** R3.4. Directories a record cannot hold (control characters, backslashes, `..` ...) are left out rather than leaked into it. */
@@ -64,13 +71,15 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     if (typeof root !== 'string' || root.length === 0) return fail('invalid-input', 'repository root must be a non-empty string');
     if (typeof mergeBaseSha !== 'string' || !COMMIT_ID.test(mergeBaseSha)) return fail('invalid-input', `merge-base must be a full commit id, got "${esc(mergeBaseSha as string)}"`);
     const range = `${mergeBaseSha}..HEAD`;
-    const counted = runGit(root, ['rev-list', '--no-merges', '--count', '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
+    const counted = runGit(root, ['rev-list', '--no-merges', '--full-history', '--count', '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
     const count = counted === null ? NaN : Number(counted.trim());
     if (!Number.isSafeInteger(count)) return fail('git-failed', `git could not list the commits in ${range}`);
     if (count === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
+    // --full-history: with a pathspec git would otherwise prune the side of a merge whose tree equals the other parent
+    // (`merge -s ours`), silently dropping real commits from the range.
     // -z ends every commit with NUL, which a message cannot contain: each record is exactly one commit, so a message that
     // embeds the parser's own separator cannot be read as a second commit.
-    const raw = runGit(root, ['log', '--no-merges', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
+    const raw = runGit(root, ['log', '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
     const commits = raw.split('\0').flatMap((record) => parseCommits(record.split(RS).join('')));
     const derived = deriveFromCommits(commits);
