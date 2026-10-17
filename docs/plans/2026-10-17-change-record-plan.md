@@ -2192,3 +2192,7 @@ R5.7 now states that the no-lazy-fetch guarantee for partial clones requires git
 
 The final review settled in the design: R2.2b (receipts only when a sensor ran and only for the repository root manifest; a self-ignoring `.awm/sensors/runs/.gitignore`; no pruning in this cycle), the `schema` key of the `changes list` JSON (R5.6) and the squash-merge limit of DD-6. The code-level findings of that review (shared bidi escaping in `escapeText`, scrubbing of inherited `GIT_DIR`/`GIT_INDEX_FILE`/`GIT_WORK_TREE`, one set of receipt predicates, strict blob decoding in `list`, dead exports, a `head-moved` code, `posixOnly` in receipt tests) are corrections inside the existing slices.
 
+### A15 — Post-implementation QA (2026-10-17)
+
+QA (Track A fidelity, Track B robustness, logic and tests) settled in the design: R1.1 (malformed names are `name-invalid` candidates), R1.4/R1.5 links.issue without credentials and 40|64-hex commit ids, R2.2c (no receipt when manifest entries were dropped; sorted-pairs digest), R3.4 (`record-too-large` for a change touching too many directories), R5.4 (adoption by a record-shaped file), R5.5 (annotated tags first; query/fragment stripped from the repo identity). The test findings (opt-out range, hasOptOut log safety, type pick order, registration on the real program, boundaries, CRLF, receipt write hardening, win32 skips, suite cost, wall-clock bounds) are test work inside the existing slices.
+
