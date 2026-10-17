@@ -1,4 +1,4 @@
-import { makeRepo, spyOnGit, type TestRepo } from './helpers';
+import { importCommits, makeRepo, spyOnGit, type TestRepo } from './helpers';
 import { SINCE_48H, record, recordPath } from './list-fixtures';
 import { listChanges, type ListOutcome } from '../../../src/core/changes/list';
 
@@ -7,7 +7,8 @@ let big: TestRepo;
 beforeAll(() => {
     big = makeRepo();
     big.commit({ [recordPath('2026-10-10-adopt')]: record('2026-10-10-adopt') }, 'feat: adopt', '2026-10-10T00:00:00Z');
-    for (let i = 1; i <= 201; i++) big.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '-m', `fix: n${i}`);
+    // 201 empty commits with the same committer date, written by ONE git fast-import process instead of 201 `git commit`s.
+    importCommits(big, Array.from({ length: 201 }, (_, i) => ({ message: `fix: n${i + 1}`, files: {}, date: '2026-10-16T10:00:00Z' })));
 }, 180_000);
 afterAll(() => big.cleanup());
 afterEach(() => jest.restoreAllMocks());

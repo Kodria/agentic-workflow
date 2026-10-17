@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Command } from 'commander';
-import { bad, makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
+import { bad, cloneRepo, makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
 import { pathToFileURL } from 'url';
 import { commitLiterally, now, record, recordPath } from '../../core/changes/list-fixtures';
 import { registerChangesCommand, runChangesList } from '../../../src/commands/changes';
@@ -16,7 +16,10 @@ afterEach(() => expect(listReal()).toEqual(realBefore));
 
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 let repo: TestRepo;
-beforeEach(() => { repo = makeRepo(); });
+let template: TestRepo;
+beforeAll(() => { template = makeRepo(); });
+afterAll(() => template.cleanup());
+beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const FIRST = '2026-10-16-first';

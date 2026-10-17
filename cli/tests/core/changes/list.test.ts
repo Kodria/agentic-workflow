@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { bad, commitForgedSigned, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
+import { bad, commitForgedSigned, cloneRepo, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, UNSAFE, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, subjects } from './list-fixtures';
 import { MAX_SUBJECT, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 import { resolveBaseCommit } from '../../../src/core/changes/git';
@@ -10,7 +10,10 @@ import { runChangeValidate } from '../../../src/commands/change';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
 let repo: TestRepo;
-beforeEach(() => { repo = makeRepo(); });
+let template: TestRepo;
+beforeAll(() => { template = makeRepo(); });
+afterAll(() => template.cleanup());
+beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const list = (opts: Record<string, unknown> = {}): ListOutcome => listIn(repo, opts);

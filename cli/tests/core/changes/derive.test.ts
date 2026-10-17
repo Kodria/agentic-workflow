@@ -2,7 +2,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { changedFiles, mergeBase } from '../../../src/core/changes/git';
 import { deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
 
@@ -130,7 +130,10 @@ describe('deriveFromCommits and deriveModules (no repository)', () => {
 
 describe('deriveFields in a repository', () => {
     let repo: TestRepo;
-    beforeEach(() => { repo = makeRepo(); });
+    let template: TestRepo;
+    beforeAll(() => { template = makeRepo(); });
+    afterAll(() => template.cleanup());
+    beforeEach(() => { repo = cloneRepo(template); });
     afterEach(() => repo.cleanup());
     const branch = () => branchOff(repo);
     const noNewFile = (name: string) => expect(fs.existsSync(path.join(repo.root, name))).toBe(false);

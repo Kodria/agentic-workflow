@@ -1,4 +1,4 @@
-import { bad, branchOff, makeRepo, nonRepoDir, type TestRepo } from './helpers';
+import { bad, branchOff, cloneRepo, makeRepo, nonRepoDir, type TestRepo } from './helpers';
 import { failed } from '../../../src/core/changes/command';
 import { HEAD_MOVED, headMovedFailure, recordDirProblem, resolveRange } from '../../../src/core/changes/range';
 import type { RecordDir } from '../../../src/core/changes/record-io';
@@ -6,7 +6,10 @@ import type { RecordDir } from '../../../src/core/changes/record-io';
 let repo: TestRepo;
 /** A repository for the groups that need one (the pure recordDirProblem tests need none). */
 function withRepo(): void {
-    beforeEach(() => { repo = makeRepo(); });
+    let template: TestRepo;
+    beforeAll(() => { template = makeRepo(); });
+    afterAll(() => template.cleanup());
+    beforeEach(() => { repo = cloneRepo(template); });
     afterEach(() => repo.cleanup());
 }
 

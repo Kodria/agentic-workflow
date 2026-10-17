@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, cloneRepo, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
@@ -37,7 +37,10 @@ describe('ref and revision predicates (no repository)', () => {
 
 describe('git functions in a repository', () => {
     let repo: TestRepo;
-    beforeEach(() => { repo = makeRepo(); });
+    let template: TestRepo;
+    beforeAll(() => { template = makeRepo(); });
+    afterAll(() => template.cleanup());
+    beforeEach(() => { repo = cloneRepo(template); });
     afterEach(() => repo.cleanup());
     const branch = () => branchOff(repo);
     const noNewFile = (name: string) => expect(fs.existsSync(path.join(repo.root, name))).toBe(false);

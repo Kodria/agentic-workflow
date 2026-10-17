@@ -1,11 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { hasOptOut } from '../../../src/core/changes/trailers';
 
 describe('hasOptOut', () => {
     let repo: TestRepo;
-    beforeEach(() => { repo = makeRepo(); });
+    let template: TestRepo;
+    beforeAll(() => { template = makeRepo(); });
+    afterAll(() => template.cleanup());
+    beforeEach(() => { repo = cloneRepo(template); });
     afterEach(() => repo.cleanup());
     const branch = () => branchOff(repo);
     const noNewFile = (name: string) => expect(fs.existsSync(path.join(repo.root, name))).toBe(false);

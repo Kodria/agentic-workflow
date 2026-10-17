@@ -1,12 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { gitAtLeast, importCommits, makeRepo, posixOnly, spyOnGit, type TestRepo } from './helpers';
+import { gitAtLeast, importCommits, cloneRepo, makeRepo, posixOnly, spyOnGit, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, snapshotDir, subjects } from './list-fixtures';
 import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_RECORDS_PER_RUN, MAX_SUBJECT, PAGE_SIZE, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 
 let repo: TestRepo;
-beforeEach(() => { repo = makeRepo(); });
+let template: TestRepo;
+beforeAll(() => { template = makeRepo(); });
+afterAll(() => template.cleanup());
+beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const list = (opts: Record<string, unknown> = {}): ListOutcome => listIn(repo, opts);
