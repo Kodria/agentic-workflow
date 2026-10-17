@@ -375,6 +375,20 @@ describe('validateRecordShape', () => {
             expect(r.diagnostics[r.diagnostics.length - 1].code).toBe('diagnostics-truncated');
             expect(r.diagnostics[0].code).toBe('unknown-field');
         });
+        test('reports how many diagnostics the cap dropped, so that kept + omitted is the total', () => {
+            const keys = Array.from({ length: 6000 }, (_v, i) => `k${i}: 1`).join('\n');
+            const r = validateRecordShape(NAME, doc(`${fm()}\n${keys}`));
+            expect(r.omitted).toBe(6000 - 49);
+            expect(r.diagnostics.length - 1 + (r.omitted ?? 0)).toBe(6000);
+        });
+        test('reports exactly 51 diagnostics as 49 kept and 2 omitted', () => {
+            const keys = Array.from({ length: 51 }, (_v, i) => `k${i}: 1`).join('\n');
+            expect(validateRecordShape(NAME, doc(`${fm()}\n${keys}`)).omitted).toBe(2);
+        });
+        test('has no omitted count when the cap was not reached', () => {
+            expect(validateRecordShape(NAME, doc(`${fm()}\nk1: 1`))).not.toHaveProperty('omitted');
+            expect(validateRecordShape(NAME, doc(fm()))).not.toHaveProperty('omitted');
+        });
         test('does not add diagnostics-truncated when 50 or fewer diagnostics exist', () => {
             const r = validateRecordShape(NAME, doc(`${fm()}\nk1: 1\nk2: 1`));
             expect(codes(r)).toEqual(['unknown-field', 'unknown-field']);

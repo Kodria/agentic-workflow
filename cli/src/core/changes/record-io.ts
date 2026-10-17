@@ -67,7 +67,8 @@ export function recordsWithSlug(dir: string, slug: string): string[] | null {
 /** What a file looked like when it was read: enough to notice that someone else changed it since. */
 export interface FileSnapshot { size: number; mtimeMs: number; ino: number }
 
-export type RecordRead = { ok: true; text: string; snapshot: FileSnapshot } | { ok: false; code: string; message: string };
+/** `tooLarge` marks the size refusal (the validator reports it as `record-too-large`, R1.8); `code` stays `record-invalid` for the writers. */
+export type RecordRead = { ok: true; text: string; snapshot: FileSnapshot } | { ok: false; code: string; message: string; tooLarge?: true };
 
 const unreadable = (code: string, message: string): RecordRead => ({ ok: false, code, message });
 
@@ -82,7 +83,7 @@ export function readRecord(target: string, name: string): RecordRead {
         const stat = fs.lstatSync(target);
         if (stat.isSymbolicLink()) return unreadable('unsafe-path', `${label} is a symlink; refusing to write`);
         if (!stat.isFile()) return unreadable('record-invalid', `${label} is not a regular file`);
-        if (stat.size > MAX_RECORD_BYTES) return unreadable('record-invalid', `${label} is larger than ${MAX_RECORD_BYTES} bytes`);
+        if (stat.size > MAX_RECORD_BYTES) return { ...unreadable('record-invalid', `${label} is larger than ${MAX_RECORD_BYTES} bytes`), tooLarge: true } as RecordRead;
         const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(target));
         return { ok: true, text, snapshot: { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino } };
     } catch (error) {

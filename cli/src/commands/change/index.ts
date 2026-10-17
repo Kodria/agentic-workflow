@@ -205,13 +205,24 @@ const safeDiagnostic = (d: Diagnostic): Diagnostic => {
     return d.field === undefined ? base : { ...base, field: clipMessage(cleanText(d.field)) };
 };
 
-/** One record's report: every text field made single-line and bounded, at most 20 diagnostics. */
-function finish(recordPath: string, list: Diagnostic[]): RecordReport {
+/**
+ * One record's report: every text field made single-line and bounded, at most 20 diagnostics. `dropped` counts the diagnostics
+ * the shape validator's own cap already removed, so the truncation marker counts every omitted diagnostic.
+ */
+function finish(recordPath: string, list: Diagnostic[], dropped = 0): RecordReport {
     const all = list.map(safeDiagnostic);
-    const kept = all.length > MAX_RECORD_DIAGNOSTICS
-        ? [...all.slice(0, MAX_RECORD_DIAGNOSTICS - 1), { code: 'diagnostics-truncated', message: `${all.length - (MAX_RECORD_DIAGNOSTICS - 1)} more diagnostics omitted` }]
+    const total = all.length + dropped;
+    const kept = total > MAX_RECORD_DIAGNOSTICS
+        ? [...all.slice(0, MAX_RECORD_DIAGNOSTICS - 1), { code: 'diagnostics-truncated', message: `${total - (MAX_RECORD_DIAGNOSTICS - 1)} more diagnostics omitted` }]
         : all;
     return { path: clipMessage(cleanText(recordPath)), state: kept.length === 0 ? 'valid' : 'invalid', diagnostics: kept };
+}
+
+/** R4.5: an operational failure. With --json it is the one-line report shape (state invalid, record `docs/changes`), else the stderr form of `change new`. */
+function failure(json: boolean, code: string, message: string, remedy?: string): CommandResult {
+    if (!json) return fail(code, message, remedy);
+    const record = finish(RECORD_DIR, [{ code, message: remedy ? `${message}; ${remedy}` : message }]);
+    return { code: 2, stdout: `${JSON.stringify({ state: 'invalid', records: [record] })}\n`, stderr: '' };
 }
 
 /** What every record of one run is checked against; computed at most once per run (and per verification commit). */
@@ -287,7 +298,7 @@ function checkReceipt(run: ValidateRun, record: ChangeRecord, out: Diagnostic[])
 }
 
 /** The records are read from the working tree, through the symlink-safe, size-bounded readers. Never throws. */
-function validateOne(run: ValidateRun, rel: string): RecordReport {
+function validateOne(run: ValidateRun, rel: string, requireCommitted: boolean): RecordReport {
     const name = path.posix.basename(rel);
     const missing = (code: string, message: string): RecordReport => finish(rel, [{ code, message }]);
     if (run.dir.kind === 'absent') return missing('record-missing', `${RECORD_DIR}/ does not exist`);
@@ -295,17 +306,36 @@ function validateOne(run: ValidateRun, rel: string): RecordReport {
     if (run.dir.kind === 'error') return missing('io-failed', `could not inspect ${RECORD_DIR}`);
     if (!isRegularFileInside(run.root, rel)) return missing('record-missing', `${esc(rel)} is not a regular file in the working tree`);
     const read = readRecord(path.join(run.dir.dir, name), name);
-    if (!read.ok) return missing(read.code, read.message);
+    if (!read.ok) return missing(read.tooLarge === true ? 'record-too-large' : read.code, read.message);
 
+    const diagnostics: Diagnostic[] = [];
+    if (requireCommitted) {
+        const state = committedState(run.root, rel);
+        if (state === 'changed') diagnostics.push({ code: 'record-uncommitted', message: `${esc(rel)} has uncommitted changes; commit it and validate again` });
+        else if (state === 'unknown') diagnostics.push({ code: 'record-uncommitted', message: `could not tell whether ${esc(rel)} has uncommitted changes` });
+    }
     const shape = validateRecordShape(name, read.text, { root: run.root });
-    const diagnostics: Diagnostic[] = [...shape.diagnostics];
+    // The shape validator's own cap ends its list with a marker; finish() writes one marker for the whole record instead.
+    const capped = shape.omitted !== undefined && shape.diagnostics[shape.diagnostics.length - 1]?.code === 'diagnostics-truncated';
+    diagnostics.push(...(capped ? shape.diagnostics.slice(0, -1) : shape.diagnostics));
     const record = shape.record;
     if (record) {
         checkDerived(run, record, diagnostics);
         checkVerifiedCommit(run, record.verification.commit, diagnostics);
         if (run.strict) checkReceipt(run, record, diagnostics);
     }
-    return finish(rel, diagnostics);
+    return finish(rel, diagnostics, capped ? shape.omitted : 0);
+}
+
+/**
+ * Whether the working-tree copy of a record differs from HEAD (staged or not): the verdict of a run without a path must describe
+ * the committed record. `--no-optional-locks`: status would otherwise refresh the index, and validate writes nothing (R4.6).
+ * Unreadable state is `unknown` (the caller fails closed).
+ */
+function committedState(root: string, rel: string): 'clean' | 'changed' | 'unknown' {
+    const out = runGit(root, ['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=no', '--ignore-submodules=none', '--', `:(top,literal)${rel}`]);
+    if (out === null) return 'unknown';
+    return out.length > 0 ? 'changed' : 'clean';
 }
 
 /** The repo-relative, `/`-separated path `target` (read from `cwd`) names, or null when it lies outside the repository. */
@@ -333,6 +363,11 @@ function formatText(state: string, records: RecordReport[]): string {
     return `${lines.join('\n')}\n`;
 }
 
+/** True only for a real `--json` flag; anything else (including a malformed options value) keeps the stderr form. */
+function wantsJson(rawOpts: unknown): boolean {
+    try { return isObj(rawOpts) && rawOpts.json === true; } catch { return false; }
+}
+
 function validateOpts(rawOpts: unknown): ValidateOpts | string {
     if (rawOpts !== undefined && !isObj(rawOpts)) return 'options must be an object';
     const opts = (rawOpts ?? {}) as Record<string, unknown>;
@@ -342,46 +377,47 @@ function validateOpts(rawOpts: unknown): ValidateOpts | string {
 }
 
 function changeValidate(cwd: string, target: unknown, rawOpts: unknown): CommandResult {
-    if (typeof cwd !== 'string' || cwd.length === 0) return fail('invalid-input', 'the working directory must be a non-empty string');
-    if (target !== undefined && typeof target !== 'string') return fail('path-invalid', 'the path must be a string');
+    const bail = (code: string, message: string, remedy?: string): CommandResult => failure(wantsJson(rawOpts), code, message, remedy);
+    if (typeof cwd !== 'string' || cwd.length === 0) return bail('invalid-input', 'the working directory must be a non-empty string');
+    if (target !== undefined && typeof target !== 'string') return bail('path-invalid', 'the path must be a string');
     const opts = validateOpts(rawOpts);
-    if (typeof opts === 'string') return fail('flag-invalid', opts);
+    if (typeof opts === 'string') return bail('flag-invalid', opts);
     const root = repoRoot(cwd);
-    if (root === null) return fail('not-a-git-repo', 'awm change must run inside a git repository');
+    if (root === null) return bail('not-a-git-repo', 'awm change must run inside a git repository');
 
     let rel: string | null = null;
     if (target !== undefined) {
         rel = repoRelative(root, cwd, target);
-        if (rel === null || !isRecordPath(rel)) return fail('path-invalid', `"${esc(target)}" must name a file ${RECORD_DIR}/YYYY-MM-DD-<slug>.md of this repository`);
+        if (rel === null || !isRecordPath(rel)) return bail('path-invalid', `"${esc(target)}" must name a file ${RECORD_DIR}/YYYY-MM-DD-<slug>.md of this repository`);
     }
     // Pin HEAD: the range, the ancestry and the late-file checks all describe this one commit.
     const head = headSha(root);
-    if (head === null) return fail('git-failed', 'git could not read HEAD');
-    if (opts.base !== undefined && !isSafeRef(opts.base)) return fail('invalid-input', `--base "${esc(opts.base)}" is not a safe git ref`);
+    if (head === null) return bail('git-failed', 'git could not read HEAD');
+    if (opts.base !== undefined && !isSafeRef(opts.base)) return bail('invalid-input', `--base "${esc(opts.base)}" is not a safe git ref`);
     const base = resolveBase(root, opts.base);
-    if (base === null) return fail('base-unresolved', 'could not resolve a base branch', 'pass --base <ref>');
+    if (base === null) return bail('base-unresolved', 'could not resolve a base branch', 'pass --base <ref>');
     const mergeBaseSha = mergeBase(root, base);
-    if (mergeBaseSha === null) return fail('base-unresolved', `no merge base between "${esc(base)}" and HEAD`, 'pass --base <ref>');
+    if (mergeBaseSha === null) return bail('base-unresolved', `no merge base between "${esc(base)}" and HEAD`, 'pass --base <ref>');
 
     const run: ValidateRun = { root, head, mergeBaseSha, strict: opts.strict === true, dir: inspectRecordDir(root), ancestors: new Map(), late: new Map() };
     let state: 'valid' | 'invalid' | 'exempt';
     let records: RecordReport[];
     if (rel !== null) {
-        records = [validateOne(run, rel)];
+        records = [validateOne(run, rel, false)];
     } else {
         const added = addedFilesUnder(root, mergeBaseSha, head, RECORD_DIR);
-        if (added === null) return fail('git-failed', `git could not list the records added since ${mergeBaseSha.slice(0, 12)}`);
+        if (added === null) return bail('git-failed', `git could not list the records added since ${mergeBaseSha.slice(0, 12)}`);
         const names = added.filter(isRecordPath);
         if (names.length === 0 && hasOptOut(root, [`${mergeBaseSha}..${head}`])) {
-            if (headSha(root) !== head) return fail('git-failed', MOVED);
+            if (headSha(root) !== head) return bail('git-failed', MOVED);
             state = 'exempt';
             return { code: 0, stdout: opts.json === true ? `${JSON.stringify({ state, records: [] })}\n` : 'Change Record validation: exempt (Change-Record: none)\n', stderr: '' };
         }
-        records = names.slice(0, MAX_RECORDS).map((name) => validateOne(run, name));
+        records = names.slice(0, MAX_RECORDS).map((name) => validateOne(run, name, true));
         if (names.length === 0) records = [finish(RECORD_DIR, [{ code: 'record-missing', message: 'this branch adds no Change Record and no commit carries Change-Record: none' }])];
         if (names.length > MAX_RECORDS) records.push(finish(RECORD_DIR, [{ code: 'too-many-records', message: `${names.length} records were added; only the first ${MAX_RECORDS} were validated` }]));
     }
-    if (headSha(root) !== head) return fail('git-failed', MOVED);
+    if (headSha(root) !== head) return bail('git-failed', MOVED);
     state = records.every((r) => r.state === 'valid') ? 'valid' : 'invalid';
     return { code: state === 'valid' ? 0 : 2, stdout: opts.json === true ? `${JSON.stringify({ state, records })}\n` : formatText(state, records), stderr: '' };
 }
@@ -391,14 +427,14 @@ export function runChangeValidate(cwd: string, target: string | undefined, opts:
     try {
         return changeValidate(cwd, target, opts);
     } catch (error) {
-        return fail('internal-error', `unexpected failure (${esc(error instanceof Error ? error.name : 'unknown')})`);
+        return failure(wantsJson(opts), 'internal-error', `unexpected failure (${esc(error instanceof Error ? error.name : 'unknown')})`);
     }
 }
 
 /** The action wrapper: the working directory may be gone, and nothing may throw out of the action. */
-function inCwd(command: (cwd: string) => CommandResult): void {
+function inCwd(command: (cwd: string) => CommandResult, json = false): void {
     let cwd: string;
-    try { cwd = process.cwd(); } catch { emit(fail('not-a-git-repo', 'the working directory is not accessible')); return; }
+    try { cwd = process.cwd(); } catch { emit(failure(json, 'not-a-git-repo', 'the working directory is not accessible')); return; }
     emit(command(cwd));
 }
 
@@ -420,5 +456,5 @@ export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): 
         .option('--base <ref>', 'base branch (default: origin/HEAD, main, master)')
         .option('--strict', 'require a matching, passing sensor receipt for verification.commit')
         .option('--json', 'print a single JSON line')
-        .action((target: string | undefined, opts: ValidateOpts) => inCwd((cwd) => runChangeValidate(cwd, target, opts)));
+        .action((target: string | undefined, opts: ValidateOpts) => inCwd((cwd) => runChangeValidate(cwd, target, opts), wantsJson(opts)));
 }

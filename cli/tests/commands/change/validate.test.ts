@@ -7,7 +7,7 @@ import { registerChangeCommand, runChangeNew, runChangeValidate, type ValidateOp
 import * as deriveModule from '../../../src/core/changes/derive';
 import * as gitModule from '../../../src/core/changes/git';
 import { buildReceipt, writeReceipt } from '../../../src/core/changes/receipt';
-import { PENDING_MARKER } from '../../../src/core/changes/types';
+import { MAX_RECORD_BYTES, PENDING_MARKER } from '../../../src/core/changes/types';
 import type { CommandResult } from '../../../src/core/command-result';
 
 const REAL_CHANGES_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'docs', 'changes');
@@ -190,11 +190,24 @@ describe('target path safety', () => {
     test('a missing docs/changes directory is record-missing for an explicit path', () => {
         diag(run(REL), 'record-missing', undefined);
     });
-    test('an oversize record file is record-invalid and its content is not parsed', () => {
-        repo.commit({ [REL]: 'x'.repeat(70 * 1024) }, 'docs: big');
+    test('a record of 65537 bytes is record-too-large and its content is not parsed', () => {
+        repo.commit({ [REL]: 'x'.repeat(MAX_RECORD_BYTES + 1) }, 'docs: big');
         const r = run();
-        diag(r, 'record-invalid', undefined);
+        expect(codesOf(r)).toEqual(['record-too-large']);
         expect(r.code).toBe(2);
+    });
+    test('record-too-large also applies to an explicit path', () => {
+        repo.commit({ [REL]: 'x'.repeat(MAX_RECORD_BYTES + 1) }, 'docs: big');
+        diag(run(REL), 'record-too-large', undefined);
+    });
+    test('a record of exactly 65536 bytes is read and judged on its content', () => {
+        repo.commit({ [REL]: 'x'.repeat(MAX_RECORD_BYTES) }, 'docs: limit');
+        expect(codesOf(run())).toEqual(['frontmatter-missing']);
+    });
+    test('an invalid-UTF-8 record is still record-invalid, not record-too-large', () => {
+        repo.commit({ [REL]: 'ok' }, 'docs: r');
+        fs.writeFileSync(abs(REL), Buffer.from([0x2d, 0xff]));
+        expect(codesOf(run(REL))).toEqual(['record-invalid']);
     });
     test('a record that is not valid UTF-8 is record-invalid', () => {
         commitRecord();
@@ -540,6 +553,7 @@ describe('R4.5 output and exit codes', () => {
     test('text report: header, one line per record, one indented line per diagnostic', () => {
         commitRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix'));
+        repo.git('commit', '-q', '-am', 'docs: edit the record');
         const r = runChangeValidate(repo.root, undefined, {});
         expect(r.code).toBe(2);
         expect(r.stderr).toBe('');
@@ -594,7 +608,28 @@ describe('R4.5 output and exit codes', () => {
         const ds = diagsOf(run(REL));
         expect(ds).toHaveLength(20);
         expect(ds.slice(0, 19).every((d) => d.code === 'unknown-field')).toBe(true);
-        expect(ds[19].code).toBe('diagnostics-truncated');
+        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: '11 more diagnostics omitted' });
+    });
+    test('the truncation count includes the diagnostics the shape validator itself dropped (80 found, 19 kept)', () => {
+        commitRecord();
+        const extra = Array.from({ length: 80 }, (_, i) => `extra${i}: 1`).join('\n');
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
+        const ds = diagsOf(run(REL));
+        expect(ds).toHaveLength(20);
+        expect(ds.filter((d) => d.code === 'diagnostics-truncated')).toHaveLength(1);
+        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: '61 more diagnostics omitted' });
+    });
+    test('a count of dropped diagnostics is exact at the shape cap boundary (exactly 50 found)', () => {
+        commitRecord();
+        const extra = Array.from({ length: 50 }, (_, i) => `extra${i}: 1`).join('\n');
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
+        expect(diagsOf(run(REL))[19]).toMatchObject({ code: 'diagnostics-truncated', message: '31 more diagnostics omitted' });
+    });
+    test('a count of dropped diagnostics is exact just past the shape cap (51 found)', () => {
+        commitRecord();
+        const extra = Array.from({ length: 51 }, (_, i) => `extra${i}: 1`).join('\n');
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
+        expect(diagsOf(run(REL))[19]).toMatchObject({ code: 'diagnostics-truncated', message: '32 more diagnostics omitted' });
     });
     test('21 diagnostics are cut to 19 and the marker', () => {
         commitRecord();
@@ -620,7 +655,9 @@ describe('R4.5 output and exit codes', () => {
         expect(out.records).toHaveLength(51);
         expect(out.records[0].path).toBe('docs/changes/2026-10-17-r00.md');
         expect(out.records[49].path).toBe('docs/changes/2026-10-17-r49.md');
-        expect(out.records[50]).toMatchObject({ path: 'docs/changes', state: 'invalid', diagnostics: [{ code: 'too-many-records' }] });
+        expect(out.records[50]).toEqual({ path: 'docs/changes', state: 'invalid', diagnostics: [{ code: 'too-many-records', message: '53 records were added; only the first 50 were validated' }] });
+        expect(out.records.slice(0, 50).every((x) => x.diagnostics.every((d) => d.code !== 'too-many-records'))).toBe(true);
+        expect(run().code).toBe(2);
     });
     test('exactly 50 records are all validated with no too-many-records marker', () => {
         const files = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`docs/changes/2026-10-17-r${String(i).padStart(2, '0')}.md`, 'x']));
@@ -632,6 +669,7 @@ describe('R4.5 output and exit codes', () => {
     test('every message is one line of at most 300 units, in both formats', () => {
         commitRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix').replace('semver: minor', 'semver: patch'));
+        repo.git('commit', '-q', '-am', 'docs: edit the record');
         repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late');
         for (const d of diagsOf(run())) {
             expect(d.message.length).toBeLessThanOrEqual(300);
@@ -659,6 +697,147 @@ describe('R4.5 output and exit codes', () => {
         const ds = diagsOf(run(REL));
         expect(ds.find((d) => d.field === 'scope')?.message).toBe('scope is null but git derives "changes"');
         expect(ds.find((d) => d.field === 'breaking')?.message).toBe('breaking is true but git derives false');
+    });
+});
+
+describe('R4.5 operational failures under --json', () => {
+    const J = { json: true };
+    const cases: Array<[string, string, () => CommandResult]> = [
+        ['not-a-git-repo', 'not-a-git-repo', () => runChangeValidate(nonRepoDir(repo), undefined, J)],
+        ['base-unresolved (unknown --base)', 'base-unresolved', () => runChangeValidate(repo.root, undefined, { ...J, base: 'no-such-branch' })],
+        ['base-unresolved (no default base)', 'base-unresolved', () => { repo.git('branch', '-m', 'main', 'trunk'); return runChangeValidate(repo.root, undefined, J); }],
+        ['invalid-input (unsafe --base)', 'invalid-input', () => runChangeValidate(repo.root, undefined, { ...J, base: '--output=x' })],
+        ['invalid-input (hostile --base)', 'invalid-input', () => runChangeValidate(repo.root, undefined, { ...J, base: `\u001b[31m${'y\n'.repeat(400)}` })],
+        ['invalid-input (cwd)', 'invalid-input', () => runChangeValidate(bad(undefined), undefined, J)],
+        ['path-invalid', 'path-invalid', () => runChangeValidate(repo.root, '../x.md', J)],
+        ['path-invalid (hostile path)', 'path-invalid', () => runChangeValidate(repo.root, `docs/changes/\u001b${'z\n'.repeat(400)}.md`, J)],
+        ['git-failed', 'git-failed', () => { jest.spyOn(gitModule, 'headSha').mockReturnValue(null); return runChangeValidate(repo.root, undefined, J); }],
+        ['flag-invalid', 'flag-invalid', () => runChangeValidate(repo.root, undefined, bad({ ...J, base: 7 }))],
+        ['internal-error', 'internal-error', () => { jest.spyOn(gitModule, 'resolveBase').mockImplementation(() => { throw new RangeError('x'); }); return runChangeValidate(repo.root, undefined, J); }],
+    ];
+    test.each(cases)('%s prints one JSON line of the report shape on stdout and exits 2', (_name, code, call) => {
+        const r = call();
+        expect(r.code).toBe(2);
+        expect(r.stderr).toBe('');
+        expect(r.stdout.endsWith('\n')).toBe(true);
+        expect(r.stdout.slice(0, -1)).not.toContain('\n');
+        const out = JSON.parse(r.stdout) as Report;
+        expect(Object.keys(out).sort()).toEqual(['records', 'state']);
+        expect(out.state).toBe('invalid');
+        expect(out.records).toHaveLength(1);
+        expect(out.records[0]).toMatchObject({ path: 'docs/changes', state: 'invalid' });
+        expect(out.records[0].diagnostics).toHaveLength(1);
+        const d = out.records[0].diagnostics[0];
+        expect(d.code).toBe(code);
+        expect(d.message.length).toBeLessThanOrEqual(300);
+        expect(d.message).not.toMatch(rawUnsafe);
+        expect(d.field).toBeUndefined();
+    });
+    test('the base-unresolved remedy travels in the JSON message', () => {
+        const out = JSON.parse(runChangeValidate(repo.root, undefined, { ...J, base: 'nope' }).stdout) as Report;
+        expect(out.records[0].diagnostics[0].message).toContain('pass --base <ref>');
+    });
+    test('the untrusted --base is escaped in the JSON message (no raw escape character, bounded)', () => {
+        const out = JSON.parse(runChangeValidate(repo.root, undefined, { ...J, base: '\u001b[31mred' }).stdout) as Report;
+        expect(out.records[0].diagnostics[0].message).toContain('\\u001b');
+    });
+    test('without --json the failure stays on stderr with an empty stdout', () => {
+        const r = runChangeValidate(repo.root, undefined, { base: 'nope' });
+        expectFailure(r, 'base-unresolved');
+    });
+    test('json: false keeps the stderr form', () => {
+        expectFailure(runChangeValidate(repo.root, undefined, { json: false, base: 'nope' }), 'base-unresolved');
+    });
+});
+
+describe('R4.3 committed-record verdict (record-uncommitted)', () => {
+    test('a clean committed record has no record-uncommitted diagnostic', () => {
+        commitRecord();
+        expect(codesOf(run())).not.toContain('record-uncommitted');
+        expect(run().code).toBe(0);
+    });
+    test('an unstaged edit of a committed record is record-uncommitted', () => {
+        commitRecord();
+        edit(REL, (t) => `${t}\nmore\n`);
+        const r = run();
+        expect(r.code).toBe(2);
+        diag(r, 'record-uncommitted', undefined);
+    });
+    test('the verdict is not silently computed from the edit: an edit that keeps the record valid is still invalid', () => {
+        commitRecord();
+        edit(REL, (t) => `${t}\nmore\n`);
+        expect(run(REL).code).toBe(0); // the edited file on its own is fine ...
+        expect(report(run()).state).toBe('invalid'); // ... but the branch's committed record is not what was validated
+    });
+    test('a staged but uncommitted edit is record-uncommitted', () => {
+        commitRecord();
+        edit(REL, (t) => `${t}\nmore\n`);
+        repo.git('add', REL);
+        diag(run(), 'record-uncommitted', undefined);
+    });
+    test('an edit that also breaks the shape reports both', () => {
+        commitRecord();
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other'));
+        const c = codesOf(run());
+        expect(c).toContain('record-uncommitted');
+        expect(c).toContain('field-invalid');
+    });
+    test('uncommitted edit of another record does not taint a clean one', () => {
+        commitRecord('aaa');
+        commitRecord('bbb');
+        edit('docs/changes/2026-10-17-bbb.md', (t) => `${t}\nmore\n`);
+        const out = report(run());
+        expect(out.records.map((x) => x.state)).toEqual(['valid', 'invalid']);
+    });
+    test('an untracked unrelated file is not an uncommitted change of the record', () => {
+        commitRecord();
+        fs.writeFileSync(path.join(repo.root, 'docs', 'changes', 'notes.md'), 'x');
+        expect(run().code).toBe(0);
+    });
+    test('with an explicit path the working-tree file is validated and no record-uncommitted is reported', () => {
+        commitRecord();
+        edit(REL, (t) => `${t}\nmore\n`);
+        expect(codesOf(run(REL))).not.toContain('record-uncommitted');
+    });
+    test('a git failure while checking the record fails closed as record-uncommitted', () => {
+        commitRecord();
+        const real = gitModule.runGit;
+        jest.spyOn(gitModule, 'runGit').mockImplementation((cwd, args) => (args.includes('status') ? null : real(cwd, args)));
+        const r = run();
+        expect(r.code).toBe(2);
+        expect(diag(r, 'record-uncommitted', undefined).message).toContain('could not');
+    });
+    test('the check never refreshes the index (git --no-optional-locks)', () => {
+        commitRecord();
+        const calls: string[][] = [];
+        const real = gitModule.runGit;
+        jest.spyOn(gitModule, 'runGit').mockImplementation((cwd, args) => { calls.push(args); return real(cwd, args); });
+        run();
+        const status = calls.find((a) => a.includes('status'));
+        expect(status?.[0]).toBe('--no-optional-locks');
+        expect(status).toEqual(expect.arrayContaining(['--porcelain', '-z', '--untracked-files=no']));
+    });
+});
+
+describe('R4.3 shape first', () => {
+    test('an invalid-shape committed record with late code changes reports only the shape diagnostics', () => {
+        commitRecord();
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other').replace('type: feat', 'type: fix'));
+        repo.git('commit', '-q', '-am', 'docs: break the record');
+        repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
+        expect(codesOf(run(undefined, { strict: true }))).toEqual(['field-invalid']);
+    });
+    test('the same record with an explicit path reports only the shape diagnostics', () => {
+        commitRecord();
+        edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other'));
+        repo.git('commit', '-q', '-am', 'docs: break the record');
+        repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
+        expect(codesOf(run(REL, { strict: true }))).toEqual(['field-invalid']);
+    });
+    test('once the shape is fixed the other diagnostics appear', () => {
+        commitRecord();
+        repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
+        expect(codesOf(run())).toEqual(expect.arrayContaining(['code-changed-after-verification', 'derived-mismatch']));
     });
 });
 
@@ -803,5 +982,13 @@ describe('registerChangeCommand: validate', () => {
         await program().parseAsync(['node', 'awm', 'change', 'validate']);
         expect(process.exitCode).toBe(2);
         expect(err).toHaveBeenCalledWith(expect.stringMatching(/^[a-z-]+: /));
+    });
+    test('a cwd that is not accessible is reported as a JSON line under --json', async () => {
+        jest.spyOn(process, 'cwd').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); });
+        await program().parseAsync(['node', 'awm', 'change', 'validate', '--json']);
+        expect(process.exitCode).toBe(2);
+        expect(err).not.toHaveBeenCalled();
+        const printed = JSON.parse(String(out.mock.calls[0][0])) as Report;
+        expect(printed.records[0]).toMatchObject({ path: 'docs/changes', diagnostics: [{ code: 'not-a-git-repo' }] });
     });
 });

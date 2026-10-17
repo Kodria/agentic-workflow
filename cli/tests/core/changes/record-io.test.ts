@@ -136,8 +136,12 @@ describe('readRecord', () => {
     test('refuses invalid UTF-8 as record-invalid', () => {
         expect(readRecord(write(Buffer.from([0xff, 0xfe, 0x0a])), 'n.md')).toMatchObject({ ok: false, code: 'record-invalid' });
     });
-    test('refuses a record over the size limit as record-invalid', () => {
-        expect(readRecord(write('x'.repeat(MAX_RECORD_BYTES + 1)), 'n.md')).toMatchObject({ ok: false, code: 'record-invalid' });
+    test('refuses a record over the size limit as record-invalid, flagged tooLarge', () => {
+        expect(readRecord(write('x'.repeat(MAX_RECORD_BYTES + 1)), 'n.md')).toMatchObject({ ok: false, code: 'record-invalid', tooLarge: true });
+    });
+    test('only the size refusal is flagged tooLarge', () => {
+        expect(readRecord(write(Buffer.from([0xff, 0xfe, 0x0a])), 'n.md')).not.toHaveProperty('tooLarge');
+        expect(readRecord(scratch(), 'n.md')).not.toHaveProperty('tooLarge');
     });
     test('accepts a record of exactly the size limit', () => {
         expect(readRecord(write('x'.repeat(MAX_RECORD_BYTES)), 'n.md').ok).toBe(true);

@@ -16,15 +16,16 @@ type Obj = Record<string, unknown>;
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
 /** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */
-function finalize(list: Diagnostic[]): Diagnostic[] {
+function finalize(list: Diagnostic[]): { diagnostics: Diagnostic[]; omitted?: number } {
     const clean = list.map((d): Diagnostic => {
         const message = cleanText(d.message);
         const base: Diagnostic = { code: d.code, message: clipMessage(message) };
         return d.field === undefined ? base : { ...base, field: cleanText(d.field) };
     });
-    if (clean.length <= MAX_DIAGNOSTICS) return clean;
+    if (clean.length <= MAX_DIAGNOSTICS) return { diagnostics: clean };
     const kept = clean.slice(0, MAX_DIAGNOSTICS - 1);
-    return [...kept, { code: 'diagnostics-truncated', message: `${clean.length - kept.length} more diagnostics omitted` }];
+    const omitted = clean.length - kept.length;
+    return { diagnostics: [...kept, { code: 'diagnostics-truncated', message: `${omitted} more diagnostics omitted` }], omitted };
 }
 
 // ---- Value predicates ----
@@ -149,7 +150,8 @@ function checkProvenance(fm: Obj, out: Diagnostic[]): void {
 
 export interface ShapeOptions { root?: string }
 
-export function validateRecordShape(fileName: string, raw: string, opts: ShapeOptions = {}): { record?: ChangeRecord; diagnostics: Diagnostic[] } {
+/** `omitted` is the number of diagnostics the MAX_DIAGNOSTICS cap dropped (absent when none were); the last diagnostic is then `diagnostics-truncated`. */
+export function validateRecordShape(fileName: string, raw: string, opts: ShapeOptions = {}): { record?: ChangeRecord; diagnostics: Diagnostic[]; omitted?: number } {
     if (typeof fileName !== 'string' || typeof raw !== 'string') {
         return { diagnostics: [{ code: 'input-invalid', message: 'fileName and raw must both be strings' }] };
     }
@@ -159,7 +161,7 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
     const root = typeof opts?.root === 'string' ? opts.root : undefined;
     const out: Diagnostic[] = [];
     if (!isValidRecordFileName(fileName)) out.push({ code: 'name-invalid', message: `file name "${esc(fileName)}" must be YYYY-MM-DD-<slug>.md with a valid date and slug of at most 64 chars` });
-    const stop = (...more: Diagnostic[]) => ({ diagnostics: finalize([...out, ...more]) });
+    const stop = (...more: Diagnostic[]) => finalize([...out, ...more]);
 
     const split = splitRecord(raw);
     if (!split.ok) return stop(split.diagnostic);
@@ -185,5 +187,5 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
     checkProvenance(fm, out);
 
     if (out.length === 0) return { record: fm as unknown as ChangeRecord, diagnostics: [] };
-    return { diagnostics: finalize(out) };
+    return finalize(out);
 }
