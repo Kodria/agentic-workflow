@@ -2188,3 +2188,7 @@ R5.5 (`pr` from the true end of a long subject) and R5.7 (first-parent history r
 
 R5.7 now states that the no-lazy-fetch guarantee for partial clones requires git 2.43 or newer (the variable `GIT_NO_LAZY_FETCH` is ignored by older git); the partial-clone test is skipped, with a visible reason, on older git.
 
+### A14 — Final whole-implementation review (2026-10-17)
+
+The final review settled in the design: R2.2b (receipts only when a sensor ran and only for the repository root manifest; a self-ignoring `.awm/sensors/runs/.gitignore`; no pruning in this cycle), the `schema` key of the `changes list` JSON (R5.6) and the squash-merge limit of DD-6. The code-level findings of that review (shared bidi escaping in `escapeText`, scrubbing of inherited `GIT_DIR`/`GIT_INDEX_FILE`/`GIT_WORK_TREE`, one set of receipt predicates, strict blob decoding in `list`, dead exports, a `head-moved` code, `posixOnly` in receipt tests) are corrections inside the existing slices.
+
