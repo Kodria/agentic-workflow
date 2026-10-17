@@ -824,6 +824,21 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
             expect(written(stderr)).toBe('no sensor receipt written: the manifest is on the generic fallback while the tree has real stack indicators (pack drift)\n');
             expect(fs.existsSync(receiptsDir())).toBe(false);
         });
+        test('R2.2c a run in which every sensor was skipped certified nothing: no receipt, a line of its own, stdout and exit code unchanged', async () => {
+            const out = { overall: 'skipped', sensors: [{ name: 'lint', status: 'skipped', errors: [] }, { name: 'tsc', status: 'skipped', errors: [] }], manifestPath: rootManifest() };
+            (runSensors as jest.Mock).mockResolvedValue(out);
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf(out));
+            expect(process.exitCode).toBe(exitCodeForVerdict('skipped'));
+            expect(written(stderr)).toBe('no sensor receipt written: every sensor was skipped, so the run certified nothing\n');
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('R2.2c one sensor that ran among skipped ones is enough for a receipt', async () => {
+            (runSensors as jest.Mock).mockResolvedValue({ overall: 'pass', sensors: [{ name: 'lint', status: 'skipped', errors: [] }, { name: 'tsc', status: 'pass', errors: [] }], manifestPath: rootManifest() });
+            await runCli();
+            expect(written(stderr)).toBe('');
+            expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
+        });
         test('R2.2c an empty invalidEntries list does not withhold the receipt', async () => {
             (runSensors as jest.Mock).mockResolvedValue({ ...output, manifestPath: rootManifest(), invalidEntries: [] });
             await runCli();

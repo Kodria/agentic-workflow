@@ -226,6 +226,7 @@ export function finalizeRunReceipt(pre: Precondition, output: Pick<RunOutput, 'o
         if (pre === null || typeof pre !== 'object' || !pre.eligible) return finalizeReceipt(pre, output, deps);
         const withheld = (why: string): string => `no sensor receipt written: ${why}\n`;
         if (output === null || typeof output !== 'object' || !Array.isArray(output.sensors) || output.sensors.length === 0) return withheld('no sensor ran, so there is nothing to certify');
+        if (output.sensors.every((sensor) => sensor !== null && typeof sensor === 'object' && sensor.status === 'skipped')) return withheld('every sensor was skipped, so the run certified nothing');
         if (Array.isArray(output.invalidEntries) && output.invalidEntries.length > 0) return withheld('some sensor entries of the manifest were invalid and skipped, so the verdict does not cover it');
         if (output.packDrift !== undefined && output.packDrift !== null) return withheld('the manifest is on the generic fallback while the tree has real stack indicators (pack drift)');
         if (output.overall === 'not_certified') return withheld('the verdict was not certified (not_certified)');
