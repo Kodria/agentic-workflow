@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { writeFileAtomic } from '../atomic-file';
 import { cliVersion } from '../cli-version';
+import { sameExistingPath } from '../paths';
 import type { RunOutput } from '../../commands/sensors/types';
 import type { Overall, SensorStatus } from './types';
 import { esc, isCanonicalIso, isSingleLine } from './text-safety';
@@ -197,14 +198,10 @@ export function finalizeReceipt(pre: Precondition, output: Pick<RunOutput, 'over
     }
 }
 
-/** True when `manifestPath` is the repository root's `.awm/sensors.json` (both resolved with realpath.native; a missing file is not it). */
+/** True when `manifestPath` is the repository root's `.awm/sensors.json` (identity through realpath.native, see sameExistingPath; a missing file is not it). */
 export function isRootManifest(root: string, manifestPath: unknown): boolean {
     if (typeof root !== 'string' || root.length === 0 || typeof manifestPath !== 'string' || manifestPath.length === 0) return false;
-    try {
-        return fs.realpathSync.native(path.join(root, '.awm', 'sensors.json')) === fs.realpathSync.native(manifestPath);
-    } catch {
-        return false;
-    }
+    return sameExistingPath(path.join(root, '.awm', 'sensors.json'), manifestPath);
 }
 
 /**
