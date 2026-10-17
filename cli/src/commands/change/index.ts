@@ -22,6 +22,7 @@ export interface ChangeDeps { now?: () => Date }
 export interface NewOpts { base?: string; plan?: string; issue?: string; model?: string; session?: string; refresh?: boolean }
 
 const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
+const REMEDY_SPLIT = 'split the change into smaller ones';
 const MAX_PROVENANCE_VALUE = 200;
 const MAX_ISSUE_URL = 2048;
 const CREATION_ONLY_FLAGS = ['plan', 'issue', 'model', 'session'] as const;
@@ -126,6 +127,8 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     if (opts.issue !== undefined) links.issue = opts.issue;
     const content = renderSkeleton({ id, fields: derived.fields, verification, links, provenance: provenance(root, opts) });
     if (content === null) return fail('skeleton-invalid', 'the record skeleton could not be rendered');
+    // R3.4: a change touching thousands of directories (or a huge receipt) outgrows the record bound: say so, instead of a validation code.
+    if (Buffer.byteLength(content, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `the generated record would exceed ${MAX_RECORD_BYTES} bytes`, REMEDY_SPLIT);
     // Backstop: the only thing wrong with a skeleton may be its pending markers.
     const problem = validateRecordShape(`${id}.md`, content, { root }).diagnostics.find((d) => d.code !== 'pending-content');
     if (problem) return fail('skeleton-invalid', `the generated record failed validation: ${esc(problem.code)}${problem.field ? ` (${esc(problem.field)})` : ''}`);
@@ -151,7 +154,8 @@ function refresh({ dir, existing, slug, fields, verification, head, root }: Refr
     const current = readRecord(target, name);
     if (!current.ok) return fail(current.code, current.message);
     const next = refreshDerived(current.text, fields, verification);
-    if (next === null || Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-invalid', `${esc(name)} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
+    if (next !== null && Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-too-large', `${esc(name)} would exceed ${MAX_RECORD_BYTES} bytes once refreshed`, REMEDY_SPLIT);
+    if (next === null) return fail('record-invalid', `${esc(name)} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
     const moved = headMovedFailure(root, head);
     if (moved) return failed(moved);
     // Someone else may have edited (or replaced) the record since it was read: their version wins, nothing is written.

@@ -14,6 +14,8 @@ export interface TestRepo {
     /** The throwaway HOME directory (also a convenient parent for a directory that is not a repository). */
     home: string;
     git: (...args: string[]) => string;
+    /** Runs git with `input` on its standard input (explicit identity and config isolation, like `git`). */
+    gitInput: (input: string, ...args: string[]) => string;
     /** Writes `files`, commits them and returns the new HEAD. `date` (an ISO instant) becomes the author and committer date; omitted, git uses the clock. */
     commit: (files: Record<string, string>, message: string, date?: string) => string;
     /** Runs git with the author and committer date set to `date` (an ISO instant): merges and annotated tags carry a date too. */
@@ -22,7 +24,7 @@ export interface TestRepo {
 }
 
 /** The git runner of a repository: identity and config isolation in an explicit environment, optional explicit dates. */
-function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitAt' | 'commit'> {
+function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitInput' | 'gitAt' | 'commit'> {
     const env = {
         ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
         GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
@@ -34,6 +36,7 @@ function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitAt' | 'c
         return { GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
     };
     const git = (...args: string[]) => run({}, args);
+    const gitInput = (input: string, ...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env, input }).trim();
     const gitAt = (date: string, ...args: string[]) => run(dates(date), args);
     const commit = (files: Record<string, string>, message: string, date?: string): string => {
         for (const [rel, content] of Object.entries(files)) {
@@ -45,7 +48,7 @@ function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitAt' | 'c
         run(date === undefined ? {} : dates(date), ['commit', '-q', '-m', message]);
         return git('rev-parse', 'HEAD');
     };
-    return { git, gitAt, commit };
+    return { git, gitInput, gitAt, commit };
 }
 
 /** Isolated repo: HOME/AWM_HOME point at a tmpdir; never touches the real ~/.awm. */
@@ -54,7 +57,7 @@ export function makeRepo(): TestRepo {
     const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-')));
     Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
-    const { git, gitAt, commit } = gitApi(root, home);
+    const { git, gitInput, gitAt, commit } = gitApi(root, home);
     const cleanup = () => {
         for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
         fs.rmSync(root, { recursive: true, force: true });
@@ -67,7 +70,7 @@ export function makeRepo(): TestRepo {
         cleanup();
         throw error;
     }
-    return { root, home, git, gitAt, commit, cleanup };
+    return { root, home, git, gitInput, gitAt, commit, cleanup };
 }
 
 /** The version of the installed git as [major, minor], or null when it cannot be read. */
@@ -97,8 +100,8 @@ export const posixOnly: typeof test = process.platform === 'win32' ? (test.skip 
 export function cloneRepo(template: TestRepo): TestRepo {
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
     fs.cpSync(template.root, root, { recursive: true });
-    const { git, gitAt, commit } = gitApi(root, template.home);
-    return { root, home: template.home, git, gitAt, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+    const { git, gitInput, gitAt, commit } = gitApi(root, template.home);
+    return { root, home: template.home, git, gitInput, gitAt, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
 /**
@@ -130,6 +133,27 @@ export function withEnv<T>(vars: Record<string, string>, fn: () => T): T {
     const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
     Object.assign(process.env, vars);
     try { return fn(); } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+}
+
+export interface ImportedCommit { message: string; files: Record<string, string>; /** ISO instant used as author and committer date. */ date: string }
+
+/**
+ * Adds many commits on top of the current branch with ONE `git fast-import` process (instead of one add + commit per commit), then
+ * resets the working tree to the new tip. Explicit identity and committer dates; the history is what `repo.commit` would build.
+ */
+export function importCommits(repo: TestRepo, commits: ImportedCommit[]): void {
+    const ref = `refs/heads/${repo.git('symbolic-ref', '--short', 'HEAD')}`;
+    const parts: string[] = [];
+    commits.forEach((c, i) => {
+        const when = `${Math.floor(Date.parse(c.date) / 1000)} +0000`;
+        const bytes = (text: string): string => `data ${Buffer.byteLength(text)}\n${text}\n`;
+        parts.push(`commit ${ref}\nauthor t <t@t> ${when}\ncommitter t <t@t> ${when}\n${bytes(c.message)}`);
+        if (i === 0) parts.push(`from ${ref}^0\n`);
+        for (const [rel, content] of Object.entries(c.files)) parts.push(`M 100644 inline ${rel}\n${bytes(content)}`);
+        parts.push('\n');
+    });
+    repo.gitInput(parts.join(''), 'fast-import', '--quiet');
+    repo.git('reset', '-q', '--hard');
 }
 
 /** Checks out `feat/x` and returns the commit it forked from (main). */

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
 import childProcess from 'child_process';
-import { cloneRepo, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
+import { cloneRepo, importCommits, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import * as ledgerStore from '../../../src/core/ledger/store';
@@ -238,14 +238,23 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
     });
 });
 
-describe('awm change new: generated record is checked before it is written', () => {
+describe('awm change new: generated record is checked before it is written (R3.4 size bound)', () => {
     freshRepo();
-    test('a skeleton over the record size limit is skeleton-invalid and writes nothing', () => {
+    test('R3.4 a receipt that makes the record exceed 64 KiB fails with record-too-large and a remedy, and writes nothing', () => {
         const sensors = Array.from({ length: 700 }, (_, i) => ({ name: `sensor-${String(i).padStart(4, '0')}-${'x'.repeat(100)}`, status: 'pass' as const, errors: [] }));
         writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors } as never }));
         const r = run('change-record');
-        expectFailure(r, 'skeleton-invalid');
-        expect(r.stderr).toContain('record-too-large');
+        expectFailure(r, 'record-too-large', 'split the change into smaller ones');
+        expect(recordFiles()).toEqual([]);
+    });
+    test('R3.4 a change touching thousands of directories fails with record-too-large (not a cryptic skeleton-invalid) and writes nothing', () => {
+        // One fast-import commit adds a file in each of 4000 vendor directories: `modules` alone is far over 64 KiB.
+        const files = Object.fromEntries(Array.from({ length: 4000 }, (_, i) => [`vendor/package-${String(i).padStart(5, '0')}/index.js`, '1']));
+        importCommits(repo, [{ message: 'feat(vendor): import vendored packages', files, date: '2026-10-17T10:00:00Z' }]);
+        receiptForHead();
+        const r = run('change-record');
+        expectFailure(r, 'record-too-large', 'split the change into smaller ones');
+        expect(r.stderr).not.toContain('skeleton-invalid');
         expect(recordFiles()).toEqual([]);
     });
 });
@@ -787,6 +796,27 @@ describe('awm change new --refresh (R3.11)', () => {
         receiptForHead();
         expectFailure(run('change-record', { refresh: true }), 'record-invalid');
         expect(read()).toBe(broken);
+    });
+    test('R3.4 a refresh that would push the record over 64 KiB is record-too-large with a remedy, and the record is untouched', () => {
+        receiptForHead();
+        run('change-record');
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
+        const files = Object.fromEntries(Array.from({ length: 4000 }, (_, i) => [`vendor/package-${String(i).padStart(5, '0')}/index.js`, '1']));
+        importCommits(repo, [{ message: 'feat(vendor): import vendored packages', files, date: '2026-10-17T10:30:00Z' }]);
+        receiptForHead();
+        const before = read();
+        expectFailure(run('change-record', { refresh: true }), 'record-too-large', 'split the change into smaller ones');
+        expect(read()).toBe(before);
+    });
+    test('a record already over 64 KiB on disk is record-invalid and untouched (it cannot be read for a rewrite)', () => {
+        receiptForHead();
+        run('change-record');
+        fs.writeFileSync(file(), `${read()}\n${'x'.repeat(70 * 1024)}\n`);
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): huge');
+        receiptForHead();
+        const before = read();
+        expectFailure(run('change-record', { refresh: true }), 'record-invalid');
+        expect(read()).toBe(before);
     });
     test('a record that is not valid UTF-8 is record-invalid and untouched', () => {
         receiptForHead();

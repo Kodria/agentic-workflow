@@ -150,6 +150,12 @@ function trimSlashes(s: string): string {
 /** `name` without one trailing `.git`. */
 const withoutDotGit = (s: string): string => (s.endsWith('.git') ? s.slice(0, -4) : s);
 
+/** `text` up to the first `?` or `#`: a query or fragment of a remote can carry a token, and is not part of the repository name. */
+function withoutQueryAndFragment(text: string): string {
+    const cut = text.search(/[?#]/);
+    return cut < 0 ? text : text.slice(0, cut);
+}
+
 /** `user@host:path` (scp-style); null when the text is not of that form. The host is lowercased like in the URL form. */
 function scpIdentity(url: string): string | null {
     const at = url.indexOf('@');
@@ -158,7 +164,7 @@ function scpIdentity(url: string): string | null {
     if (colon < 0) return null;
     const host = url.slice(at + 1, colon);
     if (host === '' || host.includes('/')) return null;
-    const repo = withoutDotGit(trimSlashes(url.slice(colon + 1)));
+    const repo = withoutDotGit(trimSlashes(withoutQueryAndFragment(url.slice(colon + 1))));
     return repo === '' ? null : `${host.toLowerCase()}/${repo}`;
 }
 

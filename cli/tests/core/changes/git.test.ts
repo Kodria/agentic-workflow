@@ -365,6 +365,19 @@ describe('git functions in a repository', () => {
         test('strips credentials in the scp-style form too', () => {
             expect(identity('user:secret@Host.example:o/r')).toBe('host.example/o/r');
         });
+        test.each([
+            ['an scp-style remote with a ?query', 'git@host.example:o/r?token=SECRET'],
+            ['an scp-style remote with a #fragment', 'git@host.example:o/r#SECRET'],
+            ['an scp-style remote with .git then ?query', 'git@host.example:o/r.git?token=SECRET'],
+            ['an scp-style remote with a query and a fragment', 'git@host.example:o/r?a=1#SECRET'],
+            ['an https remote with a ?query', 'https://host.example/o/r?token=SECRET'],
+            ['an https remote with a #fragment', 'https://host.example/o/r#SECRET'],
+            ['an https remote with credentials, .git and a query', 'https://u:SECRET@host.example/o/r.git?token=SECRET'],
+        ])('R5.5 %s: the identity holds host/owner/name and no query or fragment', (_label, url) => {
+            const id = identity(url);
+            expect(id).toBe('host.example/o/r');
+            expect(id).not.toContain('SECRET');
+        });
         test('an over-long remote url is null and is read in linear time', () => {
             fs.appendFileSync(path.join(repo.root, '.git', 'config'), `[remote "origin"]\n\turl = https://h.example/${'/'.repeat(100000)}x\n`);
             const start = performance.now();
