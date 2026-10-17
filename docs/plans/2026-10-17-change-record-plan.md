@@ -2196,3 +2196,7 @@ The final review settled in the design: R2.2b (receipts only when a sensor ran a
 
 QA (Track A fidelity, Track B robustness, logic and tests) settled in the design: R1.1 (malformed names are `name-invalid` candidates), R1.4/R1.5 links.issue without credentials and 40|64-hex commit ids, R2.2c (no receipt when manifest entries were dropped; sorted-pairs digest), R3.4 (`record-too-large` for a change touching too many directories), R5.4 (adoption by a record-shaped file), R5.5 (annotated tags first; query/fragment stripped from the repo identity). The test findings (opt-out range, hasOptOut log safety, type pick order, registration on the real program, boundaries, CRLF, receipt write hardening, win32 skips, suite cost, wall-clock bounds) are test work inside the existing slices.
 
+### A16 — QA revalidation (2026-10-17)
+
+Eight minor findings of the revalidation settle in the design: R1.4 (query and fragment of an issue URL are not inspected), R2.2c (all-skipped runs get no receipt), R3.4 (the remedy names the cause), R5.4 (wording of the not-adopted notice), R5.5 (500 earliest tags per entry; a scp host segment with `?`, `#` or `@` makes `repo` null). The rest are test work (boundary of the 64 KiB check, a non-vacuous linear-time test for the URL trimming).
+
