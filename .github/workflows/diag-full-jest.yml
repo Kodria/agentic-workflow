@@ -1,0 +1,112 @@
+# TEMPORARY diagnostic workflow for PR #219 (Change Record). NOT meant to be merged: delete before the PR is marked green.
+# ci.yml runs `jest --runInBand --bail` (pinned by tests/structural/native-release-artifacts.test.ts), so every matrix leg stops at the
+# first failing suite and hides the rest. This workflow builds exactly like ci.yml but runs the whole suite WITHOUT --bail and prints
+# one compact list of every failing suite/test per platform.
+name: diag-full-jest
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diag-full-jest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: win32-x64
+          - os: windows-11-arm
+            target: win32-arm64
+          - os: macos-14
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: cli
+        run: npm ci
+
+      - name: Build
+        working-directory: cli
+        run: npm run native:build && npm run build
+
+      - name: Build test-only native addon
+        working-directory: cli
+        run: npm run native:test-build
+
+      - name: Checkout baseline registry docs tip for RF-5.1 contract
+        uses: actions/checkout@v4
+        with:
+          repository: Kodria/awm-baseline-registry
+          ref: dc2e0f7128ed17242bbbb3077ac145e231c3abc5
+          path: awm-baseline-registry-docs
+
+      - name: Checkout published sensor registry
+        uses: actions/checkout@v4
+        with:
+          repository: Kodria/awm-baseline-registry
+          ref: v2.0.1
+          path: awm-baseline-registry
+
+      - name: Full suite, no bail
+        continue-on-error: true
+        working-directory: cli
+        env:
+          AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
+        run: npx jest --runInBand --json --outputFile=jest-results.json
+
+      - name: Every failing suite and test
+        if: always()
+        working-directory: cli
+        shell: node {0}
+        run: |
+          const r = require('./jest-results.json');
+          const rel = (n) => n.split(/[\\/]cli[\\/]/).pop();
+          for (const s of r.testResults) {
+            if (s.status !== 'failed') continue;
+            console.log('FAIL', rel(s.name));
+            for (const t of s.assertionResults) {
+              if (t.status === 'failed') console.log('  x', t.fullName, '::', String(t.failureMessages[0] || '').split('\n').slice(0, 3).join(' | ').slice(0, 400));
+            }
+            if (!s.assertionResults.length) console.log('  suite error:', String(s.message || '').split('\n').slice(0, 8).join(' | ').slice(0, 600));
+          }
+          console.log('TOTALS failedTests=' + r.numFailedTests + ' passedTests=' + r.numPassedTests + ' failedSuites=' + r.numFailedTestSuites + ' totalSuites=' + r.numTotalTestSuites);
+
+      - name: Install published R3 consumer
+        if: always()
+        continue-on-error: true
+        env:
+          NPM_CONFIG_FETCH_RETRIES: '4'
+        run: npm install --prefix published-consumer --no-audit --no-fund agentic-workflow-manager@8.1.2
+
+      - name: Accept published R3 consumer
+        if: always()
+        continue-on-error: true
+        working-directory: cli
+        env:
+          AWM_PUBLISHED_CLI_ROOT: ${{ github.workspace }}/published-consumer/node_modules/agentic-workflow-manager
+          AWM_PUBLISHED_CLI_VERSION: 8.1.2
+          AWM_PUBLISHED_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry
+        run: npx jest tests/integration/published-r3-acceptance.e2e.test.ts --runInBand
+
+      - name: Verify immutable published doctor provenance guard
+        if: always()
+        continue-on-error: true
+        working-directory: cli
+        run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand
