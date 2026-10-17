@@ -2103,3 +2103,15 @@ The S1 specification review found defects in the S1 code and wording as original
 ### A2 — S1 code-quality review (2026-10-17)
 
 The S1 code-quality review found that untrusted-text handling was ad hoc per field. Behavior now required (design R1.4 text-safety bullet and R1.8): single-line fields and multi-line fields have the control-character rules stated in the design; `validateRecordShape` never throws (`input-invalid`); diagnostic `message`/`field` are single-line with escaped attacker text; at most 50 diagnostics (`diagnostics-truncated`). The implementation unifies the character classes in one shared constant, splits `validateRecordShape` into per-section validators, and adds direct unit tests for `splitRecord`, `loadFrontmatter`, `isValidSlug` plus hostile-input tests. Corrections to earlier text: S1 has 11+ tests (the count in the original slice text and in A1 is stale; the suite now has more).
+
+### A3 — Cross-cutting conventions learned in S1 (apply to S2–S7)
+
+S1 needed ten specification rounds and four quality rounds, almost all on untrusted-text handling. S1 is complete and approved at `ddafe4b`. The conventions below bind S2–S7; where slice code above conflicts with them, the conventions win.
+
+1. **Every exported function validates its input types and never throws on untrusted input.** It returns a diagnostic, `false`, a placeholder, or a `CommandResult` with code 2.
+2. **Untrusted text never appears raw in a message.** File names, YAML keys and values, git output (branch names, subjects, tag names, paths), remote URLs, sensor names, flag values: all go through `esc()` / `escapeText` from `cli/src/core/changes/text-safety.ts` (single-line, bounded, surrogate-safe) before interpolation. This replaces any raw `${...}` interpolation or sole use of `sanitizeDiagnosticText` in the slice code.
+3. **Reuse, do not reimplement.** Text rules come from `text-safety.ts` (`isSingleLine`, `isSafeMultiline`, `sliceNoSplit`, `esc`, `clipMessage`); record shape comes from `validateRecordShape`; parsing from `splitRecord` / `loadFrontmatter`.
+4. **Tests are mutation-resistant.** One behavior per test; assert the diagnostic `code` and `field`; every validation branch has a failing-input test and a passing-input test. The implementer verifies at least the main branch checks by temporarily mutating them, seeing a test fail, and restoring them (never committed).
+5. **Character limits count code points**, never UTF-16 units.
+6. **A diagnostic message is at most 300 UTF-16 units, single-line**, and a list of diagnostics has at most 50 entries.
+
