@@ -140,7 +140,7 @@ export function headSha(root: string): string | null {
 }
 
 /** Removes any run of `/` from the start and the end of `s` (index scan: linear, unlike /\/+$/). */
-function trimSlashes(s: string): string {
+export function trimSlashes(s: string): string {
     let start = 0; let end = s.length;
     while (start < end && s[start] === '/') start++;
     while (end > start && s[end - 1] === '/') end--;
@@ -163,7 +163,8 @@ function scpIdentity(url: string): string | null {
     const colon = url.indexOf(':', at + 1);
     if (colon < 0) return null;
     const host = url.slice(at + 1, colon);
-    if (host === '' || host.includes('/')) return null;
+    // A `?`, `#` or `@` in the host segment can only be a token or a malformed remote: nothing of it is ever echoed.
+    if (host === '' || /[/?#@]/.test(host)) return null;
     const repo = withoutDotGit(trimSlashes(withoutQueryAndFragment(url.slice(colon + 1))));
     return repo === '' ? null : `${host.toLowerCase()}/${repo}`;
 }

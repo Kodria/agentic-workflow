@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { bad, expectLinearScaling, branchOff, makeHiddenSubmodule, cloneRepo, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
-import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, identityFromUrl, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, identityFromUrl, repoIdentity, runGit, trimSlashes } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
@@ -385,11 +385,28 @@ describe('git functions in a repository', () => {
             fs.appendFileSync(path.join(repo.root, '.git', 'config'), `[remote "origin"]\n\turl = https://h.example/${'/'.repeat(100000)}x\n`);
             expect(repoIdentity(repo.root)).toBeNull();
         });
-        test('identityFromUrl: a hostile url is rejected without scanning it more than once, whatever its length', () => {
+        test('identityFromUrl: a hostile url is rejected, whatever its length', () => {
             expect(identityFromUrl(`https://h.example/${'/'.repeat(100000)}x`)).toBeNull();
             expect(identityFromUrl(`git@h.example:${'/'.repeat(100000)}x`)).toBeNull();
             expect(identityFromUrl(`https://h.example/${'/'.repeat(1000)}o/r`)).toBe('h.example/o/r');
-            expectLinearScaling((n) => { identityFromUrl(`https://h.example/${'/'.repeat(n)}x`); identityFromUrl(`git@h.example:${'/'.repeat(n)}x`); }, 100_000);
+        });
+        // The 2048-unit cap returns before any scan, so the url-level tests above cannot show that the scan is linear: the helper
+        // that does the scanning is measured on its own, on inputs far beyond what the cap lets through.
+        test('trimSlashes removes the runs of slashes at both ends and scales linearly', () => {
+            expect(trimSlashes('///a/b///')).toBe('a/b');
+            expect(trimSlashes('////')).toBe('');
+            expect(trimSlashes('a')).toBe('a');
+            expect(trimSlashes(`x${'/'.repeat(5000)}y`)).toBe(`x${'/'.repeat(5000)}y`);
+            expectLinearScaling((n) => { trimSlashes(`x${'/'.repeat(n)}y`); trimSlashes(`${'/'.repeat(n)}x`); trimSlashes(`x${'/'.repeat(n)}`); }, 20_000);
+        });
+        test.each([
+            ['a ? in the scp host', 'git@github.com?token=abc:o/r'],
+            ['a # in the scp host', 'git@github.com#tok:o/r'],
+            ['a second @ in the scp host', 'git@evil@github.com:o/r'],
+            ['credentials with a # in the host', 'user:pw@host#frag:o/r'],
+        ])('R5.5 %s makes the identity null (a token must never reach repo)', (_label, url) => {
+            expect(identityFromUrl(url)).toBeNull();
+            expect(identity(url)).toBeNull();
         });
         test('is null for a non-string root or outside a repository', () => {
             expect(repoIdentity(bad(null))).toBeNull();
