@@ -199,20 +199,21 @@ export function isRootManifest(root: string, manifestPath: unknown): boolean {
 }
 
 /**
- * R2.2b: the receipt of a `sensors run`. On top of finalizeReceipt: nothing is written when no sensor ran (an empty list or
- * `not_certified`, which is also what an absent or invalid manifest gives), nor when the manifest that ran is not the repository
- * root's (a receipt is keyed by commit only, so the manifests of a monorepo's packages would overwrite each other). Returns ''
- * on success, or one stderr line. Never throws.
+ * R2.2b/R2.2c: the receipt of a `sensors run`. On top of finalizeReceipt, a receipt certifies the WHOLE declared sensor set or
+ * nothing: none is written when no sensor ran (an empty list), when the run dropped part of the manifest (schema-invalid entries,
+ * pack drift), when the verdict is `not_certified`, nor when the manifest that ran is not the repository root's (a receipt is
+ * keyed by commit only, so the manifests of a monorepo's packages would overwrite each other). Returns '' on success, or one
+ * stderr line that says which case applies. Never throws.
  */
-export function finalizeRunReceipt(pre: Precondition, output: Pick<RunOutput, 'overall' | 'sensors' | 'manifestPath'>, deps: { now?: () => Date; version?: () => string } = {}): string {
+export function finalizeRunReceipt(pre: Precondition, output: Pick<RunOutput, 'overall' | 'sensors' | 'manifestPath' | 'invalidEntries' | 'packDrift'>, deps: { now?: () => Date; version?: () => string } = {}): string {
     try {
         if (pre === null || typeof pre !== 'object' || !pre.eligible) return finalizeReceipt(pre, output, deps);
-        if (output === null || typeof output !== 'object' || !Array.isArray(output.sensors) || output.sensors.length === 0 || output.overall === 'not_certified') {
-            return 'no sensor receipt written: no sensor ran, so there is nothing to certify\n';
-        }
-        if (!isRootManifest(pre.root, output.manifestPath)) {
-            return "no sensor receipt written: the manifest that ran is not the repository root's .awm/sensors.json (a receipt certifies a whole commit)\n";
-        }
+        const withheld = (why: string): string => `no sensor receipt written: ${why}\n`;
+        if (output === null || typeof output !== 'object' || !Array.isArray(output.sensors) || output.sensors.length === 0) return withheld('no sensor ran, so there is nothing to certify');
+        if (Array.isArray(output.invalidEntries) && output.invalidEntries.length > 0) return withheld('some sensor entries of the manifest were invalid and skipped, so the verdict does not cover it');
+        if (output.packDrift !== undefined && output.packDrift !== null) return withheld('the manifest is on the generic fallback while the tree has real stack indicators (pack drift)');
+        if (output.overall === 'not_certified') return withheld('the verdict was not certified (not_certified)');
+        if (!isRootManifest(pre.root, output.manifestPath)) return withheld("the manifest that ran is not the repository root's .awm/sensors.json (a receipt certifies a whole commit)");
         return finalizeReceipt(pre, output, deps);
     } catch (error) {
         return `no sensor receipt written: ${esc(error instanceof Error ? error.message : String(error))}\n`;

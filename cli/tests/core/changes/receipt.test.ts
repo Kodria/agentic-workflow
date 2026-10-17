@@ -742,7 +742,6 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         test.each([
             ['an empty sensors list with a pass verdict', { overall: 'pass', sensors: [] }],
             ['not_certified with an empty list (absent or invalid manifest)', { overall: 'not_certified', sensors: [], mode: 'invalid', reason: 'manifest-malformed' }],
-            ['not_certified although sensors are listed (legacy manifest)', { overall: 'not_certified', sensors: [{ name: 'lint', status: 'pass', errors: [] }] }],
         ])('%s: no receipt, one stderr line, stdout and exit code unchanged', async (_n, partial) => {
             const out = { ...partial, manifestPath: rootManifest() };
             (runSensors as jest.Mock).mockResolvedValue(out);
@@ -751,6 +750,38 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
             expect(process.exitCode).toBe(exitCodeForVerdict(out.overall as never));
             expect(written(stderr)).toBe('no sensor receipt written: no sensor ran, so there is nothing to certify\n');
             expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('R2.2c a not_certified verdict that did run sensors is reported as not certified, not as "no sensor ran"', async () => {
+            const out = { overall: 'not_certified', sensors: [{ name: 'lint', status: 'pass', errors: [] }], manifestPath: rootManifest(), reason: 'legacy-v1' };
+            (runSensors as jest.Mock).mockResolvedValue(out);
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf(out));
+            expect(process.exitCode).toBe(exitCodeForVerdict('not_certified'));
+            expect(written(stderr)).toBe('no sensor receipt written: the verdict was not certified (not_certified)\n');
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('R2.2c schema-invalid sensor entries that were dropped withhold the receipt: it would list only the entries that ran', async () => {
+            const out = { ...output, manifestPath: rootManifest(), invalidEntries: [{ name: 'security', reason: 'command is required' }] };
+            (runSensors as jest.Mock).mockResolvedValue(out);
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf(out));
+            expect(process.exitCode).toBe(0);
+            expect(written(stderr)).toBe('no sensor receipt written: some sensor entries of the manifest were invalid and skipped, so the verdict does not cover it\n');
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('R2.2c pack drift withholds the receipt', async () => {
+            const out = { ...output, manifestPath: rootManifest(), packDrift: { manifest: 'generic', detected: 'js-ts', remedy: 'run awm sensors init' } };
+            (runSensors as jest.Mock).mockResolvedValue(out);
+            await runCli();
+            expect(written(stdout)).toBe(stdoutOf(out));
+            expect(written(stderr)).toBe('no sensor receipt written: the manifest is on the generic fallback while the tree has real stack indicators (pack drift)\n');
+            expect(fs.existsSync(receiptsDir())).toBe(false);
+        });
+        test('R2.2c an empty invalidEntries list does not withhold the receipt', async () => {
+            (runSensors as jest.Mock).mockResolvedValue({ ...output, manifestPath: rootManifest(), invalidEntries: [] });
+            await runCli();
+            expect(written(stderr)).toBe('');
+            expect(receiptNames()).toEqual(['.gitignore', `${g('rev-parse', 'HEAD')}.json`]);
         });
         test('an output that does not say which manifest ran certifies nothing (fail closed)', async () => {
             (runSensors as jest.Mock).mockResolvedValue({ overall: 'pass', sensors: output.sensors });
