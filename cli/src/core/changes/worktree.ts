@@ -1,6 +1,6 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { GIT_TIMEOUT_MS, gitChildEnv } from './git-env';
+import { gitSpawnOptions } from './git-env';
 import { isSafeRelativePath } from './text-safety';
 
 /** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
@@ -11,7 +11,6 @@ export const REASON_GIT_FAILED = 'git command failed or timed out';
 
 const MAX_EXTRA_EXCLUDES = 64;
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: GIT_TIMEOUT_MS };
 
 export type GitState =
     | { kind: 'ok'; root: string; commit: string; dirty: boolean }
@@ -35,14 +34,14 @@ export function gitState(cwd: string, untracked: boolean, extraExcludes: readonl
     if (!Array.isArray(extraExcludes) || extraExcludes.length > MAX_EXTRA_EXCLUDES || !extraExcludes.every(isSafeRelativePath)) return { kind: 'failed' };
     let root: string; let commit: string;
     try {
-        root = path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd, env: gitChildEnv() }).trim());
-        commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root, env: gitChildEnv() }).trim();
+        root = path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], gitSpawnOptions(cwd, { stderr: 'ignore' })).trim());
+        commit = execFileSync('git', ['rev-parse', 'HEAD'], gitSpawnOptions(root, { stderr: 'ignore' })).trim();
     } catch (error) {
         return gitFailure(error);
     }
     try {
-        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
-        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root, env: gitChildEnv(), maxBuffer: MAX_GIT_OUTPUT });
+        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--ignore-submodules=none', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
+        const status = execFileSync('git', args, gitSpawnOptions(root, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT }));
         return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
     } catch {
         return { kind: 'failed' };

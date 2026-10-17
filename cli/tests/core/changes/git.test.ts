@@ -44,6 +44,15 @@ describe('git functions in a repository', () => {
     test('returns the output of a successful command', () => {
         expect(runGit(repo.root, ['rev-parse', '--is-inside-work-tree'])?.trim()).toBe('true');
     });
+    test('reads output above Node\'s 1 MB default and gives up (null) above 16 MB', () => {
+        const blob = (megabytes: number) => {
+            const file = path.join(repo.home, `blob-${megabytes}`);
+            fs.writeFileSync(file, 'x'.repeat(megabytes * 1024 * 1024));
+            return repo.git('hash-object', '-w', file);
+        };
+        expect(runGit(repo.root, ['cat-file', 'blob', blob(2)])?.length).toBe(2 * 1024 * 1024);
+        expect(runGit(repo.root, ['cat-file', 'blob', blob(17)])).toBeNull();
+    });
     test('returns null when git fails', () => {
         expect(runGit(repo.root, ['rev-parse', '--verify', '--quiet', 'nope-ref'])).toBeNull();
     });
@@ -203,6 +212,23 @@ describe('git functions in a repository', () => {
         fs.mkdirSync(path.join(repo.root, 'docs/changes'), { recursive: true });
         fs.writeFileSync(path.join(repo.root, 'docs/changes/r.md'), 'r');
         expect(isDirtyOutside(repo.root, ['docs/changes'])).toBe(false);
+    });
+    test('dirtiness: a submodule checked out at another commit is dirty even with ignore=all and diff.ignoreSubmodules=all', () => {
+        const sm = path.join(repo.root, 'vendor', 'sm');
+        fs.mkdirSync(sm, { recursive: true });
+        const inSm = (...args: string[]) => repo.git('-C', sm, ...args);
+        const commitInSm = (name: string): string => { fs.writeFileSync(path.join(sm, name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
+        inSm('init', '-q', '-b', 'main');
+        const first = commitInSm('one');
+        fs.writeFileSync(path.join(repo.root, '.gitmodules'), '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n');
+        repo.git('config', 'diff.ignoreSubmodules', 'all');
+        repo.git('add', '.gitmodules');
+        repo.git('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
+        repo.git('commit', '-q', '-m', 'chore: add submodule');
+        expect(isDirtyOutside(repo.root, [])).toBe(false);
+        commitInSm('two');
+        expect(isDirtyOutside(repo.root, [])).toBe(true);
+        expect(isDirtyOutside(repo.root, ['docs/changes'])).toBe(true);
     });
     test('dirtiness is reported (fail closed) when the state cannot be read or the excludes are unsafe', () => {
         expect(isDirtyOutside(nonRepoDir(), [])).toBe(true);

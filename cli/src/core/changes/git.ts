@@ -1,6 +1,6 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { GIT_TIMEOUT_MS, gitChildEnv } from './git-env';
+import { gitSpawnOptions } from './git-env';
 import { isSingleLine } from './text-safety';
 import { gitState } from './worktree';
 
@@ -8,7 +8,7 @@ import { gitState } from './worktree';
 // None of them throws: git failures and invalid input come back as null / false / true (fail closed) so that callers
 // decide how to report them. Git runs without a shell, and a revision never reaches it unless it passed a whitelist.
 
-const OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 };
+const MAX_OUTPUT = 16 * 1024 * 1024;
 const SAFE_REF = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
 /** A full commit id (SHA-1 or SHA-256). */
 export const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
@@ -29,7 +29,7 @@ export function runGit(cwd: string, args: string[]): string | null {
     if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
     if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
     try {
-        return execFileSync('git', args, { ...OPTS, cwd, env: gitChildEnv() });
+        return execFileSync('git', args, gitSpawnOptions(cwd, { maxBuffer: MAX_OUTPUT }));
     } catch {
         return null;
     }
@@ -74,10 +74,10 @@ export function isAncestor(root: string, ancestor: string, descendant: string): 
 /** Paths differing between two revisions, renames reported as delete + add, verbatim (untrusted). Null on failure. */
 export function changedFiles(root: string, from: string, to = 'HEAD'): string[] | null {
     if (!isSafeRef(from) || !isSafeRef(to)) return null;
-    // --no-renames: diff.renames would report a rename as one path. --no-relative: diff.relative would make paths relative to
-    // the cwd and drop those outside it. --ignore-submodules=none: diff.ignoreSubmodules / .gitmodules `ignore` would hide a
+    // --no-renames: diff.renames would report a rename as one path. -c diff.relative=false: diff.relative would make paths relative to
+    // the cwd and drop those outside it (the config form, unlike --no-relative, also works on git < 2.28). --ignore-submodules=none: diff.ignoreSubmodules / .gitmodules `ignore` would hide a
     // submodule bump. -z: core.quotePath never applies. diff.noprefix and colour do not affect --name-only.
-    const out = runGit(root, ['diff', '--no-renames', '--no-relative', '--ignore-submodules=none', '--name-only', '-z', '--end-of-options', from, to, '--']);
+    const out = runGit(root, ['-c', 'diff.relative=false', 'diff', '--no-renames', '--ignore-submodules=none', '--name-only', '-z', '--end-of-options', from, to, '--']);
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 

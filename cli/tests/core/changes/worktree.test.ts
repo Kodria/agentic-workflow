@@ -124,6 +124,33 @@ describe('worktree state', () => {
             expect(state.kind === 'ok' && state.dirty).toBe(false);
         } finally { if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS; else process.env.GIT_LITERAL_PATHSPECS = saved; }
     });
+    describe('a submodule change is a change whatever the configuration says', () => {
+        // Offline: vendor/sm is a nested repository registered as a gitlink, hidden by .gitmodules `ignore = all` and diff.ignoreSubmodules=all.
+        const sm = () => path.join(root, 'vendor', 'sm');
+        const inSm = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: sm(), encoding: 'utf8', env: gitEnv() }).trim();
+        const commitInSm = (name: string): string => { fs.writeFileSync(path.join(sm(), name), name); inSm('add', '-A'); inSm('commit', '-q', '-m', `feat: ${name}`); return inSm('rev-parse', 'HEAD'); };
+        const registerHiddenSubmodule = () => {
+            fs.mkdirSync(sm(), { recursive: true });
+            inSm('init', '-q', '-b', 'main');
+            const first = commitInSm('one');
+            fs.writeFileSync(path.join(root, '.gitmodules'), '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n');
+            g('config', 'diff.ignoreSubmodules', 'all');
+            g('add', '.gitmodules');
+            g('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
+            g('commit', '-q', '-m', 'chore: add submodule');
+        };
+        test('a clean tree holding a submodule is clean', () => {
+            registerHiddenSubmodule();
+            const state = gitState(root, true);
+            expect(state.kind === 'ok' && state.dirty).toBe(false);
+        });
+        test.each([[true], [false]])('a submodule checked out at another commit than the gitlink makes the tree dirty (untracked=%p)', (untracked) => {
+            registerHiddenSubmodule();
+            commitInSm('two');
+            const state = gitState(root, untracked);
+            expect(state.kind === 'ok' && state.dirty).toBe(true);
+        });
+    });
     test('a non-string or empty cwd is a failure, never a throw', () => {
         expect(gitState(undefined as never, true)).toEqual({ kind: 'failed' });
         expect(gitState('', true)).toEqual({ kind: 'failed' });
