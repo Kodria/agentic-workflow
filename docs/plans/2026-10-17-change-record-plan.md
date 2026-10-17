@@ -2086,3 +2086,15 @@ with
 | R6.1 | S7 | orchestrator.test new `Change-Record: none` assertion |
 
 **Out of this plan:** R7.1–R7.4 belong to a follow-up plan in `awm-baseline-registry`, as stated in the scope note. They are not owned here, so there is no forward gap inside this plan's requirement set. Every slice and test above maps to an R-ID, so there is no backward gap.
+
+## Amendments
+
+### A1 — S1 specification review (2026-10-17)
+
+The S1 specification review found defects in the S1 code and wording as originally planned. The S1 code blocks above are the *original* plan text; the implemented, authoritative behavior is:
+
+- **Anchors and aliases (R1.2):** every YAML anchor and alias is rejected, including scalar and unused ones. Diagnostic `yaml-alias`. Quoted text containing `&` or `*` is not an anchor or alias.
+- **Pending marker (R1.7):** `pending-content` also fires when a parsed string value (after YAML unescaping) contains the marker, not only the raw text.
+- **Sensor names (R1.5):** a non-empty single-line string of at most 128 characters without control characters (replaces the planned `[A-Za-z0-9._-]+` regex, which could reject a valid sensor name copied from a receipt).
+- **Wording clarifications** (design R1.2, R1.4, R1.5, R1.7; code already matches): `CORE_SCHEMA`, non-empty `scope`/`risks` entries, canonical ISO means the `toISOString()` form, `links.plan` existence is checked whenever a repository root is available.
+- The S1 test count is 11, not 12.
