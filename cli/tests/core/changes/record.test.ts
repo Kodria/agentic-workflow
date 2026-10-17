@@ -125,6 +125,15 @@ describe('validateRecordShape', () => {
         test('provenance timestamps must be canonical ISO-8601', () => {
             expectDiag(check({ provenance: 'provenance:\n  started_at: "2026-10-17 10:00"' }), 'field-invalid', 'provenance.started_at');
         });
+        test('a provenance unknown key with an invalid value yields only unknown-field', () => {
+            const r = check({ provenance: 'provenance:\n  host: ""' });
+            expect(r.diagnostics).toEqual([{ code: 'unknown-field', field: 'provenance.host', message: 'unknown field "provenance.host"' }]);
+        });
+        test('a provenance known key with an invalid value is field-invalid', () => {
+            const r = check({ provenance: 'provenance:\n  agent: ""' });
+            expect(r.diagnostics.map((d) => d.code)).toEqual(['field-invalid']);
+            expectDiag(r, 'field-invalid', 'provenance.agent');
+        });
         test('links.plan existence is checked when a root is given', () => {
             const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
             try {

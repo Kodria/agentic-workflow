@@ -106,3 +106,33 @@ describe('loadFrontmatter', () => {
         });
     });
 });
+
+describe('exported helpers never throw on non-string input', () => {
+    const hostile: Array<[string, unknown]> = [['undefined', undefined], ['null', null], ['a number', 42], ['an object', {}], ['a Buffer', Buffer.from('---\na: 1\n---\nb')], ['an array', []]];
+    test.each(hostile)('splitRecord(%s) is input-invalid', (_label, value) => {
+        let r: ReturnType<typeof splitRecord> | undefined;
+        expect(() => { r = splitRecord(value as string); }).not.toThrow();
+        expect(r && !r.ok && r.diagnostic.code).toBe('input-invalid');
+    });
+    test.each(hostile)('loadFrontmatter(%s) is input-invalid', (_label, value) => {
+        let r: ReturnType<typeof loadFrontmatter> | undefined;
+        expect(() => { r = loadFrontmatter(value as string); }).not.toThrow();
+        expect(r && !r.ok && r.diagnostic.code).toBe('input-invalid');
+    });
+    test.each([['an array', ['2026-10-17-x.md']], ['a number', 20261017], ['null', null], ['undefined', undefined], ['an object', { toString: () => '2026-10-17-x.md' }]])('isValidRecordFileName(%s) is false', (_label, value) => {
+        expect(isValidRecordFileName(value as string)).toBe(false);
+    });
+    test('loadFrontmatter bounds the message of a huge YAML error', () => {
+        const r = loadFrontmatter(`a: *${'x'.repeat(60000)}`);
+        expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');
+        expect(!r.ok && r.diagnostic.message.length).toBeLessThanOrEqual(300);
+    });
+    test('loadFrontmatter keeps a surrogate pair whole when it clips', () => {
+        for (const pad of ['', 'x']) {
+            const r = loadFrontmatter(`a: *${pad}${'😀'.repeat(300)}`);
+            const message = !r.ok ? r.diagnostic.message : '';
+            expect(message.length).toBeLessThanOrEqual(300);
+            expect(message).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+        }
+    });
+});

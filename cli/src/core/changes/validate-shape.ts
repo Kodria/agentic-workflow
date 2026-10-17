@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
+import { clipMessage, cleanText, esc, isSafeMultiline, isSingleLine } from './text-safety';
 import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, PENDING_MARKER, RECORD_SCHEMA, type ChangeRecord, type Diagnostic } from './types';
 
 const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
 const REQUIRED_KEYS = TOP_KEYS.filter((k) => k !== 'links' && k !== 'provenance');
 const SENSOR_STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
 const OVERALL = ['pass', 'fail', 'skipped', 'not_certified'];
+const PROVENANCE_KEYS = ['agent', 'model', 'session', 'started_at', 'finished_at'];
 const SEMVER = ['major', 'minor', 'patch', 'none'];
 const SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -14,46 +16,6 @@ const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
-
-// ---- Text safety (R1.4): the one place that defines which characters are unsafe in record text. ----
-// Control characters are C0 (includes \t \n \r), DEL and C1 (includes U+0085). U+2028/U+2029 are line breaks but not controls.
-const CONTROL_CLASS = '\\u0000-\\u001f\\u007f-\\u009f';
-const SINGLE_LINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}\\u2028\\u2029]`);
-const SINGLE_LINE_UNSAFE_ALL = new RegExp(SINGLE_LINE_UNSAFE.source, 'g');
-const MULTILINE_UNSAFE = new RegExp(`[${CONTROL_CLASS}]`);
-
-/** A string with no line break and no control character. */
-export const isSingleLine = (text: unknown): text is string => typeof text === 'string' && !SINGLE_LINE_UNSAFE.test(text);
-/** A string whose only control characters are `\n` and `\t`. */
-export const isSafeMultiline = (text: unknown): text is string => typeof text === 'string' && !MULTILINE_UNSAFE.test(text.replace(/[\n\t]/g, ''));
-
-const unicodeEscape = (c: string): string => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
-const MAX_ECHO_CODE_POINTS = 80;
-const MAX_ECHO_ESCAPED = 240;
-const MAX_MESSAGE = 300;
-
-/** Attacker-controlled text made safe to embed in a diagnostic: bounded, JSON-escaped, never containing a raw line break or control. */
-function esc(text: string): string {
-    const points = [...text];
-    const clipped = points.length > MAX_ECHO_CODE_POINTS ? `${points.slice(0, MAX_ECHO_CODE_POINTS).join('')}…` : text;
-    let escaped = JSON.stringify(clipped).slice(1, -1).replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
-    if (escaped.length > MAX_ECHO_ESCAPED) escaped = `${sliceNoSplit(escaped, MAX_ECHO_ESCAPED)}…`;
-    return escaped;
-}
-
-const cleanText = (text: string): string => text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
-
-/** Cuts at `maxUnits` UTF-16 units, dropping a trailing high surrogate so a pair is never split. The only cut of untrusted text by unit count. */
-function sliceNoSplit(text: string, maxUnits: number): string {
-    if (text.length <= maxUnits) return text;
-    const last = text.charCodeAt(maxUnits - 1);
-    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? maxUnits - 1 : maxUnits);
-}
-
-/** Clips to MAX_MESSAGE UTF-16 units including the ellipsis. */
-function clipMessage(message: string): string {
-    return message.length <= MAX_MESSAGE ? message : `${sliceNoSplit(message, MAX_MESSAGE - 1)}…`;
-}
 
 /** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */
 function finalize(list: Diagnostic[]): Diagnostic[] {
@@ -202,8 +164,9 @@ function checkNarrative(fm: Obj, out: Diagnostic[]): void {
 function checkProvenance(fm: Obj, out: Diagnostic[]): void {
     if (fm.provenance === undefined) return;
     if (!isObj(fm.provenance)) { bad(out, 'provenance', 'provenance must be a mapping'); return; }
-    unknownKeys(fm.provenance, ['agent', 'model', 'session', 'started_at', 'finished_at'], 'provenance.', out);
+    unknownKeys(fm.provenance, PROVENANCE_KEYS, 'provenance.', out);
     for (const [k, val] of Object.entries(fm.provenance)) {
+        if (!PROVENANCE_KEYS.includes(k)) continue;
         const field = `provenance.${esc(k)}`;
         if (!nonEmpty(val) || !isSingleLine(val)) bad(out, field, `${field} must be a non-empty single-line string`);
         else if ((k === 'started_at' || k === 'finished_at') && !isCanonicalIso(val)) bad(out, field, `${field} must be canonical ISO-8601`);
