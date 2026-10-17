@@ -933,8 +933,8 @@ describe('registerChangeCommand', () => {
         const sub = change?.commands.find((c) => c.name() === 'new');
         expect(sub?.options.map((o) => o.long).sort()).toEqual(['--base', '--issue', '--model', '--plan', '--refresh', '--session']);
     });
-    test('the change command describes only what exists today', () => {
-        expect(program().commands.find((c) => c.name() === 'change')?.description()).toBe('create the Change Record of the current branch');
+    test('the change command describes both of its subcommands', () => {
+        expect(program().commands.find((c) => c.name() === 'change')?.description()).toBe('create and validate the Change Record of the current branch');
     });
     test('runs from the cwd, prints the created path and leaves the exit code alone', async () => {
         receiptForHead();

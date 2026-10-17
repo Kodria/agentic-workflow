@@ -1,7 +1,7 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { gitSpawnOptions } from './git-env';
-import { isSingleLine } from './text-safety';
+import { isSafeRelativePath, isSingleLine } from './text-safety';
 import { gitState } from './worktree';
 
 // Every function here takes values that may be influenced by a user or by repository content (refs, paths, remote URLs).
@@ -78,6 +78,16 @@ export function changedFiles(root: string, from: string, to = 'HEAD'): string[] 
     // the cwd and drop those outside it (the config form, unlike --no-relative, also works on git < 2.28). --ignore-submodules=none: diff.ignoreSubmodules / .gitmodules `ignore` would hide a
     // submodule bump. -z: core.quotePath never applies. diff.noprefix and colour do not affect --name-only.
     const out = runGit(root, ['-c', 'diff.relative=false', 'diff', '--no-renames', '--ignore-submodules=none', '--name-only', '-z', '--end-of-options', from, to, '--']);
+    return out === null ? null : out.split('\0').filter(Boolean);
+}
+
+/**
+ * Files ADDED (not modified, not renamed-into: renames are off) between two revisions under the repo-relative directory `dir`,
+ * verbatim (untrusted). Same safety flags as changedFiles. Null on failure or invalid input.
+ */
+export function addedFilesUnder(root: string, from: string, to: string, dir: string): string[] | null {
+    if (!isSafeRef(from) || !isSafeRef(to) || !isSafeRelativePath(dir)) return null;
+    const out = runGit(root, ['-c', 'diff.relative=false', 'diff', '--no-renames', '--ignore-submodules=none', '--diff-filter=A', '--name-only', '-z', '--end-of-options', from, to, '--', `:(top,literal)${dir}`]);
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 

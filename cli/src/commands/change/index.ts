@@ -1,16 +1,18 @@
+import fs from 'fs';
 import path from 'path';
 import { Command } from 'commander';
 import { emit, type CommandResult } from '../../core/command-result';
 import { readJournal } from '../../core/journal/store';
-import { isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
-import { headSha, isDirtyOutside, isSafeRef, mergeBase, repoRoot, resolveBase, runGit } from '../../core/changes/git';
-import { deriveFields } from '../../core/changes/derive';
+import { RECORD_FILE_RE, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
+import { addedFilesUnder, changedFiles, headSha, isAncestor, isDirtyOutside, isSafeRef, mergeBase, repoRoot, resolveBase, runGit } from '../../core/changes/git';
+import { deriveFields, type Derived } from '../../core/changes/derive';
+import { hasOptOut } from '../../core/changes/trailers';
 import { readReceipt } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
 import { isRegularFileInside } from '../../core/changes/fs-safe';
 import { createExclusive, createRecordDir, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
 import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSingleLine, isWellFormed } from '../../core/changes/text-safety';
-import { MAX_RECORD_BYTES, RECORD_DIR, type DerivedFields, type Verification } from '../../core/changes/types';
+import { DERIVED_KEYS, MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type DerivedFields, type Diagnostic, type Verification } from '../../core/changes/types';
 import { validateRecordShape } from '../../core/changes/validate-shape';
 
 export interface ChangeDeps { now?: () => Date }
@@ -186,8 +188,222 @@ export function runChangeNew(cwd: string, slug: string, opts: NewOpts, deps: Cha
     }
 }
 
+// ---- awm change validate (R4) ----
+
+export interface ValidateOpts { base?: string; strict?: boolean; json?: boolean }
+interface RecordReport { path: string; state: 'valid' | 'invalid'; diagnostics: Diagnostic[] }
+
+/** R4.5: diagnostics per record. When more were found the last slot becomes a `diagnostics-truncated` marker. */
+const MAX_RECORD_DIAGNOSTICS = 20;
+/** Records validated per run; further ones are not read and make the run invalid (`too-many-records`). */
+const MAX_RECORDS = 50;
+/** Paths listed in a `code-changed-after-verification` message (the message itself is clipped to one line of 300 units). */
+const MAX_LATE_PATHS = 20;
+
+const safeDiagnostic = (d: Diagnostic): Diagnostic => {
+    const base: Diagnostic = { code: clipMessage(cleanText(d.code)), message: line(d.message) };
+    return d.field === undefined ? base : { ...base, field: clipMessage(cleanText(d.field)) };
+};
+
+/** One record's report: every text field made single-line and bounded, at most 20 diagnostics. */
+function finish(recordPath: string, list: Diagnostic[]): RecordReport {
+    const all = list.map(safeDiagnostic);
+    const kept = all.length > MAX_RECORD_DIAGNOSTICS
+        ? [...all.slice(0, MAX_RECORD_DIAGNOSTICS - 1), { code: 'diagnostics-truncated', message: `${all.length - (MAX_RECORD_DIAGNOSTICS - 1)} more diagnostics omitted` }]
+        : all;
+    return { path: clipMessage(cleanText(recordPath)), state: kept.length === 0 ? 'valid' : 'invalid', diagnostics: kept };
+}
+
+/** What every record of one run is checked against; computed at most once per run (and per verification commit). */
+interface ValidateRun {
+    root: string; head: string; mergeBaseSha: string; strict: boolean;
+    dir: RecordDir;
+    derived?: Derived;
+    ancestors: Map<string, boolean>;
+    late: Map<string, string[] | null>;
+}
+
+const deriveOnce = (run: ValidateRun): Derived => (run.derived ??= deriveFields(run.root, run.mergeBaseSha));
+
+function lateFiles(run: ValidateRun, commit: string): string[] | null {
+    if (!run.late.has(commit)) run.late.set(commit, changedFiles(run.root, commit, run.head)?.filter((f) => !f.startsWith(`${RECORD_DIR}/`)) ?? null);
+    return run.late.get(commit) ?? null;
+}
+
+function isAncestorOfHead(run: ValidateRun, commit: string): boolean {
+    if (!run.ancestors.has(commit)) run.ancestors.set(commit, isAncestor(run.root, commit, run.head));
+    return run.ancestors.get(commit) === true;
+}
+
+const sameSensors = (a: Record<string, string>, b: Record<string, string>): boolean => {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && a[k] === b[k]);
+};
+
+/** A derived value for a message: strings escaped inside quotes (esc), lists bracketed, everything else as JSON. Bounded by the caller's clip. */
+function show(value: unknown): string {
+    if (typeof value === 'string') return `"${esc(value)}"`;
+    if (Array.isArray(value)) return `[${value.map(show).join(', ')}]`;
+    return JSON.stringify(value) ?? 'undefined';
+}
+
+/** R4.3: the recomputed derived fields equal the record's, one diagnostic per differing field. */
+function checkDerived(run: ValidateRun, record: ChangeRecord, out: Diagnostic[]): void {
+    const derived = deriveOnce(run);
+    if (!derived.ok) { out.push(derived.diagnostic); return; }
+    for (const key of DERIVED_KEYS) {
+        if (JSON.stringify(record[key]) !== JSON.stringify(derived.fields[key])) {
+            out.push({ code: 'derived-mismatch', field: key, message: `${key} is ${show(record[key])} but git derives ${show(derived.fields[key])}` });
+        }
+    }
+}
+
+/** R4.3: the verified commit is HEAD or an ancestor of it, and nothing outside docs/changes/ changed since. */
+function checkVerifiedCommit(run: ValidateRun, commit: string, out: Diagnostic[]): void {
+    if (!isAncestorOfHead(run, commit)) {
+        out.push({ code: 'verification-commit-foreign', field: 'verification.commit', message: `${commit.slice(0, 12)} is not HEAD or an ancestor of HEAD` });
+        return;
+    }
+    const late = lateFiles(run, commit);
+    if (late === null) { out.push({ code: 'git-failed', message: `git could not list the files changed since ${commit.slice(0, 12)}` }); return; }
+    if (late.length === 0) return;
+    const shown = late.slice(0, MAX_LATE_PATHS).map(esc).join(', ');
+    out.push({ code: 'code-changed-after-verification', message: `${late.length} file${late.length === 1 ? '' : 's'} changed after ${commit.slice(0, 12)}: ${shown}${late.length > MAX_LATE_PATHS ? ', …' : ''}` });
+}
+
+/** R4.4: the receipt of the verified commit exists, matches the record's verification block, and says pass. */
+function checkReceipt(run: ValidateRun, record: ChangeRecord, out: Diagnostic[]): void {
+    const { verification } = record;
+    const receipt = readReceipt(run.root, verification.commit);
+    if (!receipt.ok) {
+        out.push({ code: receipt.code, field: 'verification.commit', message: `no valid sensor receipt for ${verification.commit.slice(0, 12)}`, });
+        return;
+    }
+    const r = receipt.receipt;
+    if (r.digest !== verification.receipt_digest) out.push({ code: 'verification-mismatch', field: 'verification.receipt_digest', message: 'receipt_digest differs from the sensor receipt' });
+    if (r.overall !== verification.overall) out.push({ code: 'verification-mismatch', field: 'verification.overall', message: `the record says ${esc(verification.overall)} but the sensor receipt says ${esc(r.overall)}` });
+    if (!sameSensors(r.sensors, verification.sensors)) out.push({ code: 'verification-mismatch', field: 'verification.sensors', message: 'the sensors differ from the sensor receipt' });
+    if (r.overall !== 'pass') out.push({ code: 'verification-not-passing', field: 'verification.overall', message: `the sensor verdict is ${esc(r.overall)}, not pass` });
+}
+
+/** The records are read from the working tree, through the symlink-safe, size-bounded readers. Never throws. */
+function validateOne(run: ValidateRun, rel: string): RecordReport {
+    const name = path.posix.basename(rel);
+    const missing = (code: string, message: string): RecordReport => finish(rel, [{ code, message }]);
+    if (run.dir.kind === 'absent') return missing('record-missing', `${RECORD_DIR}/ does not exist`);
+    if (run.dir.kind === 'unsafe') return missing('unsafe-path', `${RECORD_DIR} or its parent is a symlink or not a directory; refusing to read`);
+    if (run.dir.kind === 'error') return missing('io-failed', `could not inspect ${RECORD_DIR}`);
+    if (!isRegularFileInside(run.root, rel)) return missing('record-missing', `${esc(rel)} is not a regular file in the working tree`);
+    const read = readRecord(path.join(run.dir.dir, name), name);
+    if (!read.ok) return missing(read.code, read.message);
+
+    const shape = validateRecordShape(name, read.text, { root: run.root });
+    const diagnostics: Diagnostic[] = [...shape.diagnostics];
+    const record = shape.record;
+    if (record) {
+        checkDerived(run, record, diagnostics);
+        checkVerifiedCommit(run, record.verification.commit, diagnostics);
+        if (run.strict) checkReceipt(run, record, diagnostics);
+    }
+    return finish(rel, diagnostics);
+}
+
+/** The repo-relative, `/`-separated path `target` (read from `cwd`) names, or null when it lies outside the repository. */
+function repoRelative(root: string, cwd: string, target: string): string | null {
+    if (target === '' || target.includes('\0')) return null;
+    const real = (p: string): string => { try { return fs.realpathSync.native(p); } catch { return p; } };
+    for (const from of new Set([cwd, real(cwd)])) {
+        const full = path.resolve(from, target);
+        for (const base of new Set([root, real(root)])) {
+            const rel = path.relative(base, full);
+            if (rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+        }
+    }
+    return null;
+}
+
+const isRecordPath = (rel: string): boolean => path.posix.dirname(rel) === RECORD_DIR && RECORD_FILE_RE.test(path.posix.basename(rel));
+
+function formatText(state: string, records: RecordReport[]): string {
+    const lines = [`Change Record validation: ${state}`];
+    for (const r of records) {
+        lines.push(line(`- ${r.path}: ${r.state}`));
+        for (const d of r.diagnostics) lines.push(line(`  - ${d.code}${d.field === undefined ? '' : ` (${d.field})`}: ${d.message}`));
+    }
+    return `${lines.join('\n')}\n`;
+}
+
+function validateOpts(rawOpts: unknown): ValidateOpts | string {
+    if (rawOpts !== undefined && !isObj(rawOpts)) return 'options must be an object';
+    const opts = (rawOpts ?? {}) as Record<string, unknown>;
+    if (opts.base !== undefined && typeof opts.base !== 'string') return '--base must be a string';
+    for (const key of ['strict', 'json'] as const) if (opts[key] !== undefined && typeof opts[key] !== 'boolean') return `--${key} must be a boolean flag`;
+    return opts as ValidateOpts;
+}
+
+function changeValidate(cwd: string, target: unknown, rawOpts: unknown): CommandResult {
+    if (typeof cwd !== 'string' || cwd.length === 0) return fail('invalid-input', 'the working directory must be a non-empty string');
+    if (target !== undefined && typeof target !== 'string') return fail('path-invalid', 'the path must be a string');
+    const opts = validateOpts(rawOpts);
+    if (typeof opts === 'string') return fail('flag-invalid', opts);
+    const root = repoRoot(cwd);
+    if (root === null) return fail('not-a-git-repo', 'awm change must run inside a git repository');
+
+    let rel: string | null = null;
+    if (target !== undefined) {
+        rel = repoRelative(root, cwd, target);
+        if (rel === null || !isRecordPath(rel)) return fail('path-invalid', `"${esc(target)}" must name a file ${RECORD_DIR}/YYYY-MM-DD-<slug>.md of this repository`);
+    }
+    // Pin HEAD: the range, the ancestry and the late-file checks all describe this one commit.
+    const head = headSha(root);
+    if (head === null) return fail('git-failed', 'git could not read HEAD');
+    if (opts.base !== undefined && !isSafeRef(opts.base)) return fail('invalid-input', `--base "${esc(opts.base)}" is not a safe git ref`);
+    const base = resolveBase(root, opts.base);
+    if (base === null) return fail('base-unresolved', 'could not resolve a base branch', 'pass --base <ref>');
+    const mergeBaseSha = mergeBase(root, base);
+    if (mergeBaseSha === null) return fail('base-unresolved', `no merge base between "${esc(base)}" and HEAD`, 'pass --base <ref>');
+
+    const run: ValidateRun = { root, head, mergeBaseSha, strict: opts.strict === true, dir: inspectRecordDir(root), ancestors: new Map(), late: new Map() };
+    let state: 'valid' | 'invalid' | 'exempt';
+    let records: RecordReport[];
+    if (rel !== null) {
+        records = [validateOne(run, rel)];
+    } else {
+        const added = addedFilesUnder(root, mergeBaseSha, head, RECORD_DIR);
+        if (added === null) return fail('git-failed', `git could not list the records added since ${mergeBaseSha.slice(0, 12)}`);
+        const names = added.filter(isRecordPath);
+        if (names.length === 0 && hasOptOut(root, [`${mergeBaseSha}..${head}`])) {
+            if (headSha(root) !== head) return fail('git-failed', MOVED);
+            state = 'exempt';
+            return { code: 0, stdout: opts.json === true ? `${JSON.stringify({ state, records: [] })}\n` : 'Change Record validation: exempt (Change-Record: none)\n', stderr: '' };
+        }
+        records = names.slice(0, MAX_RECORDS).map((name) => validateOne(run, name));
+        if (names.length === 0) records = [finish(RECORD_DIR, [{ code: 'record-missing', message: 'this branch adds no Change Record and no commit carries Change-Record: none' }])];
+        if (names.length > MAX_RECORDS) records.push(finish(RECORD_DIR, [{ code: 'too-many-records', message: `${names.length} records were added; only the first ${MAX_RECORDS} were validated` }]));
+    }
+    if (headSha(root) !== head) return fail('git-failed', MOVED);
+    state = records.every((r) => r.state === 'valid') ? 'valid' : 'invalid';
+    return { code: state === 'valid' ? 0 : 2, stdout: opts.json === true ? `${JSON.stringify({ state, records })}\n` : formatText(state, records), stderr: '' };
+}
+
+/** Never throws: any unexpected failure becomes a diagnostic. Read-only (R4.6): nothing here writes a file. */
+export function runChangeValidate(cwd: string, target: string | undefined, opts: ValidateOpts): CommandResult {
+    try {
+        return changeValidate(cwd, target, opts);
+    } catch (error) {
+        return fail('internal-error', `unexpected failure (${esc(error instanceof Error ? error.name : 'unknown')})`);
+    }
+}
+
+/** The action wrapper: the working directory may be gone, and nothing may throw out of the action. */
+function inCwd(command: (cwd: string) => CommandResult): void {
+    let cwd: string;
+    try { cwd = process.cwd(); } catch { emit(fail('not-a-git-repo', 'the working directory is not accessible')); return; }
+    emit(command(cwd));
+}
+
 export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): void {
-    const change = program.command('change').description('create the Change Record of the current branch');
+    const change = program.command('change').description('create and validate the Change Record of the current branch');
     change
         .command('new <slug>')
         .description('create docs/changes/YYYY-MM-DD-<slug>.md with derived fields and pending narrative')
@@ -197,9 +413,12 @@ export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): 
         .option('--model <model>', 'provenance: model identifier')
         .option('--session <session>', 'provenance: session id or URL (avoid internal URLs in public repos)')
         .option('--refresh', 'recompute only derived fields and verification of the existing record')
-        .action((slug: string, opts: NewOpts) => {
-            let cwd: string;
-            try { cwd = process.cwd(); } catch { emit(fail('not-a-git-repo', 'the working directory is not accessible')); return; }
-            emit(runChangeNew(cwd, slug, opts, deps));
-        });
+        .action((slug: string, opts: NewOpts) => inCwd((cwd) => runChangeNew(cwd, slug, opts, deps)));
+    change
+        .command('validate [path]')
+        .description('validate the Change Record(s) added by this branch, or one record (--strict also checks the sensor receipt)')
+        .option('--base <ref>', 'base branch (default: origin/HEAD, main, master)')
+        .option('--strict', 'require a matching, passing sensor receipt for verification.commit')
+        .option('--json', 'print a single JSON line')
+        .action((target: string | undefined, opts: ValidateOpts) => inCwd((cwd) => runChangeValidate(cwd, target, opts)));
 }

@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
-import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, addedFilesUnder, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
@@ -180,6 +180,33 @@ describe('git functions in a repository', () => {
         expect(changedFiles(repo.root, 'HEAD', 'HEAD^')).toBeNull();
         expect(changedFiles(nonRepoDir(), 'main', 'HEAD')).toBeNull();
         noNewFile('x');
+    });
+
+    test('addedFilesUnder lists only files ADDED in the range under the directory', () => {
+        repo.commit({ 'docs/changes/old.md': '1', 'docs/other/x.md': '1' }, 'docs: existing');
+        const base = branch();
+        repo.commit({ 'docs/changes/new.md': '1', 'docs/changes/old.md': '2', 'docs/other/y.md': '1', 'src/a.ts': '1' }, 'feat: a');
+        expect(addedFilesUnder(repo.root, base, 'HEAD', 'docs/changes')).toEqual(['docs/changes/new.md']);
+    });
+    test('addedFilesUnder reports a file moved into the directory as added', () => {
+        repo.commit({ 'other/r.md': 'same content, long enough to be detected as a rename\n'.repeat(5) }, 'feat: r');
+        const base = branch();
+        fs.mkdirSync(path.join(repo.root, 'docs/changes'), { recursive: true });
+        repo.git('mv', 'other/r.md', 'docs/changes/r.md');
+        repo.git('commit', '-q', '-m', 'refactor: move');
+        expect(addedFilesUnder(repo.root, base, 'HEAD', 'docs/changes')).toEqual(['docs/changes/r.md']);
+    });
+    test('addedFilesUnder returns null for unsafe revisions, an unsafe directory, an unknown revision and a non-repo', () => {
+        const base = branch();
+        repo.commit({ 'docs/changes/new.md': '1' }, 'feat: a');
+        expect(addedFilesUnder(repo.root, '--output=x', 'HEAD', 'docs/changes')).toBeNull();
+        expect(addedFilesUnder(repo.root, base, '-x', 'docs/changes')).toBeNull();
+        expect(addedFilesUnder(repo.root, 'nope', 'HEAD', 'docs/changes')).toBeNull();
+        expect(addedFilesUnder(repo.root, bad(7), 'HEAD', 'docs/changes')).toBeNull();
+        expect(addedFilesUnder(repo.root, base, 'HEAD', '../x')).toBeNull();
+        expect(addedFilesUnder(repo.root, base, 'HEAD', bad(null))).toBeNull();
+        expect(addedFilesUnder(nonRepoDir(), 'main', 'HEAD', 'docs/changes')).toBeNull();
+        expect(addedFilesUnder(repo.root, base, 'HEAD', 'docs/changes')).toEqual(['docs/changes/new.md']);
     });
 
     test('dirtiness ignores only the excluded paths', () => {
