@@ -89,6 +89,34 @@ describe('validateRecordShape', () => {
             expect(codes(escape)).toContain('field-invalid');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+    test('R1.4 links.issue must be a clean https://host URL', () => {
+        const issue = (v: string) => validateRecordShape(NAME, doc(fm({ links: `links:\n  issue: ${v}` })));
+        expect(issue('"https://github.com/Kodria/agentic-workflow/issues/217"').diagnostics).toEqual([]);
+        for (const v of ['"https://e.com/a\\nb"', '"https://e.com/a\\tb"', '" https://e.com/a"', '"https://e.com/a "', '"https:example.com"', '"https:///nohost"', '"https://e.com/a\\u2028b"', '"https://e.com/a b"']) {
+            expect(codes(issue(v))).toContain('field-invalid');
+        }
+    });
+    test('R1.5 counts sensor name length in code points', () => {
+        const withName = (name: string) => doc(fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n    "${name}": pass\n  receipt_digest: ${DIGEST}` }));
+        expect(validateRecordShape(NAME, withName('😀'.repeat(100))).diagnostics).toEqual([]);
+        expect(validateRecordShape(NAME, withName('😀'.repeat(128))).diagnostics).toEqual([]);
+        expect(codes(validateRecordShape(NAME, withName('😀'.repeat(129))))).toContain('field-invalid');
+    });
+    (process.platform === 'win32' ? test.skip : test)('R1.4 links.plan cannot escape the root through a symlinked directory', () => {
+        const base = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
+        const root = path.join(base, 'repo');
+        const outside = path.join(base, 'outside');
+        try {
+            fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+            fs.mkdirSync(outside);
+            fs.writeFileSync(path.join(outside, 'secret.md'), 'x');
+            fs.writeFileSync(path.join(root, 'docs', 'plans', 'real.md'), 'x');
+            fs.symlinkSync(outside, path.join(root, 'docs', 'link'));
+            const plan = (p: string) => validateRecordShape(NAME, doc(fm({ links: `links:\n  plan: ${p}` })), { root });
+            expect(plan('docs/plans/real.md').diagnostics).toEqual([]);
+            expect(codes(plan('docs/link/secret.md'))).toContain('field-invalid');
+        } finally { fs.rmSync(base, { recursive: true, force: true }); }
+    });
     test('R1.5 enforces the verification block', () => {
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: 'verification:\n  commit: abc\n  overall: pass\n  sensors: {}\n  receipt_digest: x' }))))).toContain('field-invalid');
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n    lint: green\n  receipt_digest: ${DIGEST}` }))))).toContain('field-invalid');

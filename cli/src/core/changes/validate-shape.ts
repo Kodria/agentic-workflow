@@ -17,12 +17,29 @@ const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
-const isSensorName = (k: string): boolean => k.length > 0 && k.length <= 128 && !CONTROL_RE.test(k);
+const isSensorName = (k: string): boolean => k.length > 0 && [...k].length <= 128 && !CONTROL_RE.test(k);
 function containsPendingString(value: unknown): boolean {
     if (typeof value === 'string') return value.includes(PENDING_MARKER);
     if (Array.isArray(value)) return value.some(containsPendingString);
     if (isObj(value)) return Object.entries(value).some(([k, val]) => k.includes(PENDING_MARKER) || containsPendingString(val));
     return false;
+}
+// eslint-disable-next-line no-control-regex
+const URL_FORBIDDEN_RE = /[\s\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+function isHttpsIssueUrl(v: unknown): boolean {
+    if (typeof v !== 'string' || !/^https:\/\/[^/?#\\@]/.test(v) || URL_FORBIDDEN_RE.test(v)) return false;
+    try {
+        const u = new URL(v);
+        return u.protocol === 'https:' && u.hostname.length > 0;
+    } catch { return false; }
+}
+function isRegularFileInside(root: string, rel: string): boolean {
+    const abs = path.join(root, rel);
+    try {
+        if (!fs.lstatSync(abs).isFile()) return false;
+        const relToRoot = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
+        return relToRoot !== '' && !relToRoot.startsWith('..') && !path.isAbsolute(relToRoot);
+    } catch { return false; }
 }
 const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
 
@@ -104,15 +121,12 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
             if (plan !== undefined) {
                 if (typeof plan !== 'string' || !isSafeRelative(plan)) bad(out, 'links.plan', 'links.plan must be a safe repo-relative path');
                 else if (opts.root !== undefined) {
-                    const abs = path.join(opts.root, plan);
-                    let ok = false;
-                    try { ok = fs.lstatSync(abs).isFile(); } catch { ok = false; }
+                    const ok = isRegularFileInside(opts.root, plan);
                     if (!ok) bad(out, 'links.plan', `links.plan "${plan}" does not exist as a regular file`);
                 }
             }
             if (issue !== undefined) {
-                let ok = false;
-                try { ok = typeof issue === 'string' && new URL(issue).protocol === 'https:'; } catch { ok = false; }
+                const ok = isHttpsIssueUrl(issue);
                 if (!ok) bad(out, 'links.issue', 'links.issue must be an https URL');
             }
         }
