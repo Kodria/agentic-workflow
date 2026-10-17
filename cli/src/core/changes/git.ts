@@ -92,6 +92,17 @@ export function addedFilesUnder(root: string, from: string, to: string, dir: str
 }
 
 /**
+ * True when the tracked file `rel` (repo-relative, matched literally, from any directory) equals HEAD in both the index and the
+ * working tree; false when it differs; null when that cannot be told (unsafe path, git failure). Untracked files are not looked at.
+ * `--no-optional-locks`: `status` would otherwise refresh the index, and a read-only caller must not write it.
+ */
+export function isCommittedClean(root: string, rel: string): boolean | null {
+    if (!isSafeRelativePath(rel)) return null;
+    const out = runGit(root, ['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=no', '--ignore-submodules=none', '--', `:(top,literal)${rel}`]);
+    return out === null ? null : out.length === 0;
+}
+
+/**
  * Whether the tree differs from HEAD outside RUNTIME_STATE_EXCLUDES and `extraExcludes` (untracked files count).
  * Unknown state, or an unsafe exclusion, counts as dirty: an unreadable repository must never look clean.
  */

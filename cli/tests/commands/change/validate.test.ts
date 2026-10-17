@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import childProcess from 'child_process';
 import { Command } from 'commander';
 import { bad, cloneRepo, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, runChangeValidate, type ValidateOpts } from '../../../src/commands/change';
@@ -35,12 +36,13 @@ afterAll(() => template.cleanup());
 beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
-function receipt(overall: 'pass' | 'fail' = 'pass'): void {
-    writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: '2026-10-17T11:00:00.000Z', cliVersion: '9.20.0', output: { overall, sensors: [{ name: 'lint', status: overall, errors: [] }] } as never }));
+/** A receipt for HEAD whose verdict and every sensor (default: `lint`) are `overall`. */
+function receipt(overall: 'pass' | 'fail' = 'pass', sensors: string[] = ['lint']): void {
+    writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: '2026-10-17T11:00:00.000Z', cliVersion: '9.20.0', output: { overall, sensors: sensors.map((name) => ({ name, status: overall, errors: [] })) } as never }));
 }
 /** Creates the record of `slug` for HEAD (receipt included), fills the narrative and commits it. */
-function commitRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass'): string {
-    receipt(overall);
+function commitRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass', sensors: string[] = ['lint']): string {
+    receipt(overall, sensors);
     expect(runChangeNew(repo.root, slug, {}, { now }).code).toBe(0);
     const rel = `docs/changes/2026-10-17-${slug}.md`;
     fs.writeFileSync(abs(rel), fs.readFileSync(abs(rel), 'utf8').split(PENDING_MARKER).join('filled'));
@@ -171,7 +173,7 @@ describe('target path safety', () => {
     });
     posixOnly('a record that is a symlink is record-missing and is never read', () => {
         commitRecord();
-        const outside = path.join(repo.home, 'outside.md');
+        const outside = path.join(fs.mkdtempSync(path.join(repo.home, 'outside-')), 'outside.md');
         fs.writeFileSync(outside, fs.readFileSync(abs(REL)));
         fs.rmSync(abs(REL));
         fs.symlinkSync(outside, abs(REL));
@@ -181,7 +183,7 @@ describe('target path safety', () => {
     });
     posixOnly('a symlinked docs/changes directory is unsafe-path for every record', () => {
         commitRecord();
-        const moved = path.join(repo.home, 'moved-changes');
+        const moved = path.join(fs.mkdtempSync(path.join(repo.home, 'moved-')), 'changes');
         fs.renameSync(path.join(repo.root, 'docs', 'changes'), moved);
         fs.symlinkSync(moved, path.join(repo.root, 'docs', 'changes'));
         diag(run(REL), 'unsafe-path', undefined);
@@ -204,15 +206,10 @@ describe('target path safety', () => {
         repo.commit({ [REL]: 'x'.repeat(MAX_RECORD_BYTES) }, 'docs: limit');
         expect(codesOf(run())).toEqual(['frontmatter-missing']);
     });
-    test('an invalid-UTF-8 record is still record-invalid, not record-too-large', () => {
-        repo.commit({ [REL]: 'ok' }, 'docs: r');
-        fs.writeFileSync(abs(REL), Buffer.from([0x2d, 0xff]));
-        expect(codesOf(run(REL))).toEqual(['record-invalid']);
-    });
-    test('a record that is not valid UTF-8 is record-invalid', () => {
+    test('a record that is not valid UTF-8 is record-invalid (not record-too-large)', () => {
         commitRecord();
         fs.writeFileSync(abs(REL), Buffer.from([0x2d, 0x2d, 0x2d, 0xff, 0xfe, 0x0a]));
-        diag(run(REL), 'record-invalid', undefined);
+        expect(codesOf(run(REL))).toEqual(['record-invalid']);
     });
 });
 
@@ -400,6 +397,13 @@ describe('R4.3 base checks', () => {
         expect(c).toContain('code-changed-after-verification');
         expect(c).toContain('derived-mismatch');
     });
+    test('one late file is reported as "1 file" and two as "2 files"', () => {
+        commitRecord();
+        repo.commit({ 'cli/src/one.ts': '1' }, 'chore: one');
+        expect(diag(run(), 'code-changed-after-verification', undefined).message).toMatch(/^1 file changed after [0-9a-f]{12}: cli\/src\/one\.ts$/);
+        repo.commit({ 'cli/src/two.ts': '1' }, 'chore: two');
+        expect(diag(run(), 'code-changed-after-verification', undefined).message).toMatch(/^2 files changed after [0-9a-f]{12}: cli\/src\/one\.ts, cli\/src\/two\.ts$/);
+    });
     test('the late-file list names at most 20 paths and counts them all', () => {
         commitRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`a${String(i).padStart(2, '0')}.ts`, '1'])), 'chore: late');
@@ -512,26 +516,14 @@ describe('R4.4 strict checks', () => {
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.sensors']);
     });
     test('strict: a sensor the record omits is verification-mismatch on sensors', () => {
-        receipt();
-        // two sensors in the receipt, one in the record
-        const sha = repo.git('rev-parse', 'HEAD');
-        writeReceipt(repo.root, buildReceipt({ commit: sha, ranAt: '2026-10-17T11:00:00.000Z', cliVersion: '9.20.0', output: { overall: 'pass', sensors: [{ name: 'lint', status: 'pass', errors: [] }, { name: 'types', status: 'pass', errors: [] }] } as never }));
-        expect(runChangeNew(repo.root, 'rec', {}, { now }).code).toBe(0);
-        fs.writeFileSync(abs(REL), fs.readFileSync(abs(REL), 'utf8').split(PENDING_MARKER).join('filled'));
-        repo.git('add', '-A');
-        repo.git('commit', '-q', '-m', 'docs(changes): rec');
-        expect(run(undefined, { strict: true }).code).toBe(0);
-        edit(REL, (t) => t.replace('    types: pass\n', ''));
+        commitRecord('rec', 'pass', ['lint', 'types']);
+        expect(run(undefined, { strict: true }).code).toBe(0); // two sensors in the receipt and the record ...
+        edit(REL, (t) => t.replace('    types: pass\n', '')); // ... and the record omits one
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.sensors']);
     });
     test('strict: the sensor order in the record does not matter', () => {
-        const sha = repo.git('rev-parse', 'HEAD');
-        writeReceipt(repo.root, buildReceipt({ commit: sha, ranAt: '2026-10-17T11:00:00.000Z', cliVersion: '9.20.0', output: { overall: 'pass', sensors: [{ name: 'lint', status: 'pass', errors: [] }, { name: 'types', status: 'pass', errors: [] }] } as never }));
-        expect(runChangeNew(repo.root, 'rec', {}, { now }).code).toBe(0);
-        fs.writeFileSync(abs(REL), fs.readFileSync(abs(REL), 'utf8').split(PENDING_MARKER).join('filled'));
-        repo.git('add', '-A');
-        repo.git('commit', '-q', '-m', 'docs(changes): rec');
+        commitRecord('rec', 'pass', ['lint', 'types']);
         edit(REL, (t) => t.replace('    lint: pass\n    types: pass\n', '    types: pass\n    lint: pass\n'));
         expect(run(REL, { strict: true }).code).toBe(0);
     });
@@ -590,10 +582,20 @@ describe('R4.5 output and exit codes', () => {
         edit(REL, (t) => t.replace('type: feat', 'type: fix'));
         expect(Object.keys(diagsOf(run(REL))[0]).sort()).toEqual(['code', 'field', 'message']);
     });
-    test('exit code 0 when valid and exempt, 2 otherwise', () => {
-        expect(run().code).toBe(2);
+    test('exit code 0 for a valid run', () => {
         commitRecord();
         expect(run().code).toBe(0);
+    });
+    test('exit code 0 for an exempt run', () => {
+        repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: none');
+        expect(run().code).toBe(0);
+        expect(runChangeValidate(repo.root, undefined, {}).code).toBe(0);
+    });
+    test('exit code 2 for a missing record', () => {
+        expect(run().code).toBe(2);
+    });
+    test('exit code 2 for an invalid record', () => {
+        commitRecord();
         repo.commit({ 'cli/src/more.ts': '1' }, 'chore: more');
         expect(run().code).toBe(2);
     });
@@ -601,49 +603,28 @@ describe('R4.5 output and exit codes', () => {
         expect(run().stderr).toBe('');
         expect(runChangeValidate(repo.root, undefined, {}).stderr).toBe('');
     });
-    test('at most 20 diagnostics per record: 19 and a diagnostics-truncated marker', () => {
+    /** A committed record plus `count` unknown top-level keys in the working tree: `count` unknown-field diagnostics. */
+    function withUnknownKeys(count: number): Diag[] {
         commitRecord();
-        const extra = Array.from({ length: 30 }, (_, i) => `extra${i}: 1`).join('\n');
+        const extra = Array.from({ length: count }, (_, i) => `extra${i}: 1`).join('\n');
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        const ds = diagsOf(run(REL));
+        return diagsOf(run(REL));
+    }
+    test.each([
+        [21, '2'], // just past the per-record cap
+        [30, '11'],
+        [50, '31'], // the shape validator's own cap is reached exactly
+        [51, '32'], // one diagnostic dropped by the shape validator itself
+        [80, '61'], // many dropped by the shape validator itself
+    ])('%i diagnostics: 19 kept and one marker counting %s omitted', (count, omitted) => {
+        const ds = withUnknownKeys(count);
         expect(ds).toHaveLength(20);
         expect(ds.slice(0, 19).every((d) => d.code === 'unknown-field')).toBe(true);
-        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: '11 more diagnostics omitted' });
-    });
-    test('the truncation count includes the diagnostics the shape validator itself dropped (80 found, 19 kept)', () => {
-        commitRecord();
-        const extra = Array.from({ length: 80 }, (_, i) => `extra${i}: 1`).join('\n');
-        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        const ds = diagsOf(run(REL));
-        expect(ds).toHaveLength(20);
         expect(ds.filter((d) => d.code === 'diagnostics-truncated')).toHaveLength(1);
-        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: '61 more diagnostics omitted' });
+        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: `${omitted} more diagnostics omitted` });
     });
-    test('a count of dropped diagnostics is exact at the shape cap boundary (exactly 50 found)', () => {
-        commitRecord();
-        const extra = Array.from({ length: 50 }, (_, i) => `extra${i}: 1`).join('\n');
-        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        expect(diagsOf(run(REL))[19]).toMatchObject({ code: 'diagnostics-truncated', message: '31 more diagnostics omitted' });
-    });
-    test('a count of dropped diagnostics is exact just past the shape cap (51 found)', () => {
-        commitRecord();
-        const extra = Array.from({ length: 51 }, (_, i) => `extra${i}: 1`).join('\n');
-        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        expect(diagsOf(run(REL))[19]).toMatchObject({ code: 'diagnostics-truncated', message: '32 more diagnostics omitted' });
-    });
-    test('21 diagnostics are cut to 19 and the marker', () => {
-        commitRecord();
-        const extra = Array.from({ length: 21 }, (_, i) => `extra${i}: 1`).join('\n');
-        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        const ds = diagsOf(run(REL));
-        expect(ds).toHaveLength(20);
-        expect(ds[19]).toMatchObject({ code: 'diagnostics-truncated', message: '2 more diagnostics omitted' });
-    });
-    test('exactly 20 diagnostics are all kept', () => {
-        commitRecord();
-        const extra = Array.from({ length: 20 }, (_, i) => `extra${i}: 1`).join('\n');
-        edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
-        const ds = diagsOf(run(REL));
+    test('exactly 20 diagnostics are all kept, with no marker', () => {
+        const ds = withUnknownKeys(20);
         expect(ds).toHaveLength(20);
         expect(ds.every((d) => d.code === 'unknown-field')).toBe(true);
     });
@@ -690,6 +671,31 @@ describe('R4.5 output and exit codes', () => {
         commitRecord();
         edit(REL, (t) => t.replace('  - cli/src', '  - cli/src\n  - docs'));
         expect(diag(run(REL), 'derived-mismatch', 'modules').message).toBe('modules is ["cli/src", "docs"] but git derives ["cli/src"]');
+    });
+    test('a long recorded modules list does not hide the derived value (both halves stay visible)', () => {
+        commitRecord();
+        const many = Array.from({ length: 40 }, (_, i) => `  - mod/m${String(i).padStart(2, '0')}`).join('\n');
+        edit(REL, (t) => t.replace('  - cli/src', `  - cli/src\n${many}`));
+        const d = diag(run(REL), 'derived-mismatch', 'modules');
+        expect(d.message.length).toBeLessThanOrEqual(300);
+        expect(d.message.startsWith('modules is ["cli/src", "mod/m00"')).toBe(true);
+        expect(d.message.endsWith('but git derives ["cli/src"]')).toBe(true);
+    });
+    test('a long derived modules list does not hide the recorded value', () => {
+        commitRecord();
+        repo.commit(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`wide/w${String(i).padStart(2, '0')}/x.ts`, '1'])), 'chore: wide');
+        const d = diag(run(), 'derived-mismatch', 'modules');
+        expect(d.message.length).toBeLessThanOrEqual(300);
+        expect(d.message.startsWith('modules is ["cli/src"] but git derives ["cli/src", "wide/w00"')).toBe(true);
+    });
+    test('when both the recorded and the derived list are long, each is cut to its own share and the whole message stays under the limit', () => {
+        commitRecord();
+        repo.commit(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`wide/w${String(i).padStart(2, '0')}/x.ts`, '1'])), 'chore: wide');
+        const many = Array.from({ length: 40 }, (_, i) => `  - mod/m${String(i).padStart(2, '0')}`).join('\n');
+        repo.commit({ [REL]: fs.readFileSync(abs(REL), 'utf8').replace('  - cli/src', `  - cli/src\n${many}`) }, 'docs: record');
+        const d = diag(run(), 'derived-mismatch', 'modules');
+        expect(d.message.length).toBeLessThan(300); // not clipped by the 300-unit limit: each half was cut on its own
+        expect(d.message).toMatch(/^modules is \["cli\/src", "mod\/m00".*… but git derives \["cli\/src", "wide\/w00"/);
     });
     test('a null scope and a boolean are shown as themselves', () => {
         commitRecord();
@@ -801,21 +807,86 @@ describe('R4.3 committed-record verdict (record-uncommitted)', () => {
     });
     test('a git failure while checking the record fails closed as record-uncommitted', () => {
         commitRecord();
-        const real = gitModule.runGit;
-        jest.spyOn(gitModule, 'runGit').mockImplementation((cwd, args) => (args.includes('status') ? null : real(cwd, args)));
+        const real = childProcess.execFileSync;
+        jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+            if (args.includes('status')) throw Object.assign(new Error('boom'), { code: 'ETIMEDOUT' });
+            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+        }) as never);
         const r = run();
         expect(r.code).toBe(2);
         expect(diag(r, 'record-uncommitted', undefined).message).toContain('could not');
     });
-    test('the check never refreshes the index (git --no-optional-locks)', () => {
-        commitRecord();
+});
+
+describe('one derivation, one ancestry check and one late-file listing per verification commit', () => {
+    /** Two valid records that both verify the same commit (the second is a copy of the first under another name). */
+    function twoRecordsOneCommit(): string {
+        commitRecord('aaa');
+        const text = fs.readFileSync(abs('docs/changes/2026-10-17-aaa.md'), 'utf8').replace('id: 2026-10-17-aaa', 'id: 2026-10-17-bbb');
+        repo.commit({ 'docs/changes/2026-10-17-bbb.md': text }, 'docs(changes): bbb');
+        return /commit: ([0-9a-f]{40})/.exec(text)?.[1] as string;
+    }
+    function gitCalls(fn: () => void): string[][] {
         const calls: string[][] = [];
-        const real = gitModule.runGit;
-        jest.spyOn(gitModule, 'runGit').mockImplementation((cwd, args) => { calls.push(args); return real(cwd, args); });
-        run();
-        const status = calls.find((a) => a.includes('status'));
-        expect(status?.[0]).toBe('--no-optional-locks');
-        expect(status).toEqual(expect.arrayContaining(['--porcelain', '-z', '--untracked-files=no']));
+        const real = childProcess.execFileSync;
+        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+            if (cmd === 'git') calls.push(args);
+            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+        }) as never);
+        try { fn(); } finally { spy.mockRestore(); }
+        return calls;
+    }
+    test('both records are valid, and git derives, checks ancestry and lists late files once', () => {
+        const verified = twoRecordsOneCommit();
+        let result: CommandResult | undefined;
+        const calls = gitCalls(() => { result = run(); });
+        expect(report(result as CommandResult)).toMatchObject({ state: 'valid', records: [{ state: 'valid' }, { state: 'valid' }] });
+        expect(calls.filter((a) => a.includes('--no-merges'))).toHaveLength(1); // the derivation's git log
+        expect(calls.filter((a) => a.includes('--is-ancestor'))).toHaveLength(1);
+        expect(calls.filter((a) => a.includes('diff') && a.includes(verified))).toHaveLength(1); // the late-file listing
+    });
+    test('the committed-state check still runs once per record', () => {
+        twoRecordsOneCommit();
+        const calls = gitCalls(() => { run(); });
+        expect(calls.filter((a) => a.includes('status'))).toHaveLength(2);
+    });
+});
+
+describe('a path read through a symlinked working directory or repository root', () => {
+    function link(target: string): string {
+        const dir = fs.mkdtempSync(path.join(repo.home, 'link-'));
+        const l = path.join(dir, 'repo-link');
+        fs.symlinkSync(target, l);
+        return l;
+    }
+    posixOnly('a relative path is read from a cwd that is a symlink to the repository', () => {
+        commitRecord();
+        const r = runChangeValidate(link(repo.root), REL, { json: true });
+        expect(r.code).toBe(0);
+        expect(report(r).records[0].path).toBe(REL);
+    });
+    posixOnly('a path to a record that does not exist, from a symlinked cwd, is record-missing (not outside the repository)', () => {
+        const r = runChangeValidate(link(repo.root), REL, { json: true });
+        expect(r.code).toBe(2);
+        expect(report(r).records[0].diagnostics.map((d) => d.code)).toEqual(['record-missing']);
+    });
+    posixOnly('an absolute path through a symlink to the repository is accepted', () => {
+        commitRecord();
+        const r = runChangeValidate(repo.root, path.join(link(repo.root), ...REL.split('/')), { json: true });
+        expect(r.code).toBe(0);
+        expect(report(r).records[0].path).toBe(REL);
+    });
+    posixOnly('a repository root reported through a symlink still resolves a path given from the real directory', () => {
+        commitRecord();
+        jest.spyOn(gitModule, 'repoRoot').mockReturnValue(link(repo.root));
+        const r = runChangeValidate(repo.root, abs(REL), { json: true });
+        expect(report(r).records[0].path).toBe(REL);
+        expect(r.code).toBe(0);
+    });
+    posixOnly('a symlink to somewhere else is still outside the repository', () => {
+        commitRecord();
+        const elsewhere = fs.mkdtempSync(path.join(repo.home, 'else-'));
+        expectFailure(runChangeValidate(repo.root, path.join(link(elsewhere), '2026-10-17-rec.md'), {}), 'path-invalid');
     });
 });
 
@@ -920,6 +991,15 @@ describe('robustness: never throws, always a CommandResult', () => {
         let calls = 0;
         jest.spyOn(gitModule, 'headSha').mockImplementation((root: string) => (++calls === 1 ? real(root) : 'f'.repeat(40)));
         expectFailure(runChangeValidate(repo.root, undefined, {}), 'git-failed');
+    });
+    test('a HEAD that moves during an exempt run is git-failed, not an exemption', () => {
+        repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: none');
+        const real = gitModule.headSha;
+        let calls = 0;
+        jest.spyOn(gitModule, 'headSha').mockImplementation((root: string) => (++calls === 1 ? real(root) : 'f'.repeat(40)));
+        const r = runChangeValidate(repo.root, undefined, {});
+        expectFailure(r, 'git-failed');
+        expect(r.stderr).toContain('HEAD moved');
     });
     test('an unreadable HEAD is git-failed', () => {
         commitRecord();

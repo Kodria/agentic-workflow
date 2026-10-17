@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
-import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, addedFilesUnder, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
@@ -207,6 +207,65 @@ describe('git functions in a repository', () => {
         expect(addedFilesUnder(repo.root, base, 'HEAD', bad(null))).toBeNull();
         expect(addedFilesUnder(nonRepoDir(), 'main', 'HEAD', 'docs/changes')).toBeNull();
         expect(addedFilesUnder(repo.root, base, 'HEAD', 'docs/changes')).toEqual(['docs/changes/new.md']);
+    });
+
+    test('isCommittedClean is true for an unchanged tracked file and false after an unstaged or a staged edit', () => {
+        branch();
+        repo.commit({ 'docs/changes/r.md': 'one' }, 'docs: r');
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(true);
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/r.md'), 'two');
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(false);
+        repo.git('add', 'docs/changes/r.md');
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(false);
+        repo.git('commit', '-q', '-m', 'docs: r2');
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(true);
+    });
+    test('isCommittedClean looks only at the given path, literally', () => {
+        branch();
+        repo.commit({ 'docs/changes/r.md': 'one', 'docs/changes/s.md': 'one', 'docs/changes/[a].md': 'one', 'docs/changes/a.md': 'one' }, 'docs: files');
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/s.md'), 'two');
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/a.md'), 'two');
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(true);
+        expect(isCommittedClean(repo.root, 'docs/changes/[a].md')).toBe(true); // a glob would match a.md
+        expect(isCommittedClean(repo.root, 'docs/changes/s.md')).toBe(false);
+    });
+    test('isCommittedClean ignores untracked files and runs from any directory of the repository', () => {
+        branch();
+        repo.commit({ 'docs/changes/r.md': 'one' }, 'docs: r');
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/new.md'), 'x');
+        expect(isCommittedClean(repo.root, 'docs/changes/new.md')).toBe(true);
+        expect(isCommittedClean(path.join(repo.root, 'docs'), 'docs/changes/r.md')).toBe(true);
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/r.md'), 'two');
+        expect(isCommittedClean(path.join(repo.root, 'docs'), 'docs/changes/r.md')).toBe(false);
+    });
+    test('isCommittedClean is null for an unsafe path, a non-string input and a non-repository', () => {
+        branch();
+        for (const rel of ['../x', '/etc/passwd', '', 'a\nb', '-x/../y', bad(7), bad(null)]) expect(isCommittedClean(repo.root, rel)).toBeNull();
+        expect(isCommittedClean(bad(undefined), 'docs/changes/r.md')).toBeNull();
+        expect(isCommittedClean(nonRepoDir(), 'docs/changes/r.md')).toBeNull();
+    });
+    test('isCommittedClean never takes the optional index lock (status would otherwise refresh and write the index)', () => {
+        branch();
+        repo.commit({ 'docs/changes/r.md': 'one' }, 'docs: r');
+        const real = childProcess.execFileSync;
+        const calls: string[][] = [];
+        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+            calls.push(args);
+            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+        }) as never);
+        try { isCommittedClean(repo.root, 'docs/changes/r.md'); } finally { spy.mockRestore(); }
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0]).toBe('--no-optional-locks');
+        expect(calls[0]).toEqual(expect.arrayContaining(['status', '--porcelain', '-z', '--untracked-files=no', '--ignore-submodules=none']));
+    });
+    test('isCommittedClean leaves the index file untouched even when its stat data is stale', () => {
+        branch();
+        repo.commit({ 'docs/changes/r.md': 'one' }, 'docs: r');
+        const index = path.join(repo.root, '.git', 'index');
+        fs.utimesSync(path.join(repo.root, 'docs/changes/r.md'), new Date(2000, 0, 1), new Date(2000, 0, 1));
+        const before = fs.readFileSync(index);
+        expect(isCommittedClean(repo.root, 'docs/changes/r.md')).toBe(true);
+        expect(fs.readFileSync(index).equals(before)).toBe(true);
     });
 
     test('dirtiness ignores only the excluded paths', () => {
