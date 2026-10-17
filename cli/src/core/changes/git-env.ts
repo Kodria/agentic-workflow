@@ -10,7 +10,11 @@ export const GIT_TIMEOUT_MS = 15000;
  */
 const PATHSPEC_ENV = new Set(['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS']);
 
-/** Makes git fail on a missing object (partial clone) instead of fetching it from the promisor remote. */
+/**
+ * Makes git fail on a missing object (partial clone) instead of fetching it from the promisor remote. Needs git 2.43 or newer:
+ * an older git ignores the variable and keeps its previous behaviour (it fetches the object), so the read-only guarantee for
+ * partial clones is only given from 2.43 on.
+ */
 const NO_LAZY_FETCH = 'GIT_NO_LAZY_FETCH';
 
 /** The environment every git child of the change-record code runs in: pathspec variables removed, lazy fetching off. */

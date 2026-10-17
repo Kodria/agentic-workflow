@@ -22,6 +22,15 @@ describe('listChanges: input and base (R5.1, R3.1, R3.2, R3.5)', () => {
         adopt();
         expect(listed().base).toBe('main');
     });
+    test('the default base costs one rev-parse per candidate tried, not a second one to pin it', () => {
+        adopt();
+        const spy = spyOnGit();
+        listed();
+        spy.restore();
+        const asked = (ref: string): number => spy.calls.filter((a) => a.includes(`${ref}^{commit}`)).length;
+        expect(asked('refs/remotes/origin/HEAD')).toBe(1);
+        expect(asked('main')).toBe(1);
+    });
     test('an explicit base is used and reported', () => {
         adopt();
         repo.git('branch', 'trunk');

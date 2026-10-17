@@ -70,6 +70,22 @@ export function makeRepo(): TestRepo {
     return { root, home, git, gitAt, commit, cleanup };
 }
 
+/** The version of the installed git as [major, minor], or null when it cannot be read. */
+export function gitVersion(): [number, number] | null {
+    try {
+        const m = /^git version (\d+)\.(\d+)/.exec(execFileSync('git', ['--version'], { encoding: 'utf8' }));
+        return m ? [Number(m[1]), Number(m[2])] : null;
+    } catch {
+        return null;
+    }
+}
+
+/** True when the installed git is `major.minor` or newer (false when its version cannot be read). */
+export function gitAtLeast(major: number, minor: number): boolean {
+    const v = gitVersion();
+    return v !== null && (v[0] > major || (v[0] === major && v[1] >= minor));
+}
+
 /** `test` where symlinks and POSIX modes exist; reported as skipped (not as passed) on Windows. */
 export const posixOnly: typeof test = process.platform === 'win32' ? (test.skip as typeof test) : test;
 

@@ -1,5 +1,5 @@
 import path from 'path';
-import { COMMIT_ID, LOG_SAFETY_ARGS, addedFilesUnder, commitSha, repoIdentity, runGit } from './git';
+import { COMMIT_ID, LOG_SAFETY_ARGS, addedFilesUnder, repoIdentity, runGit } from './git';
 import { RECORD_FILE_RE } from './parse';
 import { resolveBaseRef, type Failure } from './range';
 import { esc, isObj } from './text-safety';
@@ -153,7 +153,7 @@ function readBounded(root: string, shas: string[], field: string, fallback: stri
     return values;
 }
 
-/** The tag with the earliest creator date that contains `sha` (ties by name ascending); undefined when git fails. */
+/** The tag with the earliest creator date that contains `sha` (ties by name ascending); `{ ok: false }` when git fails. */
 function earliestTag(root: string, sha: string): Read<string | null> {
     // For-each-ref sorts by the LAST --sort first: creation date, then name.
     const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', '--count=1', '--format=%(refname)', 'refs/tags/']);
@@ -240,7 +240,7 @@ function parseScan(out: string): Entry[] | null {
 /**
  * R5.4: the oldest first-parent commit that touched `docs/changes` (the first one that ever touched it must have added a file),
  * read in pages of `pageSize` commits that touch it; each page continues from the first parent of the previous page's last
- * commit. null when there is none, undefined when git fails.
+ * commit. `{ ok: true, value: null }` when there is none, `{ ok: false }` when git fails.
  */
 function findAdoption(root: string, pinned: string, pageSize: number): Read<string | null> {
     let start = pinned;
@@ -338,9 +338,7 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     // R3.1/R3.2/R3.5, as `change new`; then the base is pinned to one commit id: history cannot move under the run.
     const resolved = resolveBaseRef(root, explicit as string | undefined);
     if (!resolved.ok) return { ok: false, failure: resolved.failure };
-    const base = resolved.base;
-    const pinned = commitSha(root, base);
-    if (pinned === null) return fail('git-failed', `git could not read "${esc(base)}"`);
+    const { base, sha: pinned } = resolved;
 
     // R5.1: at a shallow boundary a commit looks like a root commit, so a shallow history cannot be classified.
     const shallow = runGit(root, ['rev-parse', '--is-shallow-repository'])?.trim();

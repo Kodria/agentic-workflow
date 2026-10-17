@@ -1,4 +1,4 @@
-import { headSha, isSafeRef, mergeBase, resolveBase } from './git';
+import { headSha, isSafeRef, mergeBase, resolveBaseCommit } from './git';
 import type { RecordDir } from './record-io';
 import { esc, isObj } from './text-safety';
 import { RECORD_DIR } from './types';
@@ -16,7 +16,8 @@ export const HEAD_MOVED: Failure = { code: 'git-failed', message: 'HEAD moved du
 const KINDS: readonly string[] = ['ok', 'absent', 'unsafe', 'error'];
 
 export type Range = { ok: true; head: string; mergeBase: string } | { ok: false; failure: Failure };
-export type BaseRef = { ok: true; base: string } | { ok: false; failure: Failure };
+/** The base ref and the id of the commit it names. */
+export type BaseRef = { ok: true; base: string; sha: string } | { ok: false; failure: Failure };
 
 const failure = (code: string, message: string, remedy?: string): { ok: false; failure: Failure } => ({ ok: false, failure: remedy === undefined ? { code, message } : { code, message, remedy } });
 
@@ -26,8 +27,8 @@ const failure = (code: string, message: string, remedy?: string): { ok: false; f
  */
 export function resolveBaseRef(root: string, explicitBase: string | undefined): BaseRef {
     if (explicitBase !== undefined && !isSafeRef(explicitBase)) return failure('invalid-input', `--base "${esc(explicitBase)}" is not a safe git ref`);
-    const base = resolveBase(root, explicitBase);
-    return base === null ? failure('base-unresolved', 'could not resolve a base branch', REMEDY_BASE) : { ok: true, base };
+    const resolved = resolveBaseCommit(root, explicitBase);
+    return resolved === null ? failure('base-unresolved', 'could not resolve a base branch', REMEDY_BASE) : { ok: true, ...resolved };
 }
 
 /**

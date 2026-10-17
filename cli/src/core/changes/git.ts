@@ -48,15 +48,21 @@ export function isSafeRevision(rev: unknown): rev is string {
     return parts.length <= 2 && parts.every(isSafeRef);
 }
 
-function isCommitRef(root: string, ref: unknown): ref is string {
-    return isSafeRef(ref) && runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`]) !== null;
+/**
+ * R3.1: --base, then origin/HEAD, then main, then master: the first that names a commit, with that commit's id. Null when none
+ * does (or the explicit base is unsafe). One `rev-parse` per candidate.
+ */
+export function resolveBaseCommit(root: string, explicit?: string): { base: string; sha: string } | null {
+    for (const candidate of explicit !== undefined ? [explicit] : ['refs/remotes/origin/HEAD', 'main', 'master']) {
+        const sha = commitSha(root, candidate);
+        if (sha !== null) return { base: candidate, sha };
+    }
+    return null;
 }
 
-/** R3.1: --base, then origin/HEAD, then main, then master. Returns null when none resolves (or the explicit base is unsafe). */
+/** R3.1: the base ref (see resolveBaseCommit). Returns null when none resolves (or the explicit base is unsafe). */
 export function resolveBase(root: string, explicit?: string): string | null {
-    if (explicit !== undefined) return isCommitRef(root, explicit) ? explicit : null;
-    for (const candidate of ['refs/remotes/origin/HEAD', 'main', 'master']) if (isCommitRef(root, candidate)) return candidate;
-    return null;
+    return resolveBaseCommit(root, explicit)?.base ?? null;
 }
 
 /** Full id of the common ancestor of `base` and HEAD; null when there is none or the input is invalid. */

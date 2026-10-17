@@ -718,7 +718,7 @@ describe('R4.5 operational failures under --json', () => {
         ['path-invalid (hostile path)', 'path-invalid', () => runChangeValidate(repo.root, `docs/changes/\u001b${'z\n'.repeat(400)}.md`, J)],
         ['git-failed', 'git-failed', () => { jest.spyOn(gitModule, 'headSha').mockReturnValue(null); return runChangeValidate(repo.root, undefined, J); }],
         ['flag-invalid', 'flag-invalid', () => runChangeValidate(repo.root, undefined, bad({ ...J, base: 7 }))],
-        ['internal-error', 'internal-error', () => { jest.spyOn(gitModule, 'resolveBase').mockImplementation(() => { throw new RangeError('x'); }); return runChangeValidate(repo.root, undefined, J); }],
+        ['internal-error', 'internal-error', () => { jest.spyOn(gitModule, 'resolveBaseCommit').mockImplementation(() => { throw new RangeError('x'); }); return runChangeValidate(repo.root, undefined, J); }],
     ];
     test.each(cases)('%s prints one JSON line of the report shape on stdout and exits 2', (_name, code, call) => {
         const r = call();
