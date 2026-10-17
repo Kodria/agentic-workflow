@@ -51,7 +51,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `schema` is exactly `awm.change-record/v1`.
   - `id` equals the file stem.
   - `title` is 1–120 characters.
-  - `summary_short` is 1–280 characters, with no line breaks.
+  - `summary_short` is 1–280 characters, with no line breaks (`\r`, `\n`, U+0085, U+2028, U+2029).
   - `type` is a lowercase conventional-commit type.
   - `scope` is a non-empty string or `null`.
   - `semver` is one of `major | minor | patch | none`.
@@ -61,7 +61,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `manual_validation` is either a non-empty array of `{step, expected}` objects with non-empty strings, or the object `{none: <non-empty reason>}`.
   - `risks` is an array of non-empty strings and may be empty.
   - `rollback` is a non-empty string.
-  - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all strings. Timestamps are canonical ISO-8601, meaning exactly the form `Date.prototype.toISOString()` produces (UTC with milliseconds, e.g. `2026-10-17T10:00:00.000Z`).
+  - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all non-empty strings. Timestamps are canonical ISO-8601, meaning exactly the form `Date.prototype.toISOString()` produces (UTC with milliseconds, e.g. `2026-10-17T10:00:00.000Z`).
 - **R1.5 — Verification block:** `verification` SHALL contain:
   - `commit`: 40 lowercase hex characters;
   - `overall`: the receipt verdict;

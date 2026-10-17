@@ -2098,3 +2098,4 @@ The S1 specification review found defects in the S1 code and wording as original
 - **Sensor names (R1.5):** a non-empty single-line string of at most 128 characters without control characters (replaces the planned `[A-Za-z0-9._-]+` regex, which could reject a valid sensor name copied from a receipt).
 - **Wording clarifications** (design R1.2, R1.4, R1.5, R1.7; code already matches): `CORE_SCHEMA`, non-empty `scope`/`risks` entries, canonical ISO means the `toISOString()` form, `links.plan` existence is checked whenever a repository root is available.
 - The S1 test count is 11, not 12.
+- **Second review (R1.4):** `provenance` values are non-empty strings; `summary_short` rejects `\r`, `\n`, U+0085, U+2028 and U+2029.
