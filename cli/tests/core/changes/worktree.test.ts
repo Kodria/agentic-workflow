@@ -4,14 +4,20 @@ import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from '../../../src/core/changes/worktree';
 
+const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'];
+const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+let saved: Record<string, string | undefined> = {};
 let root: string; let home: string;
-const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' };
-const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: GIT_ENV }).trim();
+// Jest's sandboxed `process.env` is a copy that children do not see, so the child's environment is passed explicitly.
+const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
+const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: gitEnv() }).trim();
 const real = childProcess.execFileSync;
 let spy: jest.SpyInstance | undefined;
 
 beforeEach(() => {
+    saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
+    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
     root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-wt-')));
     g('init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(root, 'a.txt'), 'a');
@@ -19,7 +25,13 @@ beforeEach(() => {
 });
 afterEach(() => {
     spy?.mockRestore(); spy = undefined;
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true });
+});
+
+afterAll(() => {
+    // The environment the suite started with is back, so nothing leaks into the next test file.
+    for (const k of ENV_KEYS) expect(process.env[k]).toBe(ORIGINAL[k]);
 });
 
 /** Intercepts git invocations whose first argument is `first`; every other call reaches the real git. */
@@ -32,6 +44,14 @@ const intercept = (first: string, handler: (opts: Record<string, unknown>, args:
 const fail = (code: string) => (): never => { throw Object.assign(new Error(`spawnSync git ${code}`), { code }); };
 
 describe('worktree state', () => {
+    test('R2.x isolation: HOME and AWM_HOME point at a throwaway directory, never the real ones', () => {
+        expect(process.env.HOME).toBe(home);
+        expect(process.env.HOME).not.toBe(ORIGINAL.HOME);
+        expect(process.env.AWM_HOME).toBe(path.join(home, '.awm'));
+        expect(process.env.AWM_HOME).not.toBe(ORIGINAL.AWM_HOME);
+        expect(process.env.GIT_CONFIG_GLOBAL).toBe(os.devNull);
+        expect(process.env.GIT_CONFIG_NOSYSTEM).toBe('1');
+    });
     test('the runtime-state exclusion list is exactly the local state paths', () => {
         expect([...RUNTIME_STATE_EXCLUDES]).toEqual(['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json']);
     });
@@ -85,7 +105,7 @@ describe('worktree state', () => {
     test('a repository without a commit is not-repo', () => {
         const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-')));
         try {
-            execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: empty });
+            execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: empty, env: gitEnv() });
             expect(gitState(empty, true)).toEqual({ kind: 'not-repo' });
         } finally { fs.rmSync(empty, { recursive: true, force: true }); }
     });

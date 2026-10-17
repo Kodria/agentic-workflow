@@ -13,17 +13,21 @@ import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finaliz
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, shouldRun } from '../../../src/commands/sensors/run';
 
-const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_NOSYSTEM'];
+const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL'];
+const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+// The real checkout must stay untouched: a receipt written relative to the cwd would land here.
+const CHECKOUT_RUNS = path.resolve('.awm', 'sensors', 'runs');
+const CHECKOUT_RUNS_BEFORE = fs.existsSync(CHECKOUT_RUNS) ? fs.readdirSync(CHECKOUT_RUNS) : null;
 let saved: Record<string, string | undefined> = {};
 let root: string; let home: string;
-// Jest's sandboxed `process.env` is a copy, so identity must be passed to the child explicitly.
-const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' };
-const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: GIT_ENV }).trim();
+// Jest's sandboxed `process.env` is a copy that children do not see, so the child's environment is passed explicitly.
+const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
+const g = (...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: gitEnv() }).trim();
 
 beforeEach(() => {
     saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
-    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
+    Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull });
     root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcpt-')));
     g('init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
@@ -33,6 +37,11 @@ beforeEach(() => {
 afterEach(() => {
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true });
+});
+
+afterAll(() => {
+    for (const k of ENV_KEYS) expect(process.env[k]).toBe(ORIGINAL[k]);
+    expect(fs.existsSync(CHECKOUT_RUNS) ? fs.readdirSync(CHECKOUT_RUNS) : null).toEqual(CHECKOUT_RUNS_BEFORE);
 });
 
 const output = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }, { name: 'a-typecheck', status: 'pass' as const, errors: [] }] };
@@ -56,6 +65,13 @@ const mutateFile = (head: string, mutate: (r: Record<string, unknown>) => void, 
 };
 
 describe('receipt', () => {
+    test('isolation: HOME and AWM_HOME point at a throwaway directory, never the real ones', () => {
+        expect(process.env.HOME).toBe(home);
+        expect(process.env.HOME).not.toBe(ORIGINAL.HOME);
+        expect(process.env.AWM_HOME).toBe(path.join(home, '.awm'));
+        expect(process.env.AWM_HOME).not.toBe(ORIGINAL.AWM_HOME);
+        expect(process.env.GIT_CONFIG_GLOBAL).toBe(os.devNull);
+    });
     test('R2.1 full selection on a clean tree writes a 0600 receipt keyed by HEAD', () => {
         const pre = captureReceiptPrecondition(root);
         expect(pre.eligible).toBe(true);
@@ -348,7 +364,7 @@ describe('receipt', () => {
     test('R2.2 a repository without a commit yields no receipt', () => {
         const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-')));
         try {
-            execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: empty });
+            execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: empty, env: gitEnv() });
             expect(captureReceiptPrecondition(empty).eligible).toBe(false);
         } finally { fs.rmSync(empty, { recursive: true, force: true }); }
     });
