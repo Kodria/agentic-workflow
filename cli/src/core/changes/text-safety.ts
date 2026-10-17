@@ -59,6 +59,34 @@ export function isSafeRelativePath(p: unknown): p is string {
     return p.split('/').every((s) => s !== '' && s !== '.' && s !== '..');
 }
 
+/** A plain object (not null, not an array). */
+export const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Round-trips through UTF-8: false for a lone surrogate, which would not survive being written to a file. */
+export const isWellFormed = (s: unknown): s is string => typeof s === 'string' && Buffer.from(s, 'utf8').toString('utf8') === s;
+
+export interface HttpsUrlOptions {
+    /** `https://user:pw@host/` is accepted only when true. */
+    allowCredentials: boolean;
+    /** Upper bound on the length in UTF-16 units; none when omitted. */
+    maxLength?: number;
+}
+
+/**
+ * An https URL a record can hold: one line, no whitespace, `https://` followed by a real authority (the first character is not
+ * `/ ? # \ @`), parseable by WHATWG URL with a host. Linear time; never throws.
+ */
+export function isHttpsUrl(v: unknown, opts: HttpsUrlOptions): v is string {
+    if (!isSingleLine(v) || /\s/.test(v) || !/^https:\/\/[^/?#\\@]/.test(v)) return false;
+    if (opts.maxLength !== undefined && v.length > opts.maxLength) return false;
+    try {
+        const u = new URL(v);
+        return u.hostname.length > 0 && (opts.allowCredentials || (u.username === '' && u.password === ''));
+    } catch {
+        return false;
+    }
+}
+
 /** Escapes any remaining raw line break or control character (no quoting, no clipping). */
 export const cleanText = (text: string): string => (typeof text === 'string' ? text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape) : NON_STRING);
 

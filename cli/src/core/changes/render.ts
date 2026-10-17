@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'util';
 import yaml from 'js-yaml';
 import { loadFrontmatter, splitRecord } from './parse';
+import { isObj } from './text-safety';
 import { BODY_HEADINGS, DERIVED_KEYS, PENDING_MARKER, RECORD_SCHEMA, type DerivedFields, type Verification } from './types';
 
 // CORE_SCHEMA on both sides: the validator parses with it, so what is dumped here is exactly what it will read back.
@@ -8,7 +9,6 @@ const DUMP = { lineWidth: -1, noRefs: true, sortKeys: false, schema: yaml.CORE_S
 const REPLACED: readonly string[] = [...DERIVED_KEYS, 'verification'];
 const isBareKeyChar = (c: string): boolean => /^[\w.-]$/.test(c);
 
-const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const bare = (line: string): string => (line.endsWith('\r') ? line.slice(0, -1) : line);
 
 export interface SkeletonInput {

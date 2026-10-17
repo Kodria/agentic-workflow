@@ -1,7 +1,6 @@
-import fs from 'fs';
-import path from 'path';
 import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
-import { clipMessage, cleanText, esc, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
+import { isRegularFileInside } from './record-io';
+import { clipMessage, cleanText, esc, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
 import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, PENDING_MARKER, RECORD_SCHEMA, type ChangeRecord, type Diagnostic } from './types';
 
 const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
@@ -14,7 +13,6 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
 /** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */
@@ -35,24 +33,6 @@ const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number
 
 function isModulePath(m: unknown): boolean {
     return m === '.' || isSafeRelativePath(m);
-}
-
-const URL_WHITESPACE = /\s/;
-function isHttpsIssueUrl(v: unknown): boolean {
-    if (!isSingleLine(v) || URL_WHITESPACE.test(v) || !/^https:\/\/[^/?#\\@]/.test(v)) return false;
-    try {
-        const u = new URL(v);
-        return u.protocol === 'https:' && u.hostname.length > 0;
-    } catch { return false; }
-}
-
-function isRegularFileInside(root: string, rel: string): boolean {
-    const abs = path.join(root, rel);
-    try {
-        if (!fs.lstatSync(abs).isFile()) return false;
-        const relToRoot = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-        return relToRoot !== '' && relToRoot !== '..' && !relToRoot.startsWith('..' + path.sep) && !path.isAbsolute(relToRoot);
-    } catch { return false; }
 }
 
 function containsPendingString(value: unknown): boolean {
@@ -121,7 +101,7 @@ function checkLinks(fm: Obj, root: string | undefined, out: Diagnostic[]): void 
         if (!isSafeRelativePath(plan)) bad(out, 'links.plan', 'links.plan must be a safe single-line repo-relative path');
         else if (root !== undefined && !isRegularFileInside(root, plan)) bad(out, 'links.plan', `links.plan "${esc(plan)}" does not exist as a regular file`);
     }
-    if (issue !== undefined && !isHttpsIssueUrl(issue)) bad(out, 'links.issue', 'links.issue must be an https URL');
+    if (issue !== undefined && !isHttpsUrl(issue, { allowCredentials: true })) bad(out, 'links.issue', 'links.issue must be an https URL');
 }
 
 function checkVerification(fm: Obj, out: Diagnostic[]): void {

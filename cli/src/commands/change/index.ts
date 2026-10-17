@@ -1,16 +1,15 @@
-import fs from 'fs';
 import path from 'path';
 import { Command } from 'commander';
 import { emit, type CommandResult } from '../../core/command-result';
-import { writeFileAtomic } from '../../core/atomic-file';
 import { readJournal } from '../../core/journal/store';
-import { isValidRecordFileName, isValidSlug, RECORD_FILE_RE } from '../../core/changes/parse';
+import { isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
 import { headSha, isDirtyOutside, isSafeRef, mergeBase, repoRoot, resolveBase, runGit } from '../../core/changes/git';
 import { deriveFields } from '../../core/changes/derive';
 import { readReceipt } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
-import { clipMessage, cleanText, esc, isSafeRelativePath, isSingleLine } from '../../core/changes/text-safety';
-import { MAX_RECORD_BYTES, RECORD_DIR, type Verification } from '../../core/changes/types';
+import { createExclusive, createRecordDir, inspectRecordDir, isRegularFileInside, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
+import { clipMessage, cleanText, esc, isHttpsUrl, isObj, isSingleLine, isWellFormed } from '../../core/changes/text-safety';
+import { MAX_RECORD_BYTES, RECORD_DIR, type DerivedFields, type Verification } from '../../core/changes/types';
 import { validateRecordShape } from '../../core/changes/validate-shape';
 
 export interface ChangeDeps { now?: () => Date }
@@ -20,46 +19,25 @@ const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
 const MAX_PROVENANCE_VALUE = 200;
 const MAX_ISSUE_URL = 2048;
 const MOVED = 'HEAD moved during derivation';
+const CREATION_ONLY_FLAGS = ['plan', 'issue', 'model', 'session'] as const;
 
-/** Exit 2 with `code: message` (single line, at most 300 units) and an optional static remedy line. Untrusted text is escaped by the caller with esc(). */
+/** One line of output: control characters escaped, at most 300 UTF-16 units (an ellipsis replaces the cut), never splitting a surrogate pair. */
+const line = (text: string): string => clipMessage(cleanText(text));
+
+/**
+ * Exit 2 with `code: message` as ONE clipped line (the code counts), and an optional static remedy as a second clipped line.
+ * Untrusted text is escaped by the caller with esc().
+ */
 const fail = (code: string, message: string, remedy?: string): CommandResult => ({
     code: 2, stdout: '',
-    stderr: `${code}: ${clipMessage(cleanText(message))}\n${remedy ? `  remedy: ${remedy}\n` : ''}`,
+    stderr: `${line(`${code}: ${message}`)}\n${remedy ? `${line(`  remedy: ${remedy}`)}\n` : ''}`,
 });
 
-const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
-const errorCode = (error: unknown): string => (isObj(error) && typeof error.code === 'string' ? error.code : 'unknown');
-/** Round-trips through UTF-8: false for a lone surrogate, which would not survive being written to a file. */
-const wellFormed = (s: string): boolean => Buffer.from(s, 'utf8').toString('utf8') === s;
-
-// ---- Flags (R3.12) ----
+// ---- Flags (R3.11b, R3.12) ----
 
 /** Provenance text: one line, not blank, at most 200 code points, writable as UTF-8. */
 function isProvenanceValue(v: string): boolean {
-    return isSingleLine(v) && v.trim() !== '' && [...v].length <= MAX_PROVENANCE_VALUE && wellFormed(v);
-}
-
-function isHttpsUrl(v: string): boolean {
-    if (!isSingleLine(v) || v.length > MAX_ISSUE_URL || /\s/.test(v) || !/^https:\/\/[^/?#\\@]/.test(v) || !wellFormed(v)) return false;
-    try {
-        const u = new URL(v);
-        return u.hostname.length > 0 && u.username === '' && u.password === '';
-    } catch {
-        return false;
-    }
-}
-
-/** A plain, existing file that stays inside the repository after resolving every link on the way. */
-function isRepoFile(root: string, rel: string): boolean {
-    if (!isSafeRelativePath(rel)) return false;
-    const abs = path.join(root, ...rel.split('/'));
-    try {
-        if (!fs.lstatSync(abs).isFile()) return false;
-        const inside = path.relative(fs.realpathSync.native(root), fs.realpathSync.native(abs));
-        return inside !== '' && inside !== '..' && !inside.startsWith(`..${path.sep}`) && !path.isAbsolute(inside);
-    } catch {
-        return false;
-    }
+    return isSingleLine(v) && v.trim() !== '' && [...v].length <= MAX_PROVENANCE_VALUE && isWellFormed(v);
 }
 
 /** A static description of the first bad flag (never the value), or null. */
@@ -68,56 +46,17 @@ function flagProblem(opts: Record<string, unknown>, root: string): string | null
         if (opts[key] !== undefined && typeof opts[key] !== 'string') return `--${key} must be a string`;
     }
     if (opts.refresh !== undefined && typeof opts.refresh !== 'boolean') return '--refresh must be a boolean flag';
+    if (opts.refresh === true) {
+        const clash = CREATION_ONLY_FLAGS.find((key) => opts[key] !== undefined);
+        if (clash) return `--refresh cannot be combined with --${clash}: it only applies when a record is created`;
+    }
     for (const key of ['model', 'session'] as const) {
         const v = opts[key];
         if (v !== undefined && !isProvenanceValue(v as string)) return `--${key} must be one non-blank line of at most ${MAX_PROVENANCE_VALUE} characters`;
     }
-    if (opts.issue !== undefined && !isHttpsUrl(opts.issue as string)) return '--issue must be an https URL without credentials';
-    if (opts.plan !== undefined && !isRepoFile(root, opts.plan as string)) return '--plan must be an existing regular file inside the repository';
+    if (opts.issue !== undefined && !(isWellFormed(opts.issue) && isHttpsUrl(opts.issue, { allowCredentials: false, maxLength: MAX_ISSUE_URL }))) return '--issue must be an https URL without credentials';
+    if (opts.plan !== undefined && !isRegularFileInside(root, opts.plan as string)) return '--plan must be an existing regular file inside the repository';
     return null;
-}
-
-// ---- docs/changes (R3.12) ----
-
-type Dir = { kind: 'ok'; dir: string } | { kind: 'absent' } | { kind: 'unsafe' } | { kind: 'error' };
-
-/** Walks docs and docs/changes without following links: a symlink or a non-directory on the way is unsafe. */
-function inspectRecordDir(root: string): Dir {
-    let current = root;
-    for (const segment of RECORD_DIR.split('/')) {
-        current = path.join(current, segment);
-        let stat: fs.Stats;
-        try {
-            stat = fs.lstatSync(current);
-        } catch (error) {
-            return errorCode(error) === 'ENOENT' ? { kind: 'absent' } : { kind: 'error' };
-        }
-        if (stat.isSymbolicLink() || !stat.isDirectory()) return { kind: 'unsafe' };
-    }
-    return { kind: 'ok', dir: current };
-}
-
-/** Creates the missing directories, then inspects again: a link planted in between is still refused. */
-function createRecordDir(root: string): Dir {
-    let current = root;
-    for (const segment of RECORD_DIR.split('/')) {
-        current = path.join(current, segment);
-        try {
-            fs.mkdirSync(current);
-        } catch (error) {
-            if (errorCode(error) !== 'EEXIST') return { kind: 'error' };
-        }
-    }
-    return inspectRecordDir(root);
-}
-
-/** Names of the records with this slug, whatever their date. Null when the directory cannot be listed. */
-function recordsWithSlug(dir: string, slug: string): string[] | null {
-    try {
-        return fs.readdirSync(dir).filter((name) => RECORD_FILE_RE.exec(name)?.[4] === slug);
-    } catch {
-        return null;
-    }
 }
 
 // ---- Provenance (R3.8) ----
@@ -145,45 +84,6 @@ function provenance(root: string, opts: NewOpts): Record<string, string> {
     if (opts.model !== undefined) out.model = opts.model;
     if (opts.session !== undefined) out.session = opts.session;
     return out;
-}
-
-// ---- Writing ----
-
-/** Exclusive create: never replaces a file, never follows a link at the target. Removes what it created when the write fails. */
-function createExclusive(file: string, content: string): 'ok' | 'exists' | 'error' {
-    let fd: number;
-    try {
-        fd = fs.openSync(file, 'wx', 0o644);
-    } catch (error) {
-        return errorCode(error) === 'EEXIST' ? 'exists' : 'error';
-    }
-    try {
-        fs.writeFileSync(fd, content, 'utf8');
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        return 'ok';
-    } catch {
-        try { fs.closeSync(fd); } catch { /* the write error is the one that matters */ }
-        try { fs.unlinkSync(file); } catch { /* best effort: the file is ours, and incomplete */ }
-        return 'error';
-    }
-}
-
-/**
- * Reads a record for refresh: a regular file, not a link, within the record size limit, valid UTF-8 (so it is written back byte for
- * byte). `ignoreBOM: true` keeps a leading BOM in the text as U+FEFF; by default the decoder would strip it, and the rewrite would
- * silently drop it. With it kept, the record does not start with `---` and fails as `record-invalid`.
- */
-function readRecord(target: string, name: string): { ok: true; text: string } | { ok: false; result: CommandResult } {
-    try {
-        const stat = fs.lstatSync(target);
-        if (stat.isSymbolicLink()) return { ok: false, result: fail('unsafe-path', `${name} is a symlink; refusing to write`) };
-        if (!stat.isFile()) return { ok: false, result: fail('record-invalid', `${name} is not a regular file`) };
-        if (stat.size > MAX_RECORD_BYTES) return { ok: false, result: fail('record-invalid', `${name} is larger than ${MAX_RECORD_BYTES} bytes`) };
-        return { ok: true, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(target)) };
-    } catch (error) {
-        return { ok: false, result: errorCode(error) === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? fail('record-invalid', `${name} is not valid UTF-8`) : fail('io-failed', `could not read ${name} (${esc(errorCode(error))})`) };
-    }
 }
 
 // ---- awm change new ----
@@ -233,7 +133,7 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     const existing = dir.kind === 'ok' ? recordsWithSlug(dir.dir, slug) : [];
     if (existing === null) return fail('io-failed', `could not list ${RECORD_DIR}`);
 
-    if (opts.refresh === true) return refresh(dir, existing, slug, derived.fields, verification, head, root);
+    if (opts.refresh === true) return refresh({ dir, existing, slug, fields: derived.fields, verification, head, root });
 
     if (existing.length > 0) return fail('record-exists', `a record for slug "${slug}" already exists (${existing[0]})`, 'use --refresh to update derived fields');
     const date = utcDate(deps);
@@ -258,22 +158,23 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     return { code: 0, stdout: `Created ${RECORD_DIR}/${id}.md\n`, stderr: '' };
 }
 
+interface RefreshInput { dir: RecordDir; existing: string[]; slug: string; fields: DerivedFields; verification: Verification; head: string; root: string }
+
 /** R3.11: rewrites only the derived fields and verification of the one existing record. */
-function refresh(dir: Dir, existing: string[], slug: string, fields: Parameters<typeof refreshDerived>[1], verification: Verification, head: string, root: string): CommandResult {
+function refresh({ dir, existing, slug, fields, verification, head, root }: RefreshInput): CommandResult {
     if (dir.kind !== 'ok' || existing.length === 0) return fail('record-missing', `no record found for slug "${slug}"`, `run awm change new ${slug} to create it`);
     if (existing.length > 1) return fail('record-ambiguous', `${existing.length} records exist for slug "${slug}"; keep one`);
     const name = existing[0];
     const target = path.join(dir.dir, name);
     const current = readRecord(target, name);
-    if (!current.ok) return current.result;
+    if (!current.ok) return fail(current.code, current.message);
     const next = refreshDerived(current.text, fields, verification);
-    if (next === null || Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-invalid', `${name} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
+    if (next === null || Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-invalid', `${esc(name)} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
     if (headSha(root) !== head) return fail('git-failed', MOVED);
-    try {
-        writeFileAtomic(target, next, 0o644);
-    } catch (error) {
-        return fail('io-failed', `could not write ${name} (${esc(error instanceof Error && error.message.startsWith('refusing to replace symlink') ? 'symlink' : errorCode(error))})`);
-    }
+    // Someone else may have edited (or replaced) the record since it was read: their version wins, nothing is written.
+    if (!unchangedSince(target, current.snapshot)) return fail('record-changed', `${esc(name)} changed while it was being refreshed; run the command again`);
+    const written = replaceRecord(target, next);
+    if (!written.ok) return fail('io-failed', `could not write ${esc(name)} (${esc(written.code)})`);
     return { code: 0, stdout: `Refreshed ${RECORD_DIR}/${name}\n`, stderr: '' };
 }
 
@@ -287,7 +188,7 @@ export function runChangeNew(cwd: string, slug: string, opts: NewOpts, deps: Cha
 }
 
 export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): void {
-    const change = program.command('change').description('create and validate the Change Record of the current branch');
+    const change = program.command('change').description('create the Change Record of the current branch');
     change
         .command('new <slug>')
         .description('create docs/changes/YYYY-MM-DD-<slug>.md with derived fields and pending narrative')

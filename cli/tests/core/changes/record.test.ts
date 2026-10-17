@@ -148,6 +148,9 @@ describe('validateRecordShape', () => {
                 expectDiag(issue(v), 'field-invalid', 'links.issue');
             }
         });
+        test('links.issue keeps accepting a URL with credentials (only `awm change new` refuses to write one)', () => {
+            expect(check({ links: 'links:\n  issue: "https://user@example.com/1"' }).diagnostics).toEqual([]);
+        });
         (process.platform === 'win32' ? test.skip : test)('links.plan cannot escape the root through a symlinked directory', () => {
             const base = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
             const root = path.join(base, 'repo');

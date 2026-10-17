@@ -1,4 +1,4 @@
-import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isSafeMultiline, isSafeRelativePath, isSingleLine, sliceNoSplit } from '../../../src/core/changes/text-safety';
+import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine, isWellFormed, sliceNoSplit } from '../../../src/core/changes/text-safety';
 
 const LINE_BREAKS = ['\r', '\n', '\u0085', ' ', ' '];
 
@@ -144,5 +144,57 @@ describe('isSafeRelativePath', () => {
     });
     test.each([[undefined], [null], [7], [{}], [['a']], [true]])('rejects the non-string %p without throwing', (p) => {
         expect(isSafeRelativePath(p)).toBe(false);
+    });
+});
+
+describe('isObj', () => {
+    test.each([[{}], [{ a: 1 }], [Object.create(null)]])('accepts the object %j', (v) => {
+        expect(isObj(v)).toBe(true);
+    });
+    test.each([[null], [undefined], [[]], [[1]], ['x'], [1], [true]])('rejects %j', (v) => {
+        expect(isObj(v)).toBe(false);
+    });
+});
+
+describe('isWellFormed', () => {
+    test.each(['', 'plain', 'ñandú', '😀'])('accepts %j', (t) => {
+        expect(isWellFormed(t)).toBe(true);
+    });
+    test.each(['a\ud800b', '\udc00', 'a\ud83d'])('rejects a lone surrogate in %j', (t) => {
+        expect(isWellFormed(t)).toBe(false);
+    });
+    test.each([[undefined], [null], [1]])('rejects the non-string %p', (v) => {
+        expect(isWellFormed(v as never)).toBe(false);
+    });
+});
+
+describe('isHttpsUrl', () => {
+    const lenient = { allowCredentials: true };
+    const strict = { allowCredentials: false, maxLength: 2048 };
+    test.each(['https://github.com/o/r/issues/1', 'https://example.com', 'https://example.com:8443/a?b=c#d', 'https://[::1]/x'])('accepts %j in both modes', (u) => {
+        expect(isHttpsUrl(u, lenient)).toBe(true);
+        expect(isHttpsUrl(u, strict)).toBe(true);
+    });
+    test.each([
+        ['http', 'http://example.com'], ['other scheme', 'javascript:alert(1)'], ['upper-case scheme', 'HTTPS://example.com'], ['no authority', 'https://'],
+        ['empty host before a path', 'https:///a'], ['query first', 'https://?a'], ['whitespace', 'https://example.com/a b'], ['a line break', 'https://example.com/a\nb'],
+        ['a backslash first', 'https://\\example.com'], ['an at-sign first', 'https://@example.com'], ['plain text', 'not a url'], ['empty', ''],
+    ])('rejects %s in both modes', (_name, u) => {
+        expect(isHttpsUrl(u, lenient)).toBe(false);
+        expect(isHttpsUrl(u, strict)).toBe(false);
+    });
+    test('credentials are accepted only when allowed', () => {
+        expect(isHttpsUrl('https://user:pw@example.com/1', lenient)).toBe(true);
+        expect(isHttpsUrl('https://user:pw@example.com/1', strict)).toBe(false);
+        expect(isHttpsUrl('https://user@example.com/1', strict)).toBe(false);
+    });
+    test('the length limit applies only when given', () => {
+        const long = `https://example.com/${'a'.repeat(3000)}`;
+        expect(isHttpsUrl(long, lenient)).toBe(true);
+        expect(isHttpsUrl(long, strict)).toBe(false);
+        expect(isHttpsUrl(`https://example.com/${'a'.repeat(2048 - 20)}`, strict)).toBe(true);
+    });
+    test.each([[undefined], [null], [1], [{}]])('rejects the non-string %p without throwing', (v) => {
+        expect(isHttpsUrl(v, lenient)).toBe(false);
     });
 });

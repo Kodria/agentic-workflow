@@ -56,6 +56,33 @@ export function makeRepo(): TestRepo {
 }
 
 /**
+ * A copy of `template` in its own directory (same throwaway home, same git isolation): a few milliseconds instead of the
+ * several git processes `makeRepo` spawns. For suites that need a fresh repository per test. `cleanup` removes only the copy;
+ * the template's `cleanup` removes the shared home and restores the environment.
+ */
+export function cloneRepo(template: TestRepo): TestRepo {
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
+    fs.cpSync(template.root, root, { recursive: true });
+    const env = {
+        ...process.env, HOME: template.home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
+    };
+    const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env }).trim();
+    const commit = (files: Record<string, string>, message: string): string => {
+        for (const [rel, content] of Object.entries(files)) {
+            const abs = path.join(root, rel);
+            fs.mkdirSync(path.dirname(abs), { recursive: true });
+            fs.writeFileSync(abs, content);
+        }
+        git('add', '-A');
+        git('commit', '-q', '-m', message);
+        return git('rev-parse', 'HEAD');
+    };
+    return { root, home: template.home, git, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+/**
  * Wall-clock bound for the linear-time tests. A quadratic regression on the hostile inputs takes tens of seconds, so a
  * generous bound still catches it, while several git spawns on a slow Windows/macOS runner stay far below it.
  */

@@ -3,15 +3,14 @@ import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
 import childProcess from 'child_process';
-import yaml from 'js-yaml';
-import { makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
+import { cloneRepo, makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { buildReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
-import { refreshDerived, renderSkeleton } from '../../../src/core/changes/render';
+import * as renderModule from '../../../src/core/changes/render';
 import { validateRecordShape } from '../../../src/core/changes/validate-shape';
-import { PENDING_MARKER, type DerivedFields, type Verification } from '../../../src/core/changes/types';
+import { PENDING_MARKER, type Verification } from '../../../src/core/changes/types';
 import type { CommandResult } from '../../../src/core/command-result';
 
 const REAL_CHANGES_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'docs', 'changes');
@@ -27,16 +26,42 @@ const REMEDY = 'commit your work, then run awm sensors run';
 function receiptForHead(): void {
     writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: pass as never }));
 }
-beforeEach(() => {
-    repo = makeRepo();
-    repo.git('checkout', '-q', '-b', 'feat/x');
-    repo.commit({ 'cli/src/a.ts': '1' }, 'feat(changes): a');
+// One template repository for the whole file (it also holds HOME and AWM_HOME on a throwaway home); every test gets a copy.
+let template: TestRepo;
+beforeAll(() => {
+    template = makeRepo();
+    template.git('checkout', '-q', '-b', 'feat/x');
+    template.commit({ 'cli/src/a.ts': '1' }, 'feat(changes): a');
 });
-afterEach(() => {
-    repo.cleanup();
-    // The command writes only into the throwaway repository: the real checkout is never touched.
-    expect(listReal()).toEqual(realBefore);
-});
+afterAll(() => template.cleanup());
+function newRepo(): void {
+    repo = cloneRepo(template);
+}
+/** A fresh repository for every test: for tests that write a record, move HEAD or change the tree. */
+function freshRepo(): void {
+    beforeEach(newRepo);
+    afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
+}
+/**
+ * One repository (with a receipt for HEAD) for a whole group. Only for tests that are refused before anything is written
+ * (they never change HEAD, the tree that matters, or docs/changes): they would otherwise pay for a repository each.
+ */
+function sharedRepo(): void {
+    beforeAll(() => { newRepo(); receiptForHead(); });
+    afterAll(() => repo.cleanup());
+}
+// The command writes only into the throwaway repository: the real checkout is never touched.
+afterEach(() => expect(listReal()).toEqual(realBefore));
+afterAll(() => expect(listReal()).toEqual(realBefore));
+
+type AnyFn = (...args: unknown[]) => unknown;
+/** Replaces one fs function for the calls `match` selects (by their arguments); every other call reaches the real one. */
+function interceptFs(name: 'readdirSync' | 'mkdirSync' | 'writeFileSync' | 'renameSync' | 'readFileSync', match: (args: unknown[]) => boolean, replace: (real: AnyFn, args: unknown[]) => unknown): jest.SpyInstance {
+    const real = fs[name] as unknown as AnyFn;
+    return jest.spyOn(fs, name).mockImplementation(((...args: unknown[]) => (match(args) ? replace(real, args) : real(...args))) as never);
+}
+const baseIs = (arg: unknown, name: string): boolean => typeof arg === 'string' && path.basename(arg) === name;
+const isRecordsDirArg = (arg: unknown): boolean => baseIs(arg, 'changes') && baseIs(path.dirname(String(arg)), 'docs');
 
 const recordsDir = () => path.join(repo.root, 'docs', 'changes');
 const file = () => path.join(recordsDir(), '2026-10-17-change-record.md');
@@ -65,6 +90,7 @@ function expectFailure(r: CommandResult, code: string, remedy?: string): void {
 const recordFiles = (): string[] => { try { return fs.readdirSync(recordsDir()).sort(); } catch { return []; } };
 
 describe('test isolation', () => {
+    freshRepo();
     test('HOME and AWM_HOME point into the throwaway home', () => {
         expect(process.env.HOME).toBe(repo.home);
         expect(process.env.AWM_HOME).toBe(path.join(repo.home, '.awm'));
@@ -73,6 +99,7 @@ describe('test isolation', () => {
 });
 
 describe('awm change new: receipt and clean tree (R3.6)', () => {
+    freshRepo();
     test('a missing receipt fails with receipt-missing and the remedy, writing nothing', () => {
         expectFailure(run('change-record'), 'receipt-missing', REMEDY);
         expect(recordFiles()).toEqual([]);
@@ -109,6 +136,7 @@ describe('awm change new: receipt and clean tree (R3.6)', () => {
 });
 
 describe('awm change new: skeleton (R3.7, R3.9)', () => {
+    freshRepo();
     test('prints the created path and writes exactly that file', () => {
         receiptForHead();
         const r = run('change-record');
@@ -198,17 +226,20 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
         run('change-record', {}, { now: () => new Date('2027-01-02T23:59:59.000Z') });
         expect(recordFiles()).toEqual(['2027-01-02-change-record.md']);
     });
-    test('an unusable clock fails with date-invalid and writes nothing', () => {
+    test.each<[string, () => Date]>([
+        ['an invalid date', () => new Date(NaN)],
+        ['a year beyond 9999', () => new Date('+010000-01-01T00:00:00.000Z')],
+        ['a clock that throws', () => { throw new Error('boom'); }],
+        ['a clock that returns a string', (() => 'x') as never],
+    ])('an unusable clock (%s) fails with date-invalid and writes nothing', (_name, bad) => {
         receiptForHead();
-        expectFailure(run('change-record', {}, { now: () => new Date(NaN) }), 'date-invalid');
-        expectFailure(run('change-record', {}, { now: () => new Date('+010000-01-01T00:00:00.000Z') }), 'date-invalid');
-        expectFailure(run('change-record', {}, { now: () => { throw new Error('boom'); } }), 'date-invalid');
-        expectFailure(run('change-record', {}, { now: (() => 'x') as never }), 'date-invalid');
+        expectFailure(run('change-record', {}, { now: bad }), 'date-invalid');
         expect(recordFiles()).toEqual([]);
     });
 });
 
 describe('awm change new: generated record is checked before it is written', () => {
+    freshRepo();
     test('a skeleton over the record size limit is skeleton-invalid and writes nothing', () => {
         const sensors = Array.from({ length: 700 }, (_, i) => ({ name: `sensor-${String(i).padStart(4, '0')}-${'x'.repeat(100)}`, status: 'pass' as const, errors: [] }));
         writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors } as never }));
@@ -220,6 +251,7 @@ describe('awm change new: generated record is checked before it is written', () 
 });
 
 describe('awm change new: HEAD moving while the command runs', () => {
+    freshRepo();
     test('a HEAD that moves before the record is written is git-failed and nothing is written', () => {
         receiptForHead();
         const moving = () => { repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'); return now(); };
@@ -232,20 +264,19 @@ describe('awm change new: HEAD moving while the command runs', () => {
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
         receiptForHead();
         const before = read();
-        const real = fs.readFileSync;
-        const spy = jest.spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof real>) => {
-            const out = real(...args);
-            if (typeof args[0] === 'string' && args[0] === file()) { spy.mockRestore(); repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'); }
+        const spy = interceptFs('readFileSync', (a) => baseIs(a[0], path.basename(file())), (real, a) => {
+            const out = real(...a);
+            spy.mockRestore();
+            repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late');
             return out;
-        }) as never);
-        try {
-            expectFailure(run('change-record', { refresh: true }), 'git-failed');
-        } finally { spy.mockRestore(); }
+        });
+        expectFailure(run('change-record', { refresh: true }), 'git-failed');
         expect(read()).toBe(before);
     });
 });
 
 describe('awm change new: HEAD is pinned before the derivation', () => {
+    freshRepo();
     /** Runs `act` once, right before (or after) the first git call whose first argument is `sub`. */
     function onGit(sub: string, when: 'before' | 'after', act: () => void): jest.SpyInstance {
         const real = childProcess.execFileSync;
@@ -267,30 +298,25 @@ describe('awm change new: HEAD is pinned before the derivation', () => {
     };
     test('a commit landing between the pin and the derivation is git-failed, not a record of mixed commits', () => {
         receiptForHead();
-        const spy = onGit('merge-base', 'after', land);
-        try {
-            expectFailure(run('change-record'), 'git-failed');
-        } finally { spy.mockRestore(); }
+        onGit('merge-base', 'after', land);
+        expectFailure(run('change-record'), 'git-failed');
         expect(recordFiles()).toEqual([]);
     });
     test('the message says HEAD moved during derivation', () => {
         receiptForHead();
-        const spy = onGit('merge-base', 'after', land);
-        try {
-            expect(run('change-record').stderr).toContain('HEAD moved during derivation');
-        } finally { spy.mockRestore(); }
+        onGit('merge-base', 'after', land);
+        expect(run('change-record').stderr).toContain('HEAD moved during derivation');
     });
     test('a commit landing after the derivation but before the write is git-failed', () => {
         receiptForHead();
-        const spy = onGit('status', 'before', () => repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'));
-        try {
-            expectFailure(run('change-record'), 'git-failed');
-        } finally { spy.mockRestore(); }
+        onGit('status', 'before', () => repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'));
+        expectFailure(run('change-record'), 'git-failed');
         expect(recordFiles()).toEqual([]);
     });
 });
 
 describe('awm change new: provenance (R3.8)', () => {
+    freshRepo();
     const writeJournalWith = (patch: (state: ReturnType<typeof readStateOrThrow>) => void): void => {
         initJournal(repo.root, 'feat/x');
         const state = readStateOrThrow();
@@ -356,6 +382,7 @@ describe('awm change new: provenance (R3.8)', () => {
 });
 
 describe('awm change new: no overwrite (R3.10)', () => {
+    freshRepo();
     test('refuses to overwrite on the same date and leaves the file untouched', () => {
         receiptForHead();
         run('change-record');
@@ -396,51 +423,55 @@ describe('awm change new: no overwrite (R3.10)', () => {
         receiptForHead();
         run('change-record');
         fs.writeFileSync(file(), 'edited by hand');
-        const spy = jest.spyOn(fs, 'readdirSync').mockImplementationOnce((() => []) as never);
-        try {
-            expectFailure(run('change-record'), 'record-exists', 'use --refresh to update derived fields');
-        } finally { spy.mockRestore(); }
+        interceptFs('readdirSync', (a) => isRecordsDirArg(a[0]), () => []);
+        expectFailure(run('change-record'), 'record-exists', 'use --refresh to update derived fields');
         expect(read()).toBe('edited by hand');
     });
     test('an unreadable docs/changes listing fails closed instead of creating', () => {
         receiptForHead();
         fs.mkdirSync(recordsDir(), { recursive: true });
-        const spy = jest.spyOn(fs, 'readdirSync').mockImplementationOnce((() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }) as never);
-        try {
-            expectFailure(run('change-record'), 'io-failed');
-        } finally { spy.mockRestore(); }
-        expect(recordFiles()).toEqual([]);
+        interceptFs('readdirSync', (a) => isRecordsDirArg(a[0]), () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); });
+        expectFailure(run('change-record'), 'io-failed');
+        jest.restoreAllMocks();
+        expect(fs.readdirSync(recordsDir())).toEqual([]);
     });
     test('a failed write leaves no partial file behind', () => {
         receiptForHead();
-        const spy = jest.spyOn(fs, 'writeFileSync').mockImplementationOnce((() => { throw Object.assign(new Error('full'), { code: 'ENOSPC' }); }) as never);
-        try {
-            expectFailure(run('change-record'), 'io-failed');
-        } finally { spy.mockRestore(); }
+        // Only the write through the descriptor of the new record fails (the create itself succeeded).
+        interceptFs('writeFileSync', (a) => typeof a[0] === 'number', () => { throw Object.assign(new Error('full'), { code: 'ENOSPC' }); });
+        expectFailure(run('change-record'), 'io-failed');
         expect(recordFiles()).toEqual([]);
     });
 });
 
-describe('awm change new: path safety (R3.12)', () => {
+describe('awm change new: slug validation (R3.12)', () => {
+    sharedRepo();
     const BAD_SLUGS = ['../evil', 'a/b', 'a\\b', 'Upper', 'a_b', '', '-a', 'a-', 'a--b', 'a b', 'a\nb', 'a'.repeat(65), 'é', '.hidden'];
     test.each(BAD_SLUGS)('rejects the slug %j before building any path', (slug) => {
-        receiptForHead();
         expectFailure(run(slug), 'slug-invalid');
         expect(fs.existsSync(recordsDir())).toBe(false);
     });
-    test('accepts a slug of exactly 64 characters', () => {
-        receiptForHead();
-        expect(run('a'.repeat(64)).code).toBe(0);
-    });
-    test('a non-string slug is slug-invalid, not a throw', () => {
-        receiptForHead();
-        expectFailure(runChangeNew(repo.root, undefined as never, {}, { now }), 'slug-invalid');
-        expectFailure(runChangeNew(repo.root, { toString: () => 'ok' } as never, {}, { now }), 'slug-invalid');
+    test.each<[string, unknown]>([['undefined', undefined], ['an object with toString', { toString: () => 'ok' }]])('a non-string slug (%s) is slug-invalid, not a throw', (_name, slug) => {
+        expectFailure(runChangeNew(repo.root, slug as never, {}, { now }), 'slug-invalid');
     });
     test('a hostile slug never reaches the diagnostic raw', () => {
         const r = run('a\u2028b\u001b[31m'.repeat(40));
         expectFailure(r, 'slug-invalid');
         expect(r.stderr).not.toContain('\u001b');
+    });
+    test('the whole first line, code included, is clipped to 300 units for a hostile slug', () => {
+        const r = run('\0'.repeat(80));
+        expectFailure(r, 'slug-invalid');
+        expect(r.stderr.split('\n')[0].length).toBe(300);
+        expect(r.stderr.split('\n')[0].endsWith('…')).toBe(true);
+    });
+});
+
+describe('awm change new: path safety (R3.12)', () => {
+    freshRepo();
+    test('accepts a slug of exactly 64 characters', () => {
+        receiptForHead();
+        expect(run('a'.repeat(64)).code).toBe(0);
     });
     test('refuses a symlinked docs/changes and writes nothing through it', () => {
         if (process.platform === 'win32') return;
@@ -478,15 +509,21 @@ describe('awm change new: path safety (R3.12)', () => {
         expectFailure(run('ok', { refresh: true }), 'unsafe-path');
         expect(fs.readFileSync(path.join(outside, '2026-10-17-ok.md'), 'utf8')).toBe('precious');
     });
-    test('a link planted while the directory is being created is still refused', () => {
+    test('a link planted in place of docs while it is being created is refused, and nothing is created through it', () => {
         if (process.platform === 'win32') return;
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
-        const spy = jest.spyOn(fs, 'mkdirSync').mockImplementationOnce(((p: string) => { fs.symlinkSync(outside, p); }) as never);
-        try {
-            expectFailure(run('ok'), 'unsafe-path');
-        } finally { spy.mockRestore(); }
-        expect(fs.readdirSync(path.join(outside, 'changes'))).toEqual([]);
+        interceptFs('mkdirSync', (a) => baseIs(a[0], 'docs'), (_real, a) => { fs.symlinkSync(outside, String(a[0])); });
+        expectFailure(run('ok'), 'unsafe-path');
+        expect(fs.readdirSync(outside)).toEqual([]);
+    });
+    test('a link planted in place of changes while it is being created is refused, and nothing is created through it', () => {
+        if (process.platform === 'win32') return;
+        receiptForHead();
+        const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
+        interceptFs('mkdirSync', (a) => isRecordsDirArg(a[0]), (_real, a) => { fs.symlinkSync(outside, String(a[0])); });
+        expectFailure(run('ok'), 'unsafe-path');
+        expect(fs.readdirSync(outside)).toEqual([]);
     });
     test('creates docs/changes when it does not exist yet', () => {
         receiptForHead();
@@ -500,48 +537,49 @@ describe('awm change new: path safety (R3.12)', () => {
     });
 });
 
-describe('awm change new: flag validation (R3.12)', () => {
-    beforeEach(() => receiptForHead());
+describe('awm change new: refused flags (R3.12, R3.11b)', () => {
+    sharedRepo();
     const bad = (opts: NewOpts, what: string) => {
         const r = run('ok', opts);
         expectFailure(r, 'flag-invalid');
         expect(r.stderr).toContain(what);
         expect(recordFiles()).toEqual([]);
     };
-    test('--issue must be an https URL: http is refused', () => bad({ issue: 'http://example.com/1' }, '--issue'));
-    test('--issue: a non-URL is refused', () => bad({ issue: 'not a url' }, '--issue'));
-    test('--issue: javascript: is refused', () => bad({ issue: 'javascript:alert(1)' }, '--issue'));
-    test('--issue: embedded credentials are refused', () => bad({ issue: 'https://user@example.com/1' }, '--issue'));
-    test('--issue: whitespace is refused', () => bad({ issue: 'https://example.com/a b' }, '--issue'));
-    test('--issue: a line break is refused', () => bad({ issue: 'https://example.com/a\nb: c' }, '--issue'));
-    test('--issue: a host-less https is refused', () => bad({ issue: 'https://' }, '--issue'));
-    test('--issue: a very long URL is refused', () => bad({ issue: `https://example.com/${'a'.repeat(3000)}` }, '--issue'));
-    test('--issue: https is accepted', () => { expect(run('ok', { issue: 'https://example.com/1' }).code).toBe(0); });
-    test('--model: a line break is refused', () => bad({ model: 'a\nb' }, '--model'));
-    test('--model: a control character is refused', () => bad({ model: 'a\u0000b' }, '--model'));
-    test('--model: U+2028 is refused', () => bad({ model: 'a\u2028b' }, '--model'));
-    test('--model: an empty or blank value is refused', () => { bad({ model: '' }, '--model'); bad({ model: '   ' }, '--model'); });
-    test('--model: 201 characters are refused', () => bad({ model: 'm'.repeat(201) }, '--model'));
-    test('--model: 200 characters are accepted', () => { expect(run('ok', { model: 'm'.repeat(200) }).code).toBe(0); });
-    test('--model: the limit counts code points, not UTF-16 units', () => {
-        expect(run('ok', { model: '\u{1F600}'.repeat(200) }).code).toBe(0);
-    });
-    test('--model: 201 code points are refused', () => bad({ model: '\u{1F600}'.repeat(201) }, '--model'));
-    test('--model: a lone surrogate is refused', () => bad({ model: 'a\ud800b' }, '--model'));
-    test('--session: a line break is refused', () => bad({ session: 'a\r\nb' }, '--session'));
-    test('--session: 201 characters are refused', () => bad({ session: 's'.repeat(201) }, '--session'));
-    test('--session: a plain value is accepted', () => { expect(run('ok', { session: 'abc' }).code).toBe(0); });
-    test('a flag that is not a string is refused', () => {
-        bad({ model: 5 as never }, '--model');
-        bad({ plan: ['a'] as never }, '--plan');
-        bad({ refresh: 'yes' as never }, '--refresh');
-    });
-    test('--plan: a missing file is refused', () => bad({ plan: 'docs/plans/missing.md' }, '--plan'));
-    test('--plan: .. segments are refused', () => bad({ plan: '../outside.md' }, '--plan'));
-    test('--plan: an absolute path is refused', () => bad({ plan: path.join(repo.root, 'README.md') }, '--plan'));
-    test('--plan: a backslash path is refused', () => bad({ plan: 'docs\\plans\\p.md' }, '--plan'));
-    test('--plan: a drive-letter path is refused', () => bad({ plan: 'C:/plan.md' }, '--plan'));
-    test('--plan: a directory is refused', () => bad({ plan: 'cli' }, '--plan'));
+    test.each<[string, string]>([
+        ['http is refused', 'http://example.com/1'],
+        ['a non-URL is refused', 'not a url'],
+        ['javascript: is refused', 'javascript:alert(1)'],
+        ['embedded credentials are refused', 'https://user@example.com/1'],
+        ['whitespace is refused', 'https://example.com/a b'],
+        ['a line break is refused', 'https://example.com/a\nb: c'],
+        ['a host-less https is refused', 'https://'],
+        ['a very long URL is refused', `https://example.com/${'a'.repeat(3000)}`],
+        ['a lone surrogate is refused', 'https://example.com/\ud800'],
+    ])('--issue: %s', (_name, issue) => bad({ issue }, '--issue'));
+    test.each<[string, string]>([
+        ['a line break', 'a\nb'],
+        ['a control character', 'a\u0000b'],
+        ['U+2028', 'a\u2028b'],
+        ['an empty value', ''],
+        ['a blank value', '   '],
+        ['201 characters', 'm'.repeat(201)],
+        ['201 code points', '\u{1F600}'.repeat(201)],
+        ['a lone surrogate', 'a\ud800b'],
+    ])('--model: %s is refused', (_name, model) => bad({ model }, '--model'));
+    test.each<[string, string]>([['a line break', 'a\r\nb'], ['201 characters', 's'.repeat(201)], ['a blank value', ' ']])('--session: %s is refused', (_name, session) => bad({ session }, '--session'));
+    test.each<[string, NewOpts, string]>([
+        ['--model as a number', { model: 5 as never }, '--model'],
+        ['--plan as an array', { plan: ['a'] as never }, '--plan'],
+        ['--refresh as a string', { refresh: 'yes' as never }, '--refresh'],
+    ])('a flag that is not the right type is refused (%s)', (_name, opts, what) => bad(opts, what));
+    test.each<[string, string]>([
+        ['a missing file', 'docs/plans/missing.md'],
+        ['.. segments', '../outside.md'],
+        ['an absolute path', path.join(path.sep, 'etc', 'passwd')],
+        ['a backslash path', 'docs\\plans\\p.md'],
+        ['a drive-letter path', 'C:/plan.md'],
+        ['a directory', 'cli'],
+    ])('--plan: %s is refused', (_name, plan) => bad({ plan }, '--plan'));
     test('--plan: a symlink is refused', () => {
         if (process.platform === 'win32') return;
         fs.symlinkSync(path.join(repo.root, 'README.md'), path.join(repo.root, 'link.md'));
@@ -554,7 +592,6 @@ describe('awm change new: flag validation (R3.12)', () => {
         fs.symlinkSync(outside, path.join(repo.root, 'plans'));
         bad({ plan: 'plans/p.md' }, '--plan');
     });
-    test('--plan: an existing repo file is accepted', () => { expect(run('ok', { plan: 'README.md' }).code).toBe(0); });
     test('a hostile --plan value never reaches the diagnostic raw', () => {
         const r = run('ok', { plan: 'a\u001b[31m\nb' });
         expectFailure(r, 'flag-invalid');
@@ -563,9 +600,48 @@ describe('awm change new: flag validation (R3.12)', () => {
     test('a non-object opts is flag-invalid, not a throw', () => {
         expectFailure(runChangeNew(repo.root, 'ok', 'x' as never, { now }), 'flag-invalid');
     });
+    test.each<[string, NewOpts]>([
+        ['--plan', { plan: 'README.md' }],
+        ['--issue', { issue: 'https://example.com/1' }],
+        ['--model', { model: 'm1' }],
+        ['--session', { session: 's1' }],
+    ])('--refresh together with %s is flag-invalid and writes nothing', (flag, opts) => {
+        const r = run('ok', { ...opts, refresh: true });
+        expectFailure(r, 'flag-invalid');
+        expect(r.stderr).toContain('--refresh');
+        expect(r.stderr).toContain(flag);
+        expect(fs.existsSync(path.join(repo.root, 'docs'))).toBe(false);
+    });
+});
+
+describe('awm change new: accepted flags', () => {
+    freshRepo();
+    beforeEach(() => receiptForHead());
+    test.each<[string, NewOpts]>([
+        ['--issue https', { issue: 'https://example.com/1' }],
+        ['--model of 200 characters', { model: 'm'.repeat(200) }],
+        ['--model of 200 code points', { model: '\u{1F600}'.repeat(200) }],
+        ['--session', { session: 'abc' }],
+        ['--plan an existing repo file', { plan: 'README.md' }],
+    ])('%s is accepted', (_name, opts) => {
+        expect(run('ok', opts).code).toBe(0);
+    });
+});
+
+describe('awm change new: unsafe --base (R3.5)', () => {
+    sharedRepo();
+    test.each(['-x', '--upload-pack=evil', 'a..b', 'a b', 'a\nb', 'HEAD~1', 'a^', 'a:b', 'a@{1}', ''])('an unsafe --base %j is invalid-input', (base) => {
+        expectFailure(run('ok', { base }), 'invalid-input');
+    });
+    test('a hostile --base is echoed escaped, on one line of at most 300 units', () => {
+        const r = run('ok', { base: '\0\u001b[31m'.repeat(80) });
+        expectFailure(r, 'invalid-input');
+        expect(r.stderr).toContain('\\u0000');
+    });
 });
 
 describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', () => {
+    freshRepo();
     test('an unknown --base is base-unresolved with its remedy', () => {
         receiptForHead();
         expectFailure(run('ok', { base: 'nope' }), 'base-unresolved', 'pass --base <ref>');
@@ -582,10 +658,6 @@ describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', (
         repo.git('branch', 'mid', 'HEAD~1');
         run('change-record', { base: 'mid' });
         expect(frontmatter(read())).toMatchObject({ type: 'fix', scope: 'core', semver: 'patch', modules: ['cli/src'] });
-    });
-    test.each(['-x', '--upload-pack=evil', 'a..b', 'a b', 'a\nb', 'HEAD~1', 'a^', 'a:b', 'a@{1}', ''])('an unsafe --base %j is invalid-input', (base) => {
-        receiptForHead();
-        expectFailure(run('ok', { base }), 'invalid-input');
     });
     test('a branch with no commits beyond the base is no-commits', () => {
         repo.git('checkout', '-q', 'main');
@@ -612,6 +684,7 @@ describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', (
 });
 
 describe('awm change new --refresh (R3.11)', () => {
+    freshRepo();
     function recordCommitted(mutate: (text: string) => string = (t) => t): string {
         receiptForHead();
         run('change-record');
@@ -774,12 +847,62 @@ describe('awm change new --refresh (R3.11)', () => {
     });
     test('a failed write keeps the old content and leaves no temporary file', () => {
         const edited = recordCommitted();
-        const spy = jest.spyOn(fs, 'renameSync').mockImplementationOnce((() => { throw Object.assign(new Error('nope'), { code: 'EPERM' }); }) as never);
-        try {
-            expectFailure(run('change-record', { refresh: true }), 'io-failed');
-        } finally { spy.mockRestore(); }
+        interceptFs('renameSync', (a) => baseIs(a[1], path.basename(file())), () => { throw Object.assign(new Error('nope'), { code: 'EPERM' }); });
+        expectFailure(run('change-record', { refresh: true }), 'io-failed');
+        jest.restoreAllMocks();
         expect(read()).toBe(edited);
         expect(recordFiles()).toEqual(['2026-10-17-change-record.md']);
+    });
+    test('refresh accepts --base', () => {
+        recordCommitted();
+        expect(run('change-record', { refresh: true, base: 'main' }).code).toBe(0);
+    });
+    test('a derived key spelled with a YAML escape is record-invalid and the bytes are untouched', () => {
+        receiptForHead();
+        run('change-record');
+        const bytes = Buffer.from(read().replace(/^type: .*$/m, '"t\\x79pe": fix'));
+        expect(bytes.toString('utf8')).toContain('"t\\x79pe": fix');
+        fs.writeFileSync(file(), bytes);
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): escaped key');
+        receiptForHead();
+        expectFailure(run('change-record', { refresh: true }), 'record-invalid');
+        expect(fs.readFileSync(file()).equals(bytes)).toBe(true);
+    });
+    describe('a record that changes between being read and being written', () => {
+        /** Lets the real splice run, then edits the record as a concurrent editor would. */
+        function editDuringRefresh(edit: () => void): void {
+            const real = renderModule.refreshDerived;
+            jest.spyOn(renderModule, 'refreshDerived').mockImplementation((...args) => { const out = real(...args); edit(); return out; });
+        }
+        const later = new Date(Date.now() + 60_000);
+        test.each<[string, () => void]>([
+            ['it grows', () => fs.appendFileSync(file(), 'edited meanwhile\n')],
+            ['it keeps its size but is rewritten later', () => { const t = fs.readFileSync(file(), 'utf8'); fs.writeFileSync(file(), t.replace('written by agent', 'written by human')); fs.utimesSync(file(), later, later); }],
+            ['only its modification time moves', () => fs.utimesSync(file(), later, later)],
+        ])('%s: record-changed, and the editor\'s version is kept', (_name, edit) => {
+            recordCommitted();
+            editDuringRefresh(edit);
+            expectFailure(run('change-record', { refresh: true }), 'record-changed');
+            jest.restoreAllMocks();
+            // The editor's version stands: the record still has the derived values of the commit it was written for.
+            expect(frontmatter(read()).modules).toEqual(['cli/src']);
+        });
+        test('it is replaced by a symlink: record-changed, and the link target is untouched', () => {
+            if (process.platform === 'win32') return;
+            recordCommitted();
+            const outside = path.join(repo.home, 'real.md');
+            fs.writeFileSync(outside, 'precious');
+            editDuringRefresh(() => { fs.rmSync(file()); fs.symlinkSync(outside, file()); });
+            expectFailure(run('change-record', { refresh: true }), 'record-changed');
+            jest.restoreAllMocks();
+            expect(fs.readFileSync(outside, 'utf8')).toBe('precious');
+            expect(fs.lstatSync(file()).isSymbolicLink()).toBe(true);
+        });
+        test('an untouched record is refreshed (the check is not always failing)', () => {
+            recordCommitted();
+            editDuringRefresh(() => undefined);
+            expect(run('change-record', { refresh: true }).code).toBe(0);
+        });
     });
     test('refresh keeps the file mode', () => {
         if (process.platform === 'win32') return;
@@ -790,234 +913,51 @@ describe('awm change new --refresh (R3.11)', () => {
     });
 });
 
-describe('render: renderSkeleton', () => {
-    const fields: DerivedFields = { type: 'feat', scope: null, semver: 'minor', breaking: false, modules: ['cli/src'] };
-    const verification: Verification = { commit: 'a'.repeat(40), overall: 'pass', sensors: { lint: 'pass' }, receipt_digest: `sha256:${'b'.repeat(64)}` };
-    test('renders frontmatter and the four body sections', () => {
-        const text = renderSkeleton({ id: '2026-10-17-x', fields, verification }) as string;
-        expect(text.startsWith('---\nschema: awm.change-record/v1\nid: 2026-10-17-x\n')).toBe(true);
-        expect(validateRecordShape('2026-10-17-x.md', text).diagnostics.map((d) => d.code)).toEqual(['pending-content']);
-    });
-    test('hostile provenance and link values survive a YAML round trip as plain strings', () => {
-        const nasty = 'a: b # c\n- d';
-        const text = renderSkeleton({ id: '2026-10-17-x', fields, verification, provenance: { model: nasty, session: '&anchor *alias !!tag' }, links: { issue: 'https://e.com/?a=b#c' } });
-        expect(text).not.toBeNull();
-        const fm = frontmatter(text as string);
-        expect(fm.provenance).toEqual({ model: nasty, session: '&anchor *alias !!tag' });
-        expect(fm.links).toEqual({ issue: 'https://e.com/?a=b#c' });
-        expect(Object.keys(fm)).toEqual(['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance']);
-    });
-    test('an unusable input yields null instead of throwing', () => {
-        expect(renderSkeleton(null as never)).toBeNull();
-        expect(renderSkeleton({ id: '2026-10-17-x', fields, verification: undefined as never })).toBeNull();
-        expect(renderSkeleton({ id: 5 as never, fields, verification })).toBeNull();
-        const circular: Record<string, unknown> = {}; circular.self = circular;
-        expect(renderSkeleton({ id: '2026-10-17-x', fields, verification, provenance: circular as never })).toBeNull();
-    });
-});
-
-describe('render: refreshDerived', () => {
-    const FRESH: DerivedFields = { type: 'feat', scope: 'core', semver: 'minor', breaking: false, modules: ['cli/src/core'] };
-    const FRESH_V: Verification = { commit: 'c'.repeat(40), overall: 'pass', sensors: { lint: 'pass' }, receipt_digest: `sha256:${'d'.repeat(64)}` };
-    const OLD = [
-        '---', 'schema: awm.change-record/v1', 'id: 2026-10-17-x', '# derived fields follow', 'type: fix', 'scope: null', 'semver: patch', 'breaking: false',
-        'modules:', '- old/a', '- old/b', '# a comment after the list', '', 'links:', '  plan: docs/plans/p.md', 'verification:', `  commit: ${'0'.repeat(40)}`,
-        '  overall: fail', '  sensors:', '    lint: fail', `  receipt_digest: sha256:${'0'.repeat(64)}`, 'title: Hello', '---', '', 'body text', '',
-    ];
-    const NEW_BLOCKS = [
-        '---', 'schema: awm.change-record/v1', 'id: 2026-10-17-x', '# derived fields follow', 'type: feat', 'scope: core', 'semver: minor', 'breaking: false',
-        'modules:', '  - cli/src/core', '# a comment after the list', '', 'links:', '  plan: docs/plans/p.md', 'verification:', `  commit: ${'c'.repeat(40)}`,
-        '  overall: pass', '  sensors:', '    lint: pass', `  receipt_digest: sha256:${'d'.repeat(64)}`, 'title: Hello', '---', '', 'body text', '',
-    ];
-    const lf = (lines: string[]) => lines.join('\n');
-    const crlf = (lines: string[]) => lines.join('\r\n');
-
-    test('replaces exactly the derived blocks, keeping comments, blank lines, other keys and the body', () => {
-        expect(refreshDerived(lf(OLD), FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS));
-    });
-    test('a column-0 list is replaced as one block and the key after it is untouched', () => {
-        const old = ['---', 'type: fix', 'scope: x', 'semver: none', 'breaking: false', 'modules:', '- a', '- b', 'verification: {}', 'title: T', '---', 'b', ''];
-        const out = refreshDerived(lf(old), FRESH, FRESH_V) as string;
-        expect(out.endsWith('title: T\n---\nb\n')).toBe(true);
-        expect(frontmatter(out).modules).toEqual(['cli/src/core']);
-        expect(frontmatter(out).title).toBe('T');
-    });
-    test('CRLF files keep CRLF', () => {
-        expect(refreshDerived(crlf(OLD), FRESH, FRESH_V)).toBe(crlf(NEW_BLOCKS));
-    });
-    test('mixed line endings keep each untouched line ending', () => {
-        const old = OLD.map((l, i) => (i % 2 === 0 ? `${l}\r` : l));
-        const out = refreshDerived(old.join('\n'), FRESH, FRESH_V) as string;
-        expect(out.split('\n').find((l) => l.startsWith('title:'))).toBe(old.find((l) => l.startsWith('title:')));
-        expect(out.endsWith(old.slice(-2).join('\n'))).toBe(true);
-        expect(frontmatter(out).modules).toEqual(['cli/src/core']);
-    });
-    test('the body is preserved byte for byte, even when it looks like frontmatter', () => {
-        const tail = '\n\n---\ntype: nope\n---\nmodules:\n- z\n';
-        const out = refreshDerived(lf(OLD) + tail, FRESH, FRESH_V) as string;
-        expect(out.endsWith(tail)).toBe(true);
-    });
-    test('trailing whitespace after the closing delimiter content and a missing final newline survive', () => {
-        const out = refreshDerived(lf(OLD).replace(/\n$/, '') + '  ', FRESH, FRESH_V) as string;
-        expect(out.endsWith('body text  ')).toBe(true);
-    });
-    test('a scalar with a trailing comment on the key line is replaced as a unit', () => {
-        const old = lf(OLD).replace('type: fix', 'type: fix # why');
-        expect(refreshDerived(old, FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS));
-    });
-    test('a null scope round-trips as null', () => {
-        const out = refreshDerived(lf(OLD), { ...FRESH, scope: null }, FRESH_V) as string;
-        expect(frontmatter(out).scope).toBeNull();
-    });
-    test('hostile sensor names and module names are quoted so they parse back unchanged', () => {
-        const v: Verification = { ...FRESH_V, sensors: { 'a: b': 'pass', '# x': 'fail', 'yes': 'skipped', '-': 'pass' } };
-        const out = refreshDerived(lf(OLD), { ...FRESH, modules: ['a b', 'c#d', '*x', 'y:z'] }, v) as string;
-        expect(frontmatter(out).verification).toEqual(v);
-        expect(frontmatter(out).modules).toEqual(['a b', 'c#d', '*x', 'y:z']);
-        expect(strip2(out)).toBe(strip2(lf(NEW_BLOCKS)));
-    });
-    // The title/id/links/body lines, which a refresh never touches.
-    const strip2 = (s: string) => s.split('\n').filter((l) => /^(schema|id|title|links|  plan|#|body)/.test(l)).join('\n');
-    test.each([
-        ['no frontmatter', 'type: fix\n'],
-        ['unclosed frontmatter', '---\ntype: fix\n'],
-        ['unparseable yaml', '---\n: : :\n---\n'],
-        ['a missing derived key', lf(OLD).replace('semver: patch\n', '')],
-        ['a missing verification', lf(OLD).replace(/^verification:[\s\S]*?(?=^title)/m, '')],
-        ['a non-mapping frontmatter', '---\n- a\n- b\n---\n'],
-        ['a duplicated key', lf(OLD).replace('title: Hello', 'type: fix\ntitle: Hello')],
-        ['an anchor', lf(OLD).replace('title: Hello', 'title: &a Hello')],
-        ['a key the line scan cannot recognise, right after a replaced block', lf(OLD).replace('title: Hello', 'odd key: 1\ntitle: Hello')],
-        ['an escaped spelling of a derived key next to the bare one', lf(OLD).replace('title: Hello', '"\\u0074ype": x\ntitle: Hello')],
-        ['an escaped spelling of a derived key instead of the bare one', lf(OLD).replace('type: fix\n', '"\\u0074ype": fix\n')],
-        ['an empty string', ''],
-    ])('returns null for %s', (_name, raw) => {
-        expect(refreshDerived(raw, FRESH, FRESH_V)).toBeNull();
-    });
-    test('returns null for input that is not usable, never throws', () => {
-        expect(refreshDerived(undefined as never, FRESH, FRESH_V)).toBeNull();
-        expect(refreshDerived(lf(OLD), null as never, FRESH_V)).toBeNull();
-        expect(refreshDerived(lf(OLD), FRESH, undefined as never)).toBeNull();
-        expect(refreshDerived(lf(OLD), { ...FRESH, scope: undefined as never }, FRESH_V)).toBeNull();
-        const circular: Record<string, unknown> = {}; circular.self = circular;
-        expect(refreshDerived(lf(OLD), FRESH, circular as never)).toBeNull();
-    });
-    test('a block scalar after the derived keys is carried over byte for byte', () => {
-        const raw = lf(OLD).replace('title: Hello', 'title: >\n  one\n  two\nrollback: kept');
-        const out = refreshDerived(raw, FRESH, FRESH_V) as string;
-        expect(frontmatter(out).title).toBe('one two\n');
-        expect(frontmatter(out).rollback).toBe('kept');
-        expect(out).toContain('title: >\n  one\n  two\nrollback: kept');
-    });
-    test('never alters a key that is not derived, whatever follows a replaced block', () => {
-        const raw = lf(OLD).replace('breaking: false\n', 'breaking: false\nrisks:\n- r1\n- r2\n');
-        const out = refreshDerived(raw, FRESH, FRESH_V) as string;
-        expect(frontmatter(out).risks).toEqual(['r1', 'r2']);
-        expect(out).toContain('risks:\n- r1\n- r2\n');
-    });
-    describe('recomputed keys written other than bare', () => {
-        const SPELLINGS: Array<[string, (k: string) => string]> = [
-            ['double-quoted', (k) => `"${k}":`],
-            ['single-quoted', (k) => `'${k}':`],
-            ['bare with a space before the colon', (k) => `${k} :`],
-            ['bare with a tab before the colon', (k) => `${k}\t:`],
-            ['double-quoted with spaces before the colon', (k) => `"${k}"  :`],
-            ['single-quoted with a tab before the colon', (k) => `'${k}'\t:`],
-        ];
-        const spell = (lines: string[], key: string, fn: (k: string) => string) => lines.map((l) => (l.startsWith(`${key}:`) ? fn(key) + l.slice(key.length + 1) : l));
-        const KEYS = ['type', 'scope', 'semver', 'breaking', 'modules', 'verification'];
-        test.each(SPELLINGS.flatMap(([name, fn]) => KEYS.map((key) => [name, key, fn] as const)))('%s %s is recomputed like a bare key', (_name, key, fn) => {
-            const old = spell(OLD, key, fn);
-            expect(old).not.toEqual(OLD);
-            expect(refreshDerived(lf(old), FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS));
-        });
-        test.each(SPELLINGS)('%s keys keep CRLF', (_name, fn) => {
-            const old = KEYS.reduce((lines, key) => spell(lines, key, fn), OLD);
-            expect(refreshDerived(crlf(old), FRESH, FRESH_V)).toBe(crlf(NEW_BLOCKS));
-        });
-        test('a spelled key is also found in the middle of a file next to other keys', () => {
-            const old = lf(OLD).replace('title: Hello', '"title": Hello');
-            expect(refreshDerived(old, FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS).replace('title: Hello', '"title": Hello'));
-        });
-        test('a quoted key with an escaped quote is kept, never taken for a derived key', () => {
-            const line = '"sem\\"ver": 1';
-            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
-            expect(out).toBe(lf(NEW_BLOCKS).replace('title: Hello', `${line}\ntitle: Hello`));
-            expect(frontmatter(out)['sem"ver']).toBe(1);
-        });
-        test('a single-quoted key with a doubled quote is kept, never taken for a derived key', () => {
-            const line = "'it''s': 1";
-            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
-            expect(out).toBe(lf(NEW_BLOCKS).replace('title: Hello', `${line}\ntitle: Hello`));
-            expect(frontmatter(out)["it's"]).toBe(1);
-        });
-        test('a quoted key that merely contains a derived name is not recomputed', () => {
-            const line = '"type extra": 1';
-            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
-            expect(out).toContain(`${line}\ntitle: Hello`);
-        });
-        test('a hostile very long quoted line is scanned in linear time', () => {
-            const line = `"${'\\'.repeat(200000)}`;
-            const started = Date.now();
-            expect(refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V)).toBeNull();
-            expect(Date.now() - started).toBeLessThan(5000);
-        });
-    });
-    test('the dumped blocks use the core schema (what the validator parses)', () => {
-        const out = refreshDerived(lf(OLD), { ...FRESH, scope: 'null' }, FRESH_V) as string;
-        expect(out).toContain("scope: 'null'");
-        expect(yaml.load(out.split('\n---')[0].slice(4), { schema: yaml.CORE_SCHEMA })).toMatchObject({ scope: 'null' });
-    });
-});
-
 describe('registerChangeCommand', () => {
+    freshRepo();
     function program(): Command {
         const p = new Command();
         p.exitOverride();
         registerChangeCommand(p, { now });
         return p;
     }
-    let cwd: string;
     let savedExit: typeof process.exitCode;
     let out: jest.SpyInstance; let err: jest.SpyInstance;
     beforeEach(() => {
-        cwd = process.cwd(); savedExit = process.exitCode;
+        savedExit = process.exitCode;
         out = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         err = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        // The action reads process.cwd(); pointing it at the repository needs no chdir (a process cannot delete its own cwd on Windows).
+        jest.spyOn(process, 'cwd').mockImplementation(() => repo.root);
     });
-    afterEach(() => {
-        process.chdir(cwd); process.exitCode = savedExit;
-        out.mockRestore(); err.mockRestore();
-    });
+    afterEach(() => { process.exitCode = savedExit; });
     test('registers change new with its documented flags', () => {
         const change = program().commands.find((c) => c.name() === 'change');
         const sub = change?.commands.find((c) => c.name() === 'new');
         expect(sub?.options.map((o) => o.long).sort()).toEqual(['--base', '--issue', '--model', '--plan', '--refresh', '--session']);
     });
+    test('the change command describes only what exists today', () => {
+        expect(program().commands.find((c) => c.name() === 'change')?.description()).toBe('create the Change Record of the current branch');
+    });
     test('runs from the cwd, prints the created path and leaves the exit code alone', async () => {
         receiptForHead();
-        process.chdir(repo.root);
         await program().parseAsync(['node', 'awm', 'change', 'new', 'change-record', '--model', 'm1']);
         expect(out).toHaveBeenCalledWith('Created docs/changes/2026-10-17-change-record.md\n');
         expect(process.exitCode).toBe(savedExit);
         expect((frontmatter(read()).provenance as Record<string, string>).model).toBe('m1');
     });
     test('a failure writes the diagnostic to stderr and sets exit code 2', async () => {
-        process.chdir(repo.root);
         await program().parseAsync(['node', 'awm', 'change', 'new', 'change-record']);
         expect(err).toHaveBeenCalledWith(expect.stringContaining('receipt-missing: '));
         expect(process.exitCode).toBe(2);
     });
     test('--refresh reaches the command', async () => {
         receiptForHead();
-        process.chdir(repo.root);
         await program().parseAsync(['node', 'awm', 'change', 'new', 'change-record', '--refresh']);
         expect(err).toHaveBeenCalledWith(expect.stringContaining('record-missing: '));
     });
-    test('a cwd that no longer exists is reported, not thrown', async () => {
-        const gone = fs.mkdtempSync(path.join(repo.home, 'gone-'));
-        process.chdir(gone);
-        fs.rmSync(gone, { recursive: true });
+    test('a cwd that is not accessible is reported, not thrown', async () => {
+        jest.spyOn(process, 'cwd').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); });
         await program().parseAsync(['node', 'awm', 'change', 'new', 'x']);
         expect(process.exitCode).toBe(2);
         expect(err).toHaveBeenCalledWith(expect.stringMatching(/^[a-z-]+: /));
