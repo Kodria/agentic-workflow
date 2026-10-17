@@ -2129,3 +2129,12 @@ Three S2 findings changed the receipt semantics; the design clauses R2.1, R2.2 a
 - **Worktree state module.** `gitState` and `RUNTIME_STATE_EXCLUDES` move from `receipt.ts` into `cli/src/core/changes/worktree.ts`. S3's `git.ts` (`repoRoot`, `isDirtyOutside`, `headSha`) reuses `worktree.ts` instead of duplicating it, and S4 imports `RUNTIME_STATE_EXCLUDES` from there.
 - **Selection parity.** `shouldRun` in `cli/src/commands/sensors/run.ts` gains the `export` keyword (no behavior change; this adds `run.ts` to S2's surfaces for that one word), and a test asserts `isFullSelection(opts) === (shouldRun(true, opts) && shouldRun(false, opts))` for every combination of `fast`, `slow`, `all` and `changed` that `shouldRun` models, so the two cannot drift apart.
 
+### A6 — Test harness and reuse corrections for S3–S6 (2026-10-17)
+
+S2 is complete and approved at `703ed46`. Lessons that bind S3–S6:
+
+- **Git identity in tests.** Jest gives each test file a copy of `process.env`; child processes never see changes made to it. The S3 helper (`cli/tests/core/changes/helpers.ts`) therefore must NOT set `GIT_AUTHOR_*` / `GIT_COMMITTER_*` through `process.env`. It builds an explicit environment object for every `execFileSync('git', ...)` call (identity variables, `HOME` set to the throwaway home, `GIT_CONFIG_GLOBAL=os.devNull`, `GIT_CONFIG_NOSYSTEM=1`) and passes `-c commit.gpgsign=false`. It still overrides and restores `HOME` and `AWM_HOME` on `process.env` (CLAUDE.md test-isolation rule) and creates every repo root with `fs.realpathSync.native`. The plan's `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` handling in `commit()` passes the dates through the same explicit environment, not through `process.env`.
+- **Reuse `worktree.ts`.** S3's `git.ts` must not re-implement `gitState` or the dirty-tree logic: `repoRoot` returns `path.resolve(...)` of git's toplevel, and `isDirtyOutside` is built on `worktree.ts` (`gitState`, `RUNTIME_STATE_EXCLUDES`). S4's `change new` uses the pre-run semantics of R2.1 (`RUNTIME_STATE_EXCLUDES` plus `docs/changes`).
+- **Test count and isolation.** No test may write inside the real checkout. Tests assert the real checkout is untouched when they could leak.
+- **Review economy.** Each slice is reviewed against its clauses and A3–A6; reviewers report only concrete clause violations.
+
