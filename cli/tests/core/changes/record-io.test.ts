@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { makeRepo, type TestRepo } from './helpers';
+import { makeRepo, posixOnly, type TestRepo } from './helpers';
 import {
-    createExclusive, createRecordDir, errorCode, inspectRecordDir, isRegularFileInside, readRecord, recordsWithSlug, replaceRecord, unchangedSince,
+    createExclusive, createRecordDir, errorCode, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince,
 } from '../../../src/core/changes/record-io';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
@@ -12,7 +12,6 @@ let n = 0;
 beforeAll(() => { repo = makeRepo(); });
 afterAll(() => repo.cleanup());
 const scratch = (): string => fs.mkdtempSync(path.join(repo.home, `rio${n++}-`));
-const posixOnly = process.platform === 'win32' ? test.skip : test;
 
 type Fn = 'mkdirSync' | 'readdirSync' | 'writeFileSync' | 'renameSync' | 'lstatSync';
 function intercept(name: Fn, match: (args: unknown[]) => boolean, replace: (real: (...a: unknown[]) => unknown, args: unknown[]) => unknown): void {
@@ -122,42 +121,6 @@ describe('recordsWithSlug', () => {
     });
 });
 
-describe('isRegularFileInside', () => {
-    test('accepts a regular file inside', () => {
-        const root = scratch();
-        fs.mkdirSync(path.join(root, 'docs'));
-        fs.writeFileSync(path.join(root, 'docs', 'p.md'), 'x');
-        expect(isRegularFileInside(root, 'docs/p.md')).toBe(true);
-    });
-    test.each([['missing', 'nope.md'], ['a directory', 'docs'], ['a parent segment', '../x'], ['an absolute path', '/etc/passwd'], ['a backslash', 'docs\\p.md'], ['empty', '']])('rejects %s', (_n, rel) => {
-        const root = scratch();
-        fs.mkdirSync(path.join(root, 'docs'));
-        expect(isRegularFileInside(root, rel)).toBe(false);
-    });
-    posixOnly('rejects a symlink to a file', () => {
-        const root = scratch();
-        fs.writeFileSync(path.join(root, 'real.md'), 'x');
-        fs.symlinkSync(path.join(root, 'real.md'), path.join(root, 'link.md'));
-        expect(isRegularFileInside(root, 'link.md')).toBe(false);
-    });
-    posixOnly('rejects a file reached through a symlinked directory that leaves the root', () => {
-        const root = scratch(); const outside = scratch();
-        fs.writeFileSync(path.join(outside, 'p.md'), 'x');
-        fs.symlinkSync(outside, path.join(root, 'plans'));
-        expect(isRegularFileInside(root, 'plans/p.md')).toBe(false);
-    });
-    posixOnly('accepts a file reached through a symlinked directory that stays inside the root', () => {
-        const root = scratch();
-        fs.mkdirSync(path.join(root, 'real'));
-        fs.writeFileSync(path.join(root, 'real', 'p.md'), 'x');
-        fs.symlinkSync(path.join(root, 'real'), path.join(root, 'alias'));
-        expect(isRegularFileInside(root, 'alias/p.md')).toBe(true);
-    });
-    test.each([[undefined], [null], [5]])('rejects the non-string %p without throwing', (rel) => {
-        expect(isRegularFileInside(scratch(), rel as never)).toBe(false);
-    });
-});
-
 describe('readRecord', () => {
     const write = (content: string | Buffer): string => { const f = path.join(scratch(), '2026-10-17-x.md'); fs.writeFileSync(f, content); return f; };
     test('reads the text and a snapshot of the file', () => {
@@ -255,6 +218,12 @@ describe('unchangedSince', () => {
         const { file, snap: s } = snapshotOf('abc');
         expect(s.ino).not.toBe(0);
         expect(unchangedSince(file, { ...s, ino: s.ino + 1 })).toBe(false);
+    });
+    test('compares inodes only when the file reports one: an inode of 0 on the file side is ignored', () => {
+        const { file, snap: s } = snapshotOf('abc');
+        expect(s.ino).not.toBe(0);
+        intercept('lstatSync', (a) => a[0] === file, (real, a) => Object.assign(Object.create(Object.getPrototypeOf(real(...a))), real(...a), { ino: 0 }));
+        expect(unchangedSince(file, s)).toBe(true);
     });
     test('compares inodes only when both sides carry one', () => {
         const { file, snap: s } = snapshotOf('abc');

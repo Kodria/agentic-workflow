@@ -65,6 +65,13 @@ export const isObj = (v: unknown): v is Record<string, unknown> => v !== null &&
 /** Round-trips through UTF-8: false for a lone surrogate, which would not survive being written to a file. */
 export const isWellFormed = (s: unknown): s is string => typeof s === 'string' && Buffer.from(s, 'utf8').toString('utf8') === s;
 
+/** A canonical ISO-8601 instant: exactly what `Date.prototype.toISOString` prints (UTC, milliseconds, `Z`). Never throws. */
+export function isCanonicalIso(v: unknown): v is string {
+    if (typeof v !== 'string') return false;
+    const time = Date.parse(v);
+    return !Number.isNaN(time) && new Date(time).toISOString() === v;
+}
+
 export interface HttpsUrlOptions {
     /** `https://user:pw@host/` is accepted only when true. */
     allowCredentials: boolean;

@@ -1,4 +1,4 @@
-import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine, isWellFormed, sliceNoSplit } from '../../../src/core/changes/text-safety';
+import { MAX_MESSAGE, NON_STRING, cleanText, clipMessage, esc, escapeText, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine, isWellFormed, sliceNoSplit } from '../../../src/core/changes/text-safety';
 
 const LINE_BREAKS = ['\r', '\n', '\u0085', ' ', ' '];
 
@@ -196,5 +196,20 @@ describe('isHttpsUrl', () => {
     });
     test.each([[undefined], [null], [1], [{}]])('rejects the non-string %p without throwing', (v) => {
         expect(isHttpsUrl(v, lenient)).toBe(false);
+    });
+});
+
+describe('isCanonicalIso', () => {
+    test.each(['2026-10-17T12:00:00.000Z', '1970-01-01T00:00:00.000Z', '2024-02-29T23:59:59.999Z'])('accepts %j', (v) => {
+        expect(isCanonicalIso(v)).toBe(true);
+    });
+    test.each([
+        ['a date only', '2026-10-17'], ['no milliseconds', '2026-10-17T12:00:00Z'], ['an offset', '2026-10-17T12:00:00.000+00:00'], ['lower-case z', '2026-10-17T12:00:00.000z'],
+        ['an impossible day', '2026-02-30T00:00:00.000Z'], ['padding', ' 2026-10-17T12:00:00.000Z'], ['text', 'yesterday'], ['empty', ''],
+    ])('rejects %s', (_n, v) => {
+        expect(isCanonicalIso(v)).toBe(false);
+    });
+    test.each([[undefined], [null], [0], [{}], [new Date(0)], [Symbol('x')], [{ toString: () => { throw new Error('boom'); } }], [{ toString: () => '2026-10-17T12:00:00.000Z' }]])('rejects the non-string %p without throwing', (v) => {
+        expect(isCanonicalIso(v)).toBe(false);
     });
 });

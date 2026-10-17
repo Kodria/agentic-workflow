@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
 import childProcess from 'child_process';
-import { cloneRepo, makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
+import { cloneRepo, makeRepo, nonRepoDir, posixOnly, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { buildReceipt, writeReceipt } from '../../../src/core/changes/receipt';
@@ -409,8 +409,7 @@ describe('awm change new: no overwrite (R3.10)', () => {
         run('change-record-long');
         expect(run('change-record').code).toBe(0);
     });
-    test('a symlink named like the record counts as existing and its target is not written', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('a symlink named like the record counts as existing and its target is not written', () => {
         receiptForHead();
         fs.mkdirSync(recordsDir(), { recursive: true });
         const outside = path.join(repo.home, 'outside.md');
@@ -473,8 +472,7 @@ describe('awm change new: path safety (R3.12)', () => {
         receiptForHead();
         expect(run('a'.repeat(64)).code).toBe(0);
     });
-    test('refuses a symlinked docs/changes and writes nothing through it', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refuses a symlinked docs/changes and writes nothing through it', () => {
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
         fs.mkdirSync(path.join(repo.root, 'docs'), { recursive: true });
@@ -482,8 +480,7 @@ describe('awm change new: path safety (R3.12)', () => {
         expectFailure(run('ok'), 'unsafe-path');
         expect(fs.readdirSync(outside)).toEqual([]);
     });
-    test('refuses a symlinked docs and creates nothing through it', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refuses a symlinked docs and creates nothing through it', () => {
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
         fs.symlinkSync(outside, path.join(repo.root, 'docs'));
@@ -499,8 +496,7 @@ describe('awm change new: path safety (R3.12)', () => {
         expectFailure(run('ok'), 'unsafe-path');
         expect(fs.readFileSync(recordsDir(), 'utf8')).toBe('x');
     });
-    test('refuses to refresh through a symlinked docs/changes', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refuses to refresh through a symlinked docs/changes', () => {
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
         fs.writeFileSync(path.join(outside, '2026-10-17-ok.md'), 'precious');
@@ -509,16 +505,14 @@ describe('awm change new: path safety (R3.12)', () => {
         expectFailure(run('ok', { refresh: true }), 'unsafe-path');
         expect(fs.readFileSync(path.join(outside, '2026-10-17-ok.md'), 'utf8')).toBe('precious');
     });
-    test('a link planted in place of docs while it is being created is refused, and nothing is created through it', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('a link planted in place of docs while it is being created is refused, and nothing is created through it', () => {
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
         interceptFs('mkdirSync', (a) => baseIs(a[0], 'docs'), (_real, a) => { fs.symlinkSync(outside, String(a[0])); });
         expectFailure(run('ok'), 'unsafe-path');
         expect(fs.readdirSync(outside)).toEqual([]);
     });
-    test('a link planted in place of changes while it is being created is refused, and nothing is created through it', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('a link planted in place of changes while it is being created is refused, and nothing is created through it', () => {
         receiptForHead();
         const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
         interceptFs('mkdirSync', (a) => isRecordsDirArg(a[0]), (_real, a) => { fs.symlinkSync(outside, String(a[0])); });
@@ -537,14 +531,17 @@ describe('awm change new: path safety (R3.12)', () => {
     });
 });
 
+/** The command refuses `opts` as `flag-invalid`, names `what`, and writes nothing. */
+const badFlag = (opts: NewOpts, what: string): void => {
+    const r = run('ok', opts);
+    expectFailure(r, 'flag-invalid');
+    expect(r.stderr).toContain(what);
+    expect(recordFiles()).toEqual([]);
+};
+
 describe('awm change new: refused flags (R3.12, R3.11b)', () => {
     sharedRepo();
-    const bad = (opts: NewOpts, what: string) => {
-        const r = run('ok', opts);
-        expectFailure(r, 'flag-invalid');
-        expect(r.stderr).toContain(what);
-        expect(recordFiles()).toEqual([]);
-    };
+    const bad = badFlag;
     test.each<[string, string]>([
         ['http is refused', 'http://example.com/1'],
         ['a non-URL is refused', 'not a url'],
@@ -580,18 +577,6 @@ describe('awm change new: refused flags (R3.12, R3.11b)', () => {
         ['a drive-letter path', 'C:/plan.md'],
         ['a directory', 'cli'],
     ])('--plan: %s is refused', (_name, plan) => bad({ plan }, '--plan'));
-    test('--plan: a symlink is refused', () => {
-        if (process.platform === 'win32') return;
-        fs.symlinkSync(path.join(repo.root, 'README.md'), path.join(repo.root, 'link.md'));
-        bad({ plan: 'link.md' }, '--plan');
-    });
-    test('--plan: a file reached through a symlinked directory outside the repository is refused', () => {
-        if (process.platform === 'win32') return;
-        const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
-        fs.writeFileSync(path.join(outside, 'p.md'), 'x');
-        fs.symlinkSync(outside, path.join(repo.root, 'plans'));
-        bad({ plan: 'plans/p.md' }, '--plan');
-    });
     test('a hostile --plan value never reaches the diagnostic raw', () => {
         const r = run('ok', { plan: 'a\u001b[31m\nb' });
         expectFailure(r, 'flag-invalid');
@@ -611,6 +596,21 @@ describe('awm change new: refused flags (R3.12, R3.11b)', () => {
         expect(r.stderr).toContain('--refresh');
         expect(r.stderr).toContain(flag);
         expect(fs.existsSync(path.join(repo.root, 'docs'))).toBe(false);
+    });
+});
+
+describe('awm change new: --plan through links', () => {
+    freshRepo();
+    beforeEach(() => receiptForHead());
+    posixOnly('--plan: a symlink is refused', () => {
+        fs.symlinkSync(path.join(repo.root, 'README.md'), path.join(repo.root, 'link.md'));
+        badFlag({ plan: 'link.md' }, '--plan');
+    });
+    posixOnly('--plan: a file reached through a symlinked directory outside the repository is refused', () => {
+        const outside = fs.mkdtempSync(path.join(repo.home, 'out-'));
+        fs.writeFileSync(path.join(outside, 'p.md'), 'x');
+        fs.symlinkSync(outside, path.join(repo.root, 'plans'));
+        badFlag({ plan: 'plans/p.md' }, '--plan');
     });
 });
 
@@ -830,8 +830,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read()).not.toContain('"semver"');
         expect(validateRecordShape('2026-10-17-change-record.md', read(), { root: repo.root }).diagnostics).toEqual([]);
     });
-    test('a record that is a symlink is refused and its target untouched', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('a record that is a symlink is refused and its target untouched', () => {
         receiptForHead();
         fs.mkdirSync(recordsDir(), { recursive: true });
         const outside = path.join(repo.home, 'real.md');
@@ -887,8 +886,7 @@ describe('awm change new --refresh (R3.11)', () => {
             // The editor's version stands: the record still has the derived values of the commit it was written for.
             expect(frontmatter(read()).modules).toEqual(['cli/src']);
         });
-        test('it is replaced by a symlink: record-changed, and the link target is untouched', () => {
-            if (process.platform === 'win32') return;
+        posixOnly('it is replaced by a symlink: record-changed, and the link target is untouched', () => {
             recordCommitted();
             const outside = path.join(repo.home, 'real.md');
             fs.writeFileSync(outside, 'precious');
@@ -904,8 +902,7 @@ describe('awm change new --refresh (R3.11)', () => {
             expect(run('change-record', { refresh: true }).code).toBe(0);
         });
     });
-    test('refresh keeps the file mode', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('refresh keeps the file mode', () => {
         recordCommitted();
         fs.chmodSync(file(), 0o640);
         run('change-record', { refresh: true });

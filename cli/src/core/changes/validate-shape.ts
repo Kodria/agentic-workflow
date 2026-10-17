@@ -1,6 +1,6 @@
 import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
-import { isRegularFileInside } from './record-io';
-import { clipMessage, cleanText, esc, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
+import { isRegularFileInside } from './fs-safe';
+import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
 import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, PENDING_MARKER, RECORD_SCHEMA, type ChangeRecord, type Diagnostic } from './types';
 
 const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
@@ -29,7 +29,6 @@ function finalize(list: Diagnostic[]): Diagnostic[] {
 
 // ---- Value predicates ----
 const isSensorName = (k: string): boolean => k.length > 0 && [...k].length <= 128 && isSingleLine(k);
-const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
 
 function isModulePath(m: unknown): boolean {
     return m === '.' || isSafeRelativePath(m);

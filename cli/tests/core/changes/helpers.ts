@@ -55,6 +55,9 @@ export function makeRepo(): TestRepo {
     return { root, home, git, commit, cleanup };
 }
 
+/** `test` where symlinks and POSIX modes exist; reported as skipped (not as passed) on Windows. */
+export const posixOnly: typeof test = process.platform === 'win32' ? (test.skip as typeof test) : test;
+
 /**
  * A copy of `template` in its own directory (same throwaway home, same git isolation): a few milliseconds instead of the
  * several git processes `makeRepo` spawns. For suites that need a fresh repository per test. `cleanup` removes only the copy;

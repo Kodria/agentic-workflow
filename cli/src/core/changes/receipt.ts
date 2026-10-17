@@ -5,7 +5,7 @@ import { writeFileAtomic } from '../atomic-file';
 import { cliVersion } from '../cli-version';
 import type { RunOutput } from '../../commands/sensors/types';
 import type { Overall, SensorStatus } from './types';
-import { esc, isSingleLine } from './text-safety';
+import { esc, isCanonicalIso, isSingleLine } from './text-safety';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, gitState } from './worktree';
 
 export interface SensorReceipt {
@@ -46,12 +46,6 @@ export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): strin
         overall: body.overall, sensors: sortedSensors(body.sensors),
     });
     return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
-}
-
-function isCanonicalIso(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
-    const time = new Date(value).getTime();
-    return !Number.isNaN(time) && new Date(time).toISOString() === value;
 }
 
 const isSensorName = (name: string): boolean => isSingleLine(name) && [...name].length >= 1 && [...name].length <= MAX_SENSOR_NAME;

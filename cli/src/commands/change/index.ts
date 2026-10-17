@@ -7,8 +7,9 @@ import { headSha, isDirtyOutside, isSafeRef, mergeBase, repoRoot, resolveBase, r
 import { deriveFields } from '../../core/changes/derive';
 import { readReceipt } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
-import { createExclusive, createRecordDir, inspectRecordDir, isRegularFileInside, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
-import { clipMessage, cleanText, esc, isHttpsUrl, isObj, isSingleLine, isWellFormed } from '../../core/changes/text-safety';
+import { isRegularFileInside } from '../../core/changes/fs-safe';
+import { createExclusive, createRecordDir, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
+import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSingleLine, isWellFormed } from '../../core/changes/text-safety';
 import { MAX_RECORD_BYTES, RECORD_DIR, type DerivedFields, type Verification } from '../../core/changes/types';
 import { validateRecordShape } from '../../core/changes/validate-shape';
 
@@ -61,8 +62,6 @@ function flagProblem(opts: Record<string, unknown>, root: string): string | null
 
 // ---- Provenance (R3.8) ----
 
-const isIsoInstant = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
-
 /** Same branch name the journal writers use (detectBranch), read through runGit. A detached HEAD has no journal of its own. */
 function currentBranch(root: string): string {
     const name = runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
@@ -76,8 +75,8 @@ function provenance(root: string, opts: NewOpts): Record<string, string> {
         const state = readJournal(root, currentBranch(root)).state;
         const agent = state?.admissionContext?.provider;
         if (typeof agent === 'string' && isProvenanceValue(agent)) out.agent = agent;
-        if (isIsoInstant(state?.cycle?.startedAt)) out.started_at = state.cycle.startedAt;
-        if (isIsoInstant(state?.cycle?.completedAt)) out.finished_at = state.cycle.completedAt;
+        if (isCanonicalIso(state?.cycle?.startedAt)) out.started_at = state.cycle.startedAt;
+        if (isCanonicalIso(state?.cycle?.completedAt)) out.finished_at = state.cycle.completedAt;
     } catch {
         // A damaged or unreadable journal is not an error of this command.
     }

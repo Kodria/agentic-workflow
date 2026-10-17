@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { writeFileAtomic } from '../atomic-file';
 import { RECORD_FILE_RE } from './parse';
-import { esc, isObj, isSafeRelativePath } from './text-safety';
+import { esc, isObj } from './text-safety';
 import { MAX_RECORD_BYTES, RECORD_DIR } from './types';
 
 // Filesystem access to `docs/changes/`: the one place that decides what is safe to read from and write to. Nothing here throws
@@ -61,19 +61,6 @@ export function recordsWithSlug(dir: string, slug: string): string[] | null {
         return fs.readdirSync(dir).filter((name) => RECORD_FILE_RE.exec(name)?.[4] === slug);
     } catch {
         return null;
-    }
-}
-
-/** A repo-relative path naming a regular file (not a link) that still lies inside `root` once every link on the way is resolved. */
-export function isRegularFileInside(root: string, rel: string): boolean {
-    if (typeof root !== 'string' || !isSafeRelativePath(rel)) return false;
-    const abs = path.join(root, ...rel.split('/'));
-    try {
-        if (!fs.lstatSync(abs).isFile()) return false;
-        const inside = path.relative(fs.realpathSync.native(root), fs.realpathSync.native(abs));
-        return inside !== '' && inside !== '..' && !inside.startsWith(`..${path.sep}`) && !path.isAbsolute(inside);
-    } catch {
-        return false;
     }
 }
 
