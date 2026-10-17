@@ -14,8 +14,38 @@ export interface TestRepo {
     /** The throwaway HOME directory (also a convenient parent for a directory that is not a repository). */
     home: string;
     git: (...args: string[]) => string;
-    commit: (files: Record<string, string>, message: string) => string;
+    /** Writes `files`, commits them and returns the new HEAD. `date` (an ISO instant) becomes the author and committer date; omitted, git uses the clock. */
+    commit: (files: Record<string, string>, message: string, date?: string) => string;
+    /** Runs git with the author and committer date set to `date` (an ISO instant): merges and annotated tags carry a date too. */
+    gitAt: (date: string, ...args: string[]) => string;
     cleanup: () => void;
+}
+
+/** The git runner of a repository: identity and config isolation in an explicit environment, optional explicit dates. */
+function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitAt' | 'commit'> {
+    const env = {
+        ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
+    };
+    const run = (extra: Record<string, string>, args: string[]) =>
+        execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: { ...env, ...extra } }).trim();
+    const dates = (date: string): Record<string, string> => {
+        const stamp = `${Math.floor(Date.parse(date) / 1000)} +0000`;
+        return { GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
+    };
+    const git = (...args: string[]) => run({}, args);
+    const gitAt = (date: string, ...args: string[]) => run(dates(date), args);
+    const commit = (files: Record<string, string>, message: string, date?: string): string => {
+        for (const [rel, content] of Object.entries(files)) {
+            const abs = path.join(root, rel);
+            fs.mkdirSync(path.dirname(abs), { recursive: true });
+            fs.writeFileSync(abs, content);
+        }
+        git('add', '-A');
+        run(date === undefined ? {} : dates(date), ['commit', '-q', '-m', message]);
+        return git('rev-parse', 'HEAD');
+    };
+    return { git, gitAt, commit };
 }
 
 /** Isolated repo: HOME/AWM_HOME point at a tmpdir; never touches the real ~/.awm. */
@@ -24,22 +54,7 @@ export function makeRepo(): TestRepo {
     const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-')));
     Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' });
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
-    const env = {
-        ...process.env, HOME: home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
-        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
-    };
-    const git = (...args: string[]) =>
-        execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env }).trim();
-    const commit = (files: Record<string, string>, message: string): string => {
-        for (const [rel, content] of Object.entries(files)) {
-            const abs = path.join(root, rel);
-            fs.mkdirSync(path.dirname(abs), { recursive: true });
-            fs.writeFileSync(abs, content);
-        }
-        git('add', '-A');
-        git('commit', '-q', '-m', message);
-        return git('rev-parse', 'HEAD');
-    };
+    const { git, gitAt, commit } = gitApi(root, home);
     const cleanup = () => {
         for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
         fs.rmSync(root, { recursive: true, force: true });
@@ -52,7 +67,7 @@ export function makeRepo(): TestRepo {
         cleanup();
         throw error;
     }
-    return { root, home, git, commit, cleanup };
+    return { root, home, git, gitAt, commit, cleanup };
 }
 
 /** `test` where symlinks and POSIX modes exist; reported as skipped (not as passed) on Windows. */
@@ -66,23 +81,8 @@ export const posixOnly: typeof test = process.platform === 'win32' ? (test.skip 
 export function cloneRepo(template: TestRepo): TestRepo {
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
     fs.cpSync(template.root, root, { recursive: true });
-    const env = {
-        ...process.env, HOME: template.home, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
-        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
-    };
-    const git = (...args: string[]) =>
-        execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env }).trim();
-    const commit = (files: Record<string, string>, message: string): string => {
-        for (const [rel, content] of Object.entries(files)) {
-            const abs = path.join(root, rel);
-            fs.mkdirSync(path.dirname(abs), { recursive: true });
-            fs.writeFileSync(abs, content);
-        }
-        git('add', '-A');
-        git('commit', '-q', '-m', message);
-        return git('rev-parse', 'HEAD');
-    };
-    return { root, home: template.home, git, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+    const { git, gitAt, commit } = gitApi(root, template.home);
+    return { root, home: template.home, git, gitAt, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
 /**
