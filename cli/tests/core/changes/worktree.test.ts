@@ -144,6 +144,20 @@ describe('worktree state', () => {
             const state = gitState(root, true);
             expect(state.kind === 'ok' && state.dirty).toBe(false);
         });
+        test('an untracked file inside a clean submodule: the post-run recheck ignores it, the pre-run measure counts it', () => {
+            registerHiddenSubmodule();
+            fs.writeFileSync(path.join(sm(), 'coverage.out'), 'x'); // what a sensor leaves behind
+            const post = gitState(root, false); const pre = gitState(root, true);
+            expect(post.kind === 'ok' && post.dirty).toBe(false);
+            // git reports the submodule itself as modified (untracked content) in the normal-untracked mode, so the pre-run measure is dirty.
+            expect(pre.kind === 'ok' && pre.dirty).toBe(true);
+        });
+        test.each([[true], [false]])('modified tracked content inside a submodule makes the tree dirty (untracked=%p)', (untracked) => {
+            registerHiddenSubmodule();
+            fs.writeFileSync(path.join(sm(), 'one'), 'changed');
+            const state = gitState(root, untracked);
+            expect(state.kind === 'ok' && state.dirty).toBe(true);
+        });
         test.each([[true], [false]])('a submodule checked out at another commit than the gitlink makes the tree dirty (untracked=%p)', (untracked) => {
             registerHiddenSubmodule();
             commitInSm('two');

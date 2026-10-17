@@ -40,7 +40,10 @@ export function gitState(cwd: string, untracked: boolean, extraExcludes: readonl
         return gitFailure(error);
     }
     try {
-        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--ignore-submodules=none', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
+        // Submodules are never hidden by config (`.gitmodules` ignore=all, diff.ignoreSubmodules). The pre-run measure counts everything
+        // (`none`); the post-run recheck is about tracked files only, so it also ignores untracked content inside a submodule
+        // (sensor build/coverage output) while still seeing a moved checkout or modified tracked content (`untracked`).
+        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', untracked ? '--ignore-submodules=none' : '--ignore-submodules=untracked', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
         const status = execFileSync('git', args, gitSpawnOptions(root, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT }));
         return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
     } catch {
