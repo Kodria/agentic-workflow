@@ -2180,3 +2180,7 @@ The design clauses R5.3, R5.5, R5.6 and R5.7 now settle what the sketch left ope
 
 The S6 review settled nine points in the design (R5.1 shallow clones and base wording, R5.2 range, R5.3/R5.7 record bounds, R5.5 unusable dates and clipping, R5.6 JSON `adopted` and the shape of `invalid-record` entries, R5.7 repository-only write rule). S6 is reworked to match; read the clauses there.
 
+### A12 — S6 specification review, round two (2026-10-17)
+
+R5.5 (`pr` from the true end of a long subject) and R5.7 (first-parent history read in pages of at most 10 000 commits, stop at the adoption point or at the first page with no commit in the window) were amended in the design; S6 is reworked to match.
+
