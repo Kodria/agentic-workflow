@@ -1,14 +1,17 @@
+import path from 'path';
 import { execFileSync } from 'child_process';
+import { GIT_TIMEOUT_MS, gitChildEnv } from './git-env';
 import { isSingleLine } from './text-safety';
-import { gitChildEnv, gitState } from './worktree';
+import { gitState } from './worktree';
 
 // Every function here takes values that may be influenced by a user or by repository content (refs, paths, remote URLs).
 // None of them throws: git failures and invalid input come back as null / false / true (fail closed) so that callers
 // decide how to report them. Git runs without a shell, and a revision never reaches it unless it passed a whitelist.
 
-const OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'], timeout: 15000, maxBuffer: 16 * 1024 * 1024 };
+const OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 };
 const SAFE_REF = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
-const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** A full commit id (SHA-1 or SHA-256). */
+export const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const MAX_REF = 255;
 const MAX_IDENTITY = 300;
 const MAX_REMOTE_URL = 2048;
@@ -87,15 +90,16 @@ export function isDirtyOutside(root: string, extraExcludes: string[]): boolean {
     return state.kind !== 'ok' || state.dirty;
 }
 
-/** Repository root with native separators; null outside a repository (with a commit). */
+/** Repository root with native separators; null outside a repository. Only `rev-parse`: never a (slow, refreshing) `status`. */
 export function repoRoot(cwd: string): string | null {
-    const state = gitState(cwd, false);
-    return state.kind === 'ok' ? state.root : null;
+    const out = runGit(cwd, ['rev-parse', '--show-toplevel'])?.trim();
+    return out ? path.resolve(out) : null;
 }
 
+/** Full id of HEAD; null when there is no commit or git fails. Only `rev-parse`: never a `status`. */
 export function headSha(root: string): string | null {
-    const state = gitState(root, false);
-    return state.kind === 'ok' ? state.commit : null;
+    const out = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'])?.trim();
+    return out !== undefined && COMMIT_ID.test(out) ? out : null;
 }
 
 /** Removes any run of `/` from the start and the end of `s` (index scan: linear, unlike /\/+$/). */

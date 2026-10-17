@@ -55,6 +55,12 @@ export function makeRepo(): TestRepo {
     return { root, home, git, commit, cleanup };
 }
 
+/**
+ * Wall-clock bound for the linear-time tests. A quadratic regression on the hostile inputs takes tens of seconds, so a
+ * generous bound still catches it, while several git spawns on a slow Windows/macOS runner stay far below it.
+ */
+export const LINEAR_TIME_BOUND_MS = 5000;
+
 /** Casts a deliberately wrong value to whatever the function under test declares. */
 export const bad = (v: unknown) => v as never;
 

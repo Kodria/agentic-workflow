@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { hasOptOut } from '../../../src/core/changes/trailers';
 
 describe('hasOptOut', () => {
@@ -116,7 +116,6 @@ describe('hasOptOut', () => {
 
     // Untrusted commit messages are scanned in linear time: a regex that backtracks over a long whitespace run took seconds (80k spaces: 6.6 s).
     describe('linear-time parsing of hostile messages', () => {
-        const LIMIT_MS = 500;
         const timed = (message: string): { opted: boolean; ms: number } => {
             const file = path.join(repo.home, 'message.txt');
             fs.writeFileSync(file, message);
@@ -140,7 +139,7 @@ describe('hasOptOut', () => {
         ])('%s is processed quickly and gives the usual result', (_label, message, expected) => {
             const { opted, ms } = timed(message);
             expect(opted).toBe(expected);
-            expect(ms).toBeLessThan(LIMIT_MS);
+            expect(ms).toBeLessThan(LINEAR_TIME_BOUND_MS);
         });
     });
 });

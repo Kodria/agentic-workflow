@@ -1,7 +1,8 @@
+import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { bad, branchOff, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeRepo, nonRepoDir as plainDir, withEnv, type TestRepo } from './helpers';
 import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBase, mergeBase, isAncestor, changedFiles, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
@@ -221,6 +222,27 @@ describe('git functions in a repository', () => {
         expect(path.isAbsolute(repoRoot(sub) as string)).toBe(true);
         expect(headSha(sub)).toBe(repo.git('rev-parse', 'HEAD'));
     });
+    test('repoRoot and headSha never run git status, so a slow or failing status cannot hide a readable HEAD', () => {
+        const real = childProcess.execFileSync;
+        const seen: string[] = [];
+        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+            seen.push(...args);
+            if (args[0] === 'status') throw Object.assign(new Error('status must not run'), { code: 'ETIMEDOUT' });
+            return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+        }) as never);
+        try {
+            expect(fs.realpathSync.native(repoRoot(repo.root) as string)).toBe(fs.realpathSync.native(repo.root));
+            expect(headSha(repo.root)).toMatch(/^[0-9a-f]{40}$/);
+        } finally { spy.mockRestore(); }
+        expect(seen).not.toContain('status');
+        expect(seen).toContain('rev-parse');
+    });
+    test('repoRoot works in a repository without a commit; headSha is null there', () => {
+        const empty = fs.mkdtempSync(path.join(repo.home, 'empty-'));
+        repo.git('-C', empty, 'init', '-q', '-b', 'main');
+        expect(fs.realpathSync.native(repoRoot(empty) as string)).toBe(fs.realpathSync.native(empty));
+        expect(headSha(empty)).toBeNull();
+    });
     test('repoRoot and headSha are null outside a repository and for non-string input', () => {
         expect(repoRoot(nonRepoDir())).toBeNull();
         expect(headSha(nonRepoDir())).toBeNull();
@@ -252,7 +274,7 @@ describe('git functions in a repository', () => {
             fs.appendFileSync(path.join(repo.root, '.git', 'config'), `[remote "origin"]\n\turl = https://h.example/${'/'.repeat(100000)}x\n`);
             const start = performance.now();
             expect(repoIdentity(repo.root)).toBeNull();
-            expect(performance.now() - start).toBeLessThan(500);
+            expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
         });
         test('is null for a non-string root or outside a repository', () => {
             expect(repoIdentity(bad(null))).toBeNull();

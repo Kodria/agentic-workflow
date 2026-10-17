@@ -2,7 +2,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, makeRepo, nonRepoDir as plainDir, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
 import { changedFiles, mergeBase } from '../../../src/core/changes/git';
 import { deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
 
@@ -333,8 +333,37 @@ describe('deriveFields in a repository', () => {
         }
         const start = performance.now();
         const result = deriveFields(repo.root, mergeBase(repo.root, base));
-        expect(performance.now() - start).toBeLessThan(500);
-        expect(result.ok).toBe(true);
+        expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        // every one of these subjects is over 1024 units, so none is a conventional commit (R3.3)
+        expect(result).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
+    });
+    // The release parser's header regex backtracks quadratically on blanks followed by a line terminator its `.` cannot cross
+    // (60k spaces then `\ry\rz` took 3.3 s). A subject over 1024 UTF-16 units is therefore never handed to it (R3.3).
+    test.each([
+        ['spaces followed by lone CRs', `feat: ${' '.repeat(100000)}\ry\rz`],
+        ['spaces followed by U+2028 separators', `feat: ${' '.repeat(100000)}\u2028y\u2028z`],
+        ['a 200k-character subject', `feat: ${'x'.repeat(200000)}`],
+    ])('R3.3 a hostile subject (%s) is ignored in linear time', (_label, subject) => {
+        const base = branch();
+        const file = path.join(repo.home, 'message.txt');
+        fs.writeFileSync(file, subject);
+        fs.writeFileSync(path.join(repo.root, 'f.txt'), 'x');
+        repo.git('add', '-A');
+        repo.git('commit', '-q', '--cleanup=verbatim', '-F', file);
+        const start = performance.now();
+        const result = deriveFields(repo.root, mergeBase(repo.root, base));
+        expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        expect(result).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
+    });
+    test('R3.3 a subject of exactly 1024 units is parsed, one of 1025 is not a conventional commit', () => {
+        const base = branch();
+        const long = (type: string, units: number) => `${type}: ${'x'.repeat(units - type.length - 2)}`;
+        repo.commit({ 'a.ts': '1' }, long('feat', 1024));
+        expect(long('feat', 1024)).toHaveLength(1024);
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: null, semver: 'minor', breaking: false, modules: ['.'] } });
+        repo.commit({ 'b.ts': '1' }, long('fix!', 1025));
+        expect(long('fix!', 1025)).toHaveLength(1025);
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: null, semver: 'minor', breaking: false, modules: ['.'] } });
     });
     test('R3.3 one HEAD is read and pinned: a commit made while deriving is not mixed in', () => {
         const base = branch();

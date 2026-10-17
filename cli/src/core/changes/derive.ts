@@ -1,16 +1,18 @@
 import path from 'path';
-import { determineBump, GIT_LOG_FORMAT, parseCommits, RS, type Commit } from '../../release/core';
-import { LOG_SAFETY_ARGS, changedFiles, runGit } from './git';
+import { determineBump, GIT_LOG_FORMAT, parseCommits, RS, US, type Commit } from '../../release/core';
+import { COMMIT_ID, LOG_SAFETY_ARGS, changedFiles, headSha, runGit } from './git';
 import { esc, clipMessage, isSafeRelativePath, isSingleLine } from './text-safety';
 import { RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './types';
 
 // Pathspecs relative to the repository top, so the result does not depend on the directory git runs in.
 const ALL_FILES = ':/';
 const EXCLUDE_RECORDS = `:(top,exclude,literal)${RECORD_DIR}`;
-const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const PARSER_TYPE = /^\w+$/;
 const RECORD_TYPE = /^[a-z]+$/;
 const MODULE_DEPTH = 3;
+// R3.3: the release parser's header regex backtracks quadratically on a long subject with blanks and line terminators, so a
+// subject (the text before the first US of a record) over this many UTF-16 units is never handed to it.
+const MAX_SUBJECT_UNITS = 1024;
 
 /** Keeps the commits the release parser can produce (a `\w+` type, any spelling) with a scope that is usable text; anything else is ignored. */
 function usable(commits: unknown): Commit[] {
@@ -71,8 +73,8 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     if (typeof root !== 'string' || root.length === 0) return fail('invalid-input', 'repository root must be a non-empty string');
     if (typeof mergeBaseSha !== 'string' || !COMMIT_ID.test(mergeBaseSha)) return fail('invalid-input', `merge-base must be a full commit id, got "${esc(mergeBaseSha as string)}"`);
     // HEAD is read once: the log and the diff below both use this sha, so a HEAD that moves meanwhile cannot mix snapshots.
-    const head = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'])?.trim();
-    if (head === undefined || !COMMIT_ID.test(head)) return fail('git-failed', 'git could not read HEAD');
+    const head = headSha(root);
+    if (head === null) return fail('git-failed', 'git could not read HEAD');
     const range = `${mergeBaseSha}..${head}`;
     // --full-history: with a pathspec git would otherwise prune the side of a merge whose tree equals the other parent
     // (`merge -s ours`), silently dropping real commits from the range.
@@ -82,7 +84,11 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
     const records = raw.split('\0').filter((record) => record !== '');
     if (records.length === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
-    const commits = records.flatMap((record) => parseCommits(record.split(RS).join('')));
+    const commits = records.flatMap((record) => {
+        const clean = record.split(RS).join('');
+        const end = clean.indexOf(US);
+        return (end < 0 ? clean.length : end) > MAX_SUBJECT_UNITS ? [] : parseCommits(clean);
+    });
     const derived = deriveFromCommits(commits);
     if (derived === null) return fail('no-conventional-commits', 'no commit in the range uses a conventional-commit subject (type(scope): subject)');
     const files = changedFiles(root, mergeBaseSha, head);

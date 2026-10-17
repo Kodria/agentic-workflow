@@ -1,5 +1,6 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { GIT_TIMEOUT_MS, gitChildEnv } from './git-env';
 import { isSafeRelativePath } from './text-safety';
 
 /** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
@@ -10,21 +11,7 @@ export const REASON_GIT_FAILED = 'git command failed or timed out';
 
 const MAX_EXTRA_EXCLUDES = 64;
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: 15000 };
-
-/**
- * Variables that change how pathspecs are read (`:/`, `:(exclude)` ...) and so the meaning of every range/count/status we ask
- * for: literal/glob/noglob/icase would turn a plain exclusion into a literal name, a glob or a case-insensitive match. They are
- * removed from the child's environment; everything else (GIT_CONFIG_*, GIT_AUTHOR_*, HOME ...) is passed through untouched.
- */
-const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
-
-/** The environment every git child of the change-record code runs in. */
-export function gitChildEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    for (const name of PATHSPEC_ENV) delete env[name];
-    return env;
-}
+const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: GIT_TIMEOUT_MS };
 
 export type GitState =
     | { kind: 'ok'; root: string; commit: string; dirty: boolean }
