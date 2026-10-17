@@ -168,9 +168,9 @@ function scpIdentity(url: string): string | null {
     return repo === '' ? null : `${host.toLowerCase()}/${repo}`;
 }
 
-/** `host/owner/name` from remote.origin.url with credentials stripped; null when absent, unparseable, too long or not single-line. */
-export function repoIdentity(root: string): string | null {
-    const url = runGit(root, ['config', '--get', 'remote.origin.url'])?.trim();
+/** `host/owner/name` from a remote url with credentials, query and fragment stripped; null when unparseable, too long or not single-line. */
+export function identityFromUrl(rawUrl: string): string | null {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
     if (!url || url.length > MAX_REMOTE_URL) return null;
     let identity = scpIdentity(url);
     if (identity === null) {
@@ -183,4 +183,10 @@ export function repoIdentity(root: string): string | null {
         }
     }
     return identity !== null && isSingleLine(identity) && identity.length <= MAX_IDENTITY ? identity : null;
+}
+
+/** `host/owner/name` from remote.origin.url (see identityFromUrl); null when there is no remote. */
+export function repoIdentity(root: string): string | null {
+    const url = runGit(root, ['config', '--get', 'remote.origin.url']);
+    return url === null ? null : identityFromUrl(url);
 }

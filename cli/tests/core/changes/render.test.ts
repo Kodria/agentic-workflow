@@ -1,5 +1,5 @@
 import yaml from 'js-yaml';
-import { LINEAR_TIME_BOUND_MS } from './helpers';
+import { expectLinearScaling } from './helpers';
 import { loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
 import { refreshDerived, renderSkeleton } from '../../../src/core/changes/render';
 import { validateRecordShape } from '../../../src/core/changes/validate-shape';
@@ -185,10 +185,9 @@ describe('render: refreshDerived', () => {
             expect(out).toContain(`${line}\ntitle: Hello`);
         });
         test('a hostile very long quoted line is scanned in linear time', () => {
-            const line = `"${'\\'.repeat(200000)}`;
-            const started = Date.now();
-            expect(refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V)).toBeNull();
-            expect(Date.now() - started).toBeLessThan(LINEAR_TIME_BOUND_MS);
+            const hostile = (n: number): string => lf(OLD).replace('title: Hello', `"${'\\'.repeat(n)}\ntitle: Hello`);
+            expect(refreshDerived(hostile(200000), FRESH, FRESH_V)).toBeNull();
+            expectLinearScaling((n) => { refreshDerived(hostile(n), FRESH, FRESH_V); }, 50_000);
         });
     });
     test('the dumped blocks use the core schema (what the validator parses)', () => {

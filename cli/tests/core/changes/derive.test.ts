@@ -2,9 +2,10 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { bad, expectLinearScaling, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { US, RS } from '../../../src/release/core';
 import { changedFiles, mergeBase } from '../../../src/core/changes/git';
-import { deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
+import { commitsFromRecords, deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
 
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
 const c = (type: string, scope: string | null, breaking = false) => ({ type, scope, breaking, subject: 's' });
@@ -355,7 +356,7 @@ describe('deriveFields in a repository', () => {
         expect(deriveFields(repo.root, '--output=x')).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'invalid-input' }) });
         noNewFile('x');
     });
-    test('a hostile 200k-character subject is parsed in linear time', () => {
+    test('a hostile 200k-character subject is not a conventional commit', () => {
         const base = branch();
         const file = path.join(repo.home, 'message.txt');
         for (const [i, subject] of [`feat(${' '.repeat(200000)}`, `feat: ${' '.repeat(200000)}y`, `feat${'('.repeat(100000)}`, `fix(${'x'.repeat(200000)})!: z`].entries()) {
@@ -364,9 +365,7 @@ describe('deriveFields in a repository', () => {
             repo.git('add', '-A');
             repo.git('commit', '-q', '--cleanup=verbatim', '-F', file);
         }
-        const start = performance.now();
         const result = deriveFields(repo.root, mergeBase(repo.root, base));
-        expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
         // every one of these subjects is over 1024 units, so none is a conventional commit (R3.3)
         expect(result).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
     });
@@ -376,16 +375,14 @@ describe('deriveFields in a repository', () => {
         ['spaces followed by lone CRs', `feat: ${' '.repeat(100000)}\ry\rz`],
         ['spaces followed by U+2028 separators', `feat: ${' '.repeat(100000)}\u2028y\u2028z`],
         ['a 200k-character subject', `feat: ${'x'.repeat(200000)}`],
-    ])('R3.3 a hostile subject (%s) is ignored in linear time', (_label, subject) => {
+    ])('R3.3 a hostile subject (%s) is ignored', (_label, subject) => {
         const base = branch();
         const file = path.join(repo.home, 'message.txt');
         fs.writeFileSync(file, subject);
         fs.writeFileSync(path.join(repo.root, 'f.txt'), 'x');
         repo.git('add', '-A');
         repo.git('commit', '-q', '--cleanup=verbatim', '-F', file);
-        const start = performance.now();
         const result = deriveFields(repo.root, mergeBase(repo.root, base));
-        expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
         expect(result).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
     });
     test('R3.3 a subject of exactly 1024 units is parsed, one of 1025 is not a conventional commit', () => {
@@ -431,5 +428,26 @@ describe('deriveFields in a repository', () => {
             expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'a', semver: 'patch', breaking: false, modules: ['cli/src'] } });
         } finally { spy.mockRestore(); }
         expect(moved).toBe(true);
+    });
+});
+
+describe('commitsFromRecords: hostile subjects are never handed to the release parser (R3.3), in linear time', () => {
+    // The release parser's header regex backtracks quadratically on blanks followed by a line terminator its `.` cannot cross, so a
+    // subject over 1024 units is dropped before it. Pure parsing: no git child, so the timing says nothing about the runner's speed.
+    const record = (subject: string): string[] => [`${subject}${US}${RS}`];
+    test.each([
+        ['spaces followed by lone CRs', (n: number) => `feat: ${' '.repeat(n)}\ry\rz`],
+        ['spaces followed by U+2028 separators', (n: number) => `feat: ${' '.repeat(n)}\u2028y\u2028z`],
+        ['an unterminated scope of blanks', (n: number) => `feat(${' '.repeat(n)}`],
+        ['a run of opening parentheses', (n: number) => `feat${'('.repeat(n)}`],
+        ['a very long scope', (n: number) => `fix(${'x'.repeat(n)})!: z`],
+        ['a very long plain subject', (n: number) => `feat: ${'x'.repeat(n)}`],
+    ])('%s gives no commit and scales linearly', (_label, subject) => {
+        expect(commitsFromRecords(record(subject(20_000)))).toEqual([]);
+        expectLinearScaling((n) => { commitsFromRecords(record(subject(n))); }, 5_000);
+    });
+    test('a subject of exactly 1024 units is parsed, one of 1025 is not', () => {
+        expect(commitsFromRecords(record(`feat: ${'x'.repeat(1024 - 6)}`))).toHaveLength(1);
+        expect(commitsFromRecords(record(`feat: ${'x'.repeat(1025 - 6)}`))).toEqual([]);
     });
 });

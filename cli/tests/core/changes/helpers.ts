@@ -105,10 +105,26 @@ export function cloneRepo(template: TestRepo): TestRepo {
 }
 
 /**
- * Wall-clock bound for the linear-time tests. A quadratic regression on the hostile inputs takes tens of seconds, so a
- * generous bound still catches it, while several git spawns on a slow Windows/macOS runner stay far below it.
+ * For the linear-time tests of PURE code (no git child): `run(n)` is called with a small and a 10x larger input and the best of a
+ * few runs of each is compared. Linear code takes about 10x as long; a quadratic scan about 100x. The bound is 40x the small time
+ * (floored at 1 ms so a clock tick is not a ratio), which separates the two with a margin on both sides and does not depend on
+ * how fast or how loaded the runner is. `base` must be large enough for a quadratic scan to cost milliseconds at that size.
  */
-export const LINEAR_TIME_BOUND_MS = 5000;
+export function expectLinearScaling(run: (n: number) => void, base: number): void {
+    const best = (n: number): number => {
+        let min = Infinity;
+        for (let i = 0; i < 3; i++) {
+            const started = performance.now();
+            run(n);
+            min = Math.min(min, performance.now() - started);
+        }
+        return min;
+    };
+    run(Math.max(1, Math.floor(base / 10))); // warm-up: JIT and caches
+    const small = Math.max(best(base), 1);
+    const large = best(base * 10);
+    expect({ small, large, bounded: large <= 40 * small }).toMatchObject({ bounded: true });
+}
 
 /** Casts a deliberately wrong value to whatever the function under test declares. */
 export const bad = (v: unknown) => v as never;

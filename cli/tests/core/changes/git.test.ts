@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, makeHiddenSubmodule, cloneRepo, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
-import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, repoIdentity, runGit } from '../../../src/core/changes/git';
+import { bad, expectLinearScaling, branchOff, makeHiddenSubmodule, cloneRepo, makeRepo, nonRepoDir as plainDir, spyOnGit, withEnv, type TestRepo } from './helpers';
+import { LOG_SAFETY_ARGS, isSafeRef, isSafeRevision, resolveBaseCommit, mergeBase, isAncestor, changedFiles, addedFilesUnder, isCommittedClean, isDirtyOutside, repoRoot, headSha, identityFromUrl, repoIdentity, runGit } from '../../../src/core/changes/git';
 
 const ANY_DIR = os.tmpdir();
 const NOT_STRINGS = [undefined, null, 7, {}, ['main'], true];
@@ -381,11 +381,15 @@ describe('git functions in a repository', () => {
             expect(id).toBe('host.example/o/r');
             expect(id).not.toContain('SECRET');
         });
-        test('an over-long remote url is null and is read in linear time', () => {
+        test('an over-long remote url is null (git reads it, the 2048-unit cap rejects it)', () => {
             fs.appendFileSync(path.join(repo.root, '.git', 'config'), `[remote "origin"]\n\turl = https://h.example/${'/'.repeat(100000)}x\n`);
-            const start = performance.now();
             expect(repoIdentity(repo.root)).toBeNull();
-            expect(performance.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        });
+        test('identityFromUrl: a hostile url is rejected without scanning it more than once, whatever its length', () => {
+            expect(identityFromUrl(`https://h.example/${'/'.repeat(100000)}x`)).toBeNull();
+            expect(identityFromUrl(`git@h.example:${'/'.repeat(100000)}x`)).toBeNull();
+            expect(identityFromUrl(`https://h.example/${'/'.repeat(1000)}o/r`)).toBe('h.example/o/r');
+            expectLinearScaling((n) => { identityFromUrl(`https://h.example/${'/'.repeat(n)}x`); identityFromUrl(`git@h.example:${'/'.repeat(n)}x`); }, 100_000);
         });
         test('is null for a non-string root or outside a repository', () => {
             expect(repoIdentity(bad(null))).toBeNull();

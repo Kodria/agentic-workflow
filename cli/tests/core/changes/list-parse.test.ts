@@ -1,4 +1,4 @@
-import { LINEAR_TIME_BOUND_MS, bad } from './helpers';
+import { bad, expectLinearScaling } from './helpers';
 import { NOW, UNSAFE } from './list-fixtures';
 import { cleanLine, parsePr, parseSince } from '../../../src/core/changes/list-parse';
 
@@ -32,10 +32,9 @@ describe('parseSince (R5.2)', () => {
         expect(parseSince('999999999d', NOW)).toBeNull();
     });
     test('rejects a very long text without scanning it more than once', () => {
-        const start = Date.now();
         expect(parseSince(`${'9'.repeat(1_000_000)}h`, NOW)).toBeNull();
         expect(parseSince('x'.repeat(1_000_000), NOW)).toBeNull();
-        expect(Date.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        expectLinearScaling((n) => { parseSince(`${'9'.repeat(n)}h`, NOW); parseSince('x'.repeat(n), NOW); }, 100_000);
     });
     test.each([undefined, null, 24, {}, [], true])('rejects the non-string %j without throwing', (value) => {
         expect(parseSince(bad(value), NOW)).toBeNull();
@@ -74,12 +73,14 @@ describe('parsePr (R5.5)', () => {
         expect(parsePr(bad(value))).toBeNull();
     });
     test('a very long run of digits or of blanks after (# is parsed in linear time', () => {
-        const start = Date.now();
         expect(parsePr(`feat: x (#${'9'.repeat(1_000_000)}`)).toBeNull();
         expect(parsePr(`feat: y (#${' '.repeat(1_000_000)}1)`)).toBeNull();
         expect(parsePr(`feat: z ${'(#'.repeat(500_000)})`)).toBeNull();
         expect(parsePr(`${' '.repeat(1_000_000)}`)).toBeNull();
-        expect(Date.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        expectLinearScaling((n) => {
+            parsePr(`feat: x (#${'9'.repeat(n)}`); parsePr(`feat: y (#${' '.repeat(n)}1)`);
+            parsePr(`feat: z ${'(#'.repeat(n / 2)})`); parsePr(`${' '.repeat(n)}`);
+        }, 100_000);
     });
 });
 
@@ -113,8 +114,7 @@ describe('cleanLine', () => {
         expect(out.length).toBeLessThanOrEqual(9);
     });
     test('a very long text is cut in linear time', () => {
-        const start = Date.now();
         expect(cleanLine('\u001b'.repeat(5_000_000), 1024).length).toBe(1024);
-        expect(Date.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
+        expectLinearScaling((n) => { cleanLine('\u001b'.repeat(n), 1024); cleanLine('a\u202e'.repeat(n / 2), 1024); }, 200_000);
     });
 });

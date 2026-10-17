@@ -61,6 +61,18 @@ export function deriveModules(files: string[]): string[] {
     return [...modules].sort();
 }
 
+/**
+ * The conventional commits of NUL-separated `git log` records. Measured on the raw record, before RS is stripped (the stripped text
+ * is never longer): like the release parser, the subject ends at the first US, so only the text before it counts, and a subject over
+ * MAX_SUBJECT_UNITS is never handed to the parser.
+ */
+export function commitsFromRecords(records: string[]): Commit[] {
+    return records.flatMap((record) => {
+        const end = record.indexOf(US);
+        return (end < 0 ? record.length : end) > MAX_SUBJECT_UNITS ? [] : parseCommits(record.split(RS).join(''));
+    });
+}
+
 export type Derived = { ok: true; fields: DerivedFields } | { ok: false; diagnostic: Diagnostic };
 
 const fail = (code: string, message: string): Derived => ({ ok: false, diagnostic: { code, message: clipMessage(message) } });
@@ -84,12 +96,7 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
     const records = raw.split('\0').filter((record) => record !== '');
     if (records.length === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
-    const commits = records.flatMap((record) => {
-        // Measured on the raw record, before RS is stripped (the stripped text is never longer). Like the release parser, the
-        // subject ends at the first US, so only the text before it counts.
-        const end = record.indexOf(US);
-        return (end < 0 ? record.length : end) > MAX_SUBJECT_UNITS ? [] : parseCommits(record.split(RS).join(''));
-    });
+    const commits = commitsFromRecords(records);
     const derived = deriveFromCommits(commits);
     if (derived === null) return fail('no-conventional-commits', 'no commit in the range uses a conventional-commit subject (type(scope): subject)');
     const files = changedFiles(root, mergeBaseSha, head);

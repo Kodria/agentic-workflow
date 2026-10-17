@@ -34,7 +34,7 @@ function isOptOutLine(line: string): boolean {
 }
 
 /** DD-6: a line of the final paragraph (never the subject's) that is exactly `Change-Record: none`. No folding, no other separator. */
-function optsOut(message: string): boolean {
+export function optsOut(message: string): boolean {
     const lines = message.split('\n');
     let paragraphs = 0; let start = 0; let inside = false;
     for (let i = 0; i < lines.length; i++) {

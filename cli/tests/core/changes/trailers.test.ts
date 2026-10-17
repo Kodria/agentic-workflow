@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { LINEAR_TIME_BOUND_MS, bad, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
-import { hasOptOut } from '../../../src/core/changes/trailers';
+import { bad, expectLinearScaling, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { hasOptOut, optsOut } from '../../../src/core/changes/trailers';
 
 describe('hasOptOut', () => {
     let repo: TestRepo;
@@ -149,31 +149,31 @@ describe('hasOptOut', () => {
     });
 
     // Untrusted commit messages are scanned in linear time: a regex that backtracks over a long whitespace run took seconds (80k spaces: 6.6 s).
+    // The scaling is measured on the pure parser (no git child), so a slow or loaded runner cannot fail it; the git-level test only
+    // checks the result.
     describe('linear-time parsing of hostile messages', () => {
-        const timed = (message: string): { opted: boolean; ms: number } => {
+        const CASES: Array<[string, (n: number) => string, boolean]> = [
+            ['spaces inside a line of the final paragraph', (n) => `docs: a\n\nx${' '.repeat(n)}y`, false],
+            ['spaces inside the subject line', (n) => `docs: x${' '.repeat(n)}y\n\nChange-Record: none`, true],
+            ['alternating blanks inside a line', (n) => `docs: a\n\nx${' \t'.repeat(n / 2)}y`, false],
+            ['a single very long line', (n) => `docs: a\n\n${'x'.repeat(n)}`, false],
+            ['an opt-out line followed by blanks and text', (n) => `docs: a\n\nChange-Record: none${' '.repeat(n)}x`, false],
+            ['an opt-out key followed by blanks and no value', (n) => `docs: a\n\nChange-Record:${' '.repeat(n)}`, false],
+            ['an opt-out line with trailing blanks', (n) => `docs: a\n\nChange-Record: none${' '.repeat(n)}`, true],
+            ['many blank lines between paragraphs', (n) => `docs: a\n${'\n'.repeat(n / 2)}Change-Record: none`, true],
+            ['many whitespace-only lines', (n) => `docs: a\n\n${' \n'.repeat(n / 2)}Change-Record: none`, true],
+        ];
+        test.each(CASES)('%s gives the usual result through git', (_label, message, expected) => {
             const file = path.join(repo.home, 'message.txt');
-            fs.writeFileSync(file, message);
-            fs.writeFileSync(path.join(repo.root, 'perf.txt'), message.length.toString());
+            fs.writeFileSync(file, message(200_000));
+            fs.writeFileSync(path.join(repo.root, 'perf.txt'), 'x');
             repo.git('add', '-A');
             repo.git('commit', '-q', '--cleanup=verbatim', '-F', file);
-            const start = performance.now();
-            const opted = hasOptOut(repo.root, ['-1', 'HEAD']);
-            return { opted, ms: performance.now() - start };
-        };
-        test.each([
-            ['200k spaces inside a line of the final paragraph', `docs: a\n\nx${' '.repeat(200000)}y`, false],
-            ['200k spaces inside the subject line', `docs: x${' '.repeat(200000)}y\n\nChange-Record: none`, true],
-            ['alternating blanks inside a line', `docs: a\n\nx${' \t'.repeat(100000)}y`, false],
-            ['a 200k-character single line', `docs: a\n\n${'x'.repeat(200000)}`, false],
-            ['an opt-out line followed by 200k blanks and text', `docs: a\n\nChange-Record: none${' '.repeat(200000)}x`, false],
-            ['an opt-out key followed by 200k blanks and no value', `docs: a\n\nChange-Record:${' '.repeat(200000)}`, false],
-            ['an opt-out line with 200k trailing blanks', `docs: a\n\nChange-Record: none${' '.repeat(200000)}`, true],
-            ['100k blank lines between paragraphs', `docs: a\n${'\n'.repeat(100000)}Change-Record: none`, true],
-            ['100k whitespace-only lines', `docs: a\n\n${' \n'.repeat(100000)}Change-Record: none`, true],
-        ])('%s is processed quickly and gives the usual result', (_label, message, expected) => {
-            const { opted, ms } = timed(message);
-            expect(opted).toBe(expected);
-            expect(ms).toBeLessThan(LINEAR_TIME_BOUND_MS);
+            expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(expected);
+        });
+        test.each(CASES)('%s: the parser gives the usual result and scales linearly', (_label, message, expected) => {
+            expect(optsOut(message(200_000))).toBe(expected);
+            expectLinearScaling((n) => { optsOut(message(n)); }, 20_000);
         });
     });
 });
