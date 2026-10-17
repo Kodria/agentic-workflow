@@ -15,6 +15,15 @@ const MODULE_RE = /^(?:\.|[^/\\\0]+(?:\/[^/\\\0]+)*)$/;
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+const isSensorName = (k: string): boolean => k.length > 0 && k.length <= 128 && !CONTROL_RE.test(k);
+function containsPendingString(value: unknown): boolean {
+    if (typeof value === 'string') return value.includes(PENDING_MARKER);
+    if (Array.isArray(value)) return value.some(containsPendingString);
+    if (isObj(value)) return Object.entries(value).some(([k, val]) => k.includes(PENDING_MARKER) || containsPendingString(val));
+    return false;
+}
 const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
 
 function unknownKeys(obj: Obj, allowed: string[], prefix: string, out: Diagnostic[]): void {
@@ -67,6 +76,9 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
     const fm = loaded.value;
     if (!isObj(fm)) return { diagnostics: [...out, { code: 'not-an-object', message: 'frontmatter must be a mapping' }] };
 
+    if (!out.some((d) => d.code === 'pending-content') && containsPendingString(fm)) {
+        out.push({ code: 'pending-content', message: 'record still contains <!-- awm:pending --> placeholders' });
+    }
     unknownKeys(fm, TOP_KEYS, '', out);
     for (const key of REQUIRED_KEYS) if (!(key in fm)) bad(out, key, `missing required field "${key}"`);
 
@@ -112,7 +124,7 @@ export function validateRecordShape(fileName: string, raw: string, opts: ShapeOp
         unknownKeys(v, ['commit', 'overall', 'sensors', 'receipt_digest'], 'verification.', out);
         if (typeof v.commit !== 'string' || !SHA_RE.test(v.commit)) bad(out, 'verification.commit', 'verification.commit must be 40 lowercase hex characters');
         if (!OVERALL.includes(v.overall as string)) bad(out, 'verification.overall', `overall must be one of ${OVERALL.join('|')}`);
-        if (!isObj(v.sensors) || !Object.entries(v.sensors).every(([k, s]) => /^[A-Za-z0-9._-]+$/.test(k) && SENSOR_STATUS.includes(s as string))) {
+        if (!isObj(v.sensors) || !Object.entries(v.sensors).every(([k, s]) => isSensorName(k) && SENSOR_STATUS.includes(s as string))) {
             bad(out, 'verification.sensors', 'sensors must map sensor names to pass|fail|inconclusive|skipped');
         }
         if (typeof v.receipt_digest !== 'string' || !DIGEST_RE.test(v.receipt_digest)) bad(out, 'verification.receipt_digest', 'receipt_digest must be sha256:<64 hex>');

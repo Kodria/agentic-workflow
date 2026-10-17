@@ -27,24 +27,27 @@ export function splitRecord(raw: string): Split {
     return { ok: true, frontmatterText: text.slice(4, end), body: text.slice(end + 5) };
 }
 
-function hasSharedReference(value: unknown, seen = new Set<object>()): boolean {
-    if (value === null || typeof value !== 'object') return false;
-    if (seen.has(value)) return true;
-    seen.add(value);
-    const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
-    return children.some((child) => hasSharedReference(child, seen));
-}
-
 export type Loaded = { ok: true; value: unknown } | { ok: false; diagnostic: Diagnostic };
 
-/** CORE_SCHEMA: no custom tags, no implicit timestamps (dates stay strings). Aliases are rejected. */
+/**
+ * CORE_SCHEMA: no custom tags, no implicit timestamps (dates stay strings).
+ * Every anchor is rejected (scalar, collection, used or unused); an alias cannot exist without one.
+ * The parse listener sees the anchor of each node on `close`, so quoted `&a` / `*a` text is unaffected.
+ */
 export function loadFrontmatter(text: string): Loaded {
     let value: unknown;
+    let anchored = false;
     try {
-        value = yaml.load(text, { schema: yaml.CORE_SCHEMA, json: false });
+        value = yaml.load(text, {
+            schema: yaml.CORE_SCHEMA,
+            json: false,
+            listener: (event, state) => {
+                if (event === 'close' && (state as unknown as { anchor: string | null }).anchor !== null) anchored = true;
+            },
+        });
     } catch (error) {
         return { ok: false, diagnostic: { code: 'yaml-invalid', message: `frontmatter is not valid YAML: ${(error as Error).message.split('\n')[0]}` } };
     }
-    if (hasSharedReference(value)) return { ok: false, diagnostic: { code: 'yaml-alias', message: 'YAML anchors/aliases are not allowed' } };
+    if (anchored) return { ok: false, diagnostic: { code: 'yaml-alias', message: 'YAML anchors/aliases are not allowed' } };
     return { ok: true, value };
 }

@@ -47,6 +47,17 @@ describe('validateRecordShape', () => {
         expect(codes(validateRecordShape(NAME, doc(fm({ risks: 'risks: &r ["x"]', rollback: 'rollback: *r' }))))).toContain('yaml-alias');
         expect(codes(validateRecordShape(NAME, doc(fm({ rollback: 'rollback: !!js/function "f"' }))))).toContain('yaml-invalid');
     });
+    test('R1.2 rejects every anchor and alias, including scalar and unused ones', () => {
+        expect(codes(validateRecordShape(NAME, doc(fm({ title: 'title: &a T', rollback: 'rollback: *a' }))))).toContain('yaml-alias');
+        expect(codes(validateRecordShape(NAME, doc(fm({ rollback: 'rollback: &a r' }))))).toContain('yaml-alias');
+        expect(codes(validateRecordShape(NAME, doc(fm({ risks: 'risks:\n  - &r x\n  - *r' }))))).toContain('yaml-alias');
+        expect(codes(validateRecordShape(NAME, doc(fm({ modules: 'modules: &m\n  - cli/src/core' }))))).toContain('yaml-alias');
+        expect(codes(validateRecordShape(NAME, doc(fm({ risks: 'risks:\n  - &r x' }))))).toContain('yaml-alias');
+    });
+    test('R1.2 accepts quoted text that merely looks like an anchor or alias', () => {
+        const r = validateRecordShape(NAME, doc(fm({ summary_short: 'summary_short: "uses *a and &b"', rollback: "rollback: 'revert &a *b'" })));
+        expect(r.diagnostics).toEqual([]);
+    });
     test('R1.3 rejects unknown fields at every level', () => {
         const r = validateRecordShape(NAME, doc(fm({ extra: 'status: merged' })));
         expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: 'unknown-field', field: 'status' }));
@@ -76,6 +87,15 @@ describe('validateRecordShape', () => {
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: 'verification:\n  commit: abc\n  overall: pass\n  sensors: {}\n  receipt_digest: x' }))))).toContain('field-invalid');
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n    lint: green\n  receipt_digest: ${DIGEST}` }))))).toContain('field-invalid');
     });
+    test('R1.5 accepts free-form sensor names and rejects empty, long or control-character names', () => {
+        const withSensors = (sensors: string) => doc(fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n${sensors}\n  receipt_digest: ${DIGEST}` }));
+        expect(validateRecordShape(NAME, withSensors('    "lint:ts": pass\n    "type check": skipped')).diagnostics).toEqual([]);
+        expect(codes(validateRecordShape(NAME, withSensors('    "": pass')))).toContain('field-invalid');
+        expect(codes(validateRecordShape(NAME, withSensors(`    "${'a'.repeat(129)}": pass`)))).toContain('field-invalid');
+        expect(validateRecordShape(NAME, withSensors(`    "${'a'.repeat(128)}": pass`)).diagnostics).toEqual([]);
+        expect(codes(validateRecordShape(NAME, withSensors('    "a\\nb": pass')))).toContain('field-invalid');
+        expect(codes(validateRecordShape(NAME, withSensors('    "a\\x07b": pass')))).toContain('field-invalid');
+    });
     test('R1.6 requires the four body sections in order with content', () => {
         expect(codes(validateRecordShape(NAME, doc(fm(), '## Qué se hizo\nA\n')))).toContain('body-section-missing');
         const swapped = '## Qué se probó\nB\n## Qué se hizo\nA\n## Qué falta validar\nC\n## Riesgos y rollback\nD\n';
@@ -86,6 +106,12 @@ describe('validateRecordShape', () => {
     test('R1.7 rejects pending markers', () => {
         expect(codes(validateRecordShape(NAME, doc(fm({ rollback: `rollback: "${PENDING_MARKER}"` }))))).toContain('pending-content');
         expect(codes(validateRecordShape(NAME, doc(fm(), BODY.replace('A', PENDING_MARKER))))).toContain('pending-content');
+    });
+    test('R1.7 rejects a pending marker that only appears after YAML unescaping', () => {
+        const escaped = '\\x3c!-- awm:pending -->';
+        expect(codes(validateRecordShape(NAME, doc(fm({ rollback: `rollback: "${escaped}"` }))))).toContain('pending-content');
+        expect(codes(validateRecordShape(NAME, doc(fm({ risks: `risks:\n  - "ok"\n  - "see ${escaped}"` }))))).toContain('pending-content');
+        expect(codes(validateRecordShape(NAME, doc(fm({ manual_validation: `manual_validation:\n  - step: "${escaped}"\n    expected: "x"` }))))).toContain('pending-content');
     });
     test('R1.8 rejects oversize files before parsing', () => {
         const big = doc(fm()) + 'x'.repeat(MAX_RECORD_BYTES);
