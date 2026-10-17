@@ -15,9 +15,17 @@ import { runSensors, shouldRun } from '../../../src/commands/sensors/run';
 
 const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL'];
 const ORIGINAL = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-// The real checkout must stay untouched: a receipt written relative to the cwd would land here.
-const CHECKOUT_RUNS = path.resolve('.awm', 'sensors', 'runs');
-const CHECKOUT_RUNS_BEFORE = fs.existsSync(CHECKOUT_RUNS) ? fs.readdirSync(CHECKOUT_RUNS) : null;
+// The real checkout must stay untouched. Receipts are written under the git TOPLEVEL of the cwd (not the cwd itself),
+// so both that runs directory and the cwd-relative one are watched. Outside a git repository only the latter exists.
+const checkoutToplevel = (): string | null => {
+    try {
+        return path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' } }).trim());
+    } catch { return null; }
+};
+const TOPLEVEL = checkoutToplevel();
+const WATCHED_RUNS = [...new Set([path.resolve('.awm', 'sensors', 'runs'), ...(TOPLEVEL === null ? [] : [path.join(TOPLEVEL, '.awm', 'sensors', 'runs')])])];
+const listRuns = (): Record<string, string[] | null> => Object.fromEntries(WATCHED_RUNS.map((d) => [d, fs.existsSync(d) ? fs.readdirSync(d).sort() : null]));
+const RUNS_BEFORE = listRuns();
 let saved: Record<string, string | undefined> = {};
 let root: string; let home: string;
 // Jest's sandboxed `process.env` is a copy that children do not see, so the child's environment is passed explicitly.
@@ -41,7 +49,7 @@ afterEach(() => {
 
 afterAll(() => {
     for (const k of ENV_KEYS) expect(process.env[k]).toBe(ORIGINAL[k]);
-    expect(fs.existsSync(CHECKOUT_RUNS) ? fs.readdirSync(CHECKOUT_RUNS) : null).toEqual(CHECKOUT_RUNS_BEFORE);
+    expect(listRuns()).toEqual(RUNS_BEFORE);
 });
 
 const output = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }, { name: 'a-typecheck', status: 'pass' as const, errors: [] }] };
