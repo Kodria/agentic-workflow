@@ -447,6 +447,27 @@ describe('derivation', () => {
         repo.commit({ 'a.ts': '1' }, 'random message');
         expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
     });
+    // R3.3: only non-merge commits that touch at least one path outside docs/changes/ are derived from; an empty commit
+    // (`git commit --allow-empty`) changes no path at all, so it is ignored, as the release script's path-limited log does.
+    const emptyCommit = (message: string) => repo.git('commit', '-q', '--allow-empty', '-m', message);
+    test('R3.3 an empty breaking commit is ignored', () => {
+        const base = branch();
+        repo.commit({ 'src/x.ts': '1' }, 'fix: y');
+        emptyCommit('feat!: empty');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: null, semver: 'patch', breaking: false, modules: ['src'] } });
+    });
+    test('R3.5 a range holding only an empty commit has no commits', () => {
+        const base = branch();
+        emptyCommit('feat: empty');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-commits' }) });
+    });
+    test('R3.3 with an empty commit, a record-only commit and a real commit, only the real one counts', () => {
+        const base = branch();
+        emptyCommit('feat(e)!: empty');
+        repo.commit({ 'docs/changes/r.md': 'r' }, 'feat(r)!: record');
+        repo.commit({ 'src/real.ts': '1' }, 'perf(real): real');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'perf', scope: 'real', semver: 'patch', breaking: false, modules: ['src'] } });
+    });
     test('R3.5 a range holding only record commits has no commits', () => {
         const base = branch();
         repo.commit({ 'docs/changes/r.md': 'r' }, 'docs(changes): record');
