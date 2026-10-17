@@ -2115,3 +2115,11 @@ S1 needed ten specification rounds and four quality rounds, almost all on untrus
 5. **Character limits count code points**, never UTF-16 units.
 6. **A diagnostic message is at most 300 UTF-16 units, single-line**, and a list of diagnostics has at most 50 entries.
 
+### A4 — S2 specification review (2026-10-17)
+
+Three S2 findings changed the receipt semantics; the design clauses R2.1, R2.2 and R3.6 now state them:
+
+- **Dirty-tree definition.** The tree is dirty per `git status --porcelain` excluding only the local runtime-state paths `.awm/sensors/runs`, `.awm/journal`, `.awm/ledger`, `.awm/evidence` and `.awm/track.json` (replaces the planned blanket `:(exclude).awm`). A modified tracked `.awm/sensors.json` is dirty. `receipt.ts` exports this list as `RUNTIME_STATE_EXCLUDES`; S4's `change new` uses it plus `docs/changes` instead of the planned `['.awm', RECORD_DIR]`.
+- **Post-run recheck.** After the run, only HEAD movement or a changed *tracked* file (`--untracked-files=no`) withholds the receipt. Untracked sensor output does not.
+- **Mode on rewrite.** A receipt written over an existing file ends with mode 0600.
+

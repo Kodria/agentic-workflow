@@ -74,8 +74,8 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
 
 ### R2 — Sensor-run receipt
 
-- **R2.1 — When written:** WHEN `awm sensors run` completes with the default full selection (no `--fast`, `--slow` or `--changed`; `--all` is allowed) AND `git status --porcelain` (measured before the run) reports no changes, THE CLI SHALL write a receipt to `.awm/sensors/runs/<commit>.json` atomically with mode 0600.
-- **R2.2 — No receipt on partial or dirty runs:** IF the selection is partial or the working tree is dirty or git is unavailable, THEN THE CLI SHALL NOT write a receipt. IF the selection was full, THE CLI SHALL print one stderr line stating why no receipt was written. THE sensor verdict and exit code SHALL be unchanged.
+- **R2.1 — When written:** WHEN `awm sensors run` completes with the default full selection (no `--fast`, `--slow` or `--changed`; `--all` is allowed) AND `git status --porcelain` (measured before the run, excluding only the local runtime state `.awm/sensors/runs`, `.awm/journal`, `.awm/ledger`, `.awm/evidence` and `.awm/track.json`) reports no changes, THE CLI SHALL write a receipt to `.awm/sensors/runs/<commit>.json` atomically with mode 0600, also when it replaces an existing receipt file. A modified tracked file elsewhere under `.awm/` (for example `.awm/sensors.json`) makes the tree dirty.
+- **R2.2 — No receipt on partial or dirty runs:** IF the selection is partial or the working tree is dirty or git is unavailable, THEN THE CLI SHALL NOT write a receipt. IF the selection was full, THE CLI SHALL print one stderr line stating why no receipt was written. IF HEAD moved or any tracked file changed during the run (`git status --porcelain --untracked-files=no` after the run, with the same exclusions), THEN THE CLI SHALL NOT write a receipt and SHALL print one stderr line stating why; untracked files created by sensors (build or coverage output) do not prevent the receipt. THE sensor verdict and exit code SHALL be unchanged.
 - **R2.3 — Content:** THE receipt SHALL contain:
   - `schema: 1`;
   - `commit`: the HEAD SHA at run start;
@@ -97,7 +97,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `scope` is the most frequent non-null scope (ties broken alphabetically), or `null`.
 - **R3.4 — Modules:** THE CLI SHALL set `modules` to the sorted, unique set of parent directories of the files in `git diff --name-only merge-base..HEAD`, excluding `docs/changes/`. Each path is truncated to at most 3 segments, and root-level files map to `.`.
 - **R3.5 — No commits:** IF `merge-base..HEAD` contains no non-merge commit, THEN THE CLI SHALL exit 2 with diagnostic `no-commits`.
-- **R3.6 — Receipt required:** IF no valid receipt exists for HEAD, or the working tree is dirty outside `docs/changes/`, THEN THE CLI SHALL exit 2 with diagnostic `receipt-missing` or `tree-dirty` and remedy `commit your work, then run awm sensors run`.
+- **R3.6 — Receipt required:** IF no valid receipt exists for HEAD, or the working tree is dirty per `git status --porcelain` excluding `docs/changes/` and the runtime-state paths of R2.1, THEN THE CLI SHALL exit 2 with diagnostic `receipt-missing` or `tree-dirty` and remedy `commit your work, then run awm sensors run`.
 - **R3.7 — Verification copy:** THE CLI SHALL copy `commit`, `overall`, `sensors` and `digest` (as `receipt_digest`) from the receipt into `verification`.
 - **R3.8 — Provenance:** THE CLI SHALL fill `provenance.agent` from the branch journal's `admissionContext.provider` and `started_at`/`finished_at` from the journal cycle when present. It SHALL take `model` and `session` only from flags, and SHALL omit any key without a source.
 - **R3.9 — Skeleton:** THE CLI SHALL write narrative fields and body sections containing the `<!-- awm:pending -->` marker, and SHALL print the created path.
