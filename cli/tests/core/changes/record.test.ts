@@ -37,7 +37,6 @@ function expectDiag(r: Result, code: string, field?: string): void {
     expect(r.diagnostics).toContainEqual(expect.objectContaining(field === undefined ? { code } : { code, field }));
 }
 const check = (overrides: Record<string, string>, opts?: { root?: string }) => validateRecordShape(NAME, doc(fm(overrides)), opts);
-// eslint-disable-next-line no-control-regex
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const withSensors = (sensors: string) => fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n${sensors}\n  receipt_digest: ${DIGEST}` });
 

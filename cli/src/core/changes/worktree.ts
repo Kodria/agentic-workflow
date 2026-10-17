@@ -1,6 +1,5 @@
 import path from 'path';
-import { execFileSync } from 'child_process';
-import { gitSpawnOptions } from './git-env';
+import { execGit } from './git-env';
 import { isSafeRelativePath } from './text-safety';
 
 /** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
@@ -34,8 +33,8 @@ export function gitState(cwd: string, untracked: boolean, extraExcludes: readonl
     if (!Array.isArray(extraExcludes) || extraExcludes.length > MAX_EXTRA_EXCLUDES || !extraExcludes.every(isSafeRelativePath)) return { kind: 'failed' };
     let root: string; let commit: string;
     try {
-        root = path.resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], gitSpawnOptions(cwd, { stderr: 'ignore' })).trim());
-        commit = execFileSync('git', ['rev-parse', 'HEAD'], gitSpawnOptions(root, { stderr: 'ignore' })).trim();
+        root = path.resolve(execGit(cwd, ['rev-parse', '--show-toplevel'], { stderr: 'ignore' }).trim());
+        commit = execGit(root, ['rev-parse', 'HEAD'], { stderr: 'ignore' }).trim();
     } catch (error) {
         return gitFailure(error);
     }
@@ -44,7 +43,7 @@ export function gitState(cwd: string, untracked: boolean, extraExcludes: readonl
         // (`none`); the post-run recheck is about tracked files only, so it also ignores untracked content inside a submodule
         // (sensor build/coverage output) while still seeing a moved checkout or modified tracked content (`untracked`).
         const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', untracked ? '--ignore-submodules=none' : '--ignore-submodules=untracked', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
-        const status = execFileSync('git', args, gitSpawnOptions(root, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT }));
+        const status = execGit(root, args, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT });
         return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
     } catch {
         return { kind: 'failed' };

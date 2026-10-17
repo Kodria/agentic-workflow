@@ -77,7 +77,6 @@ export function commitLiterally(repo: TestRepo, committerDate: string, message =
     return sha;
 }
 
-// eslint-disable-next-line no-control-regex
 export const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 export const FIRST = '2026-10-16-first';
 

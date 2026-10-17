@@ -1,6 +1,5 @@
 import path from 'path';
-import { execFileSync } from 'child_process';
-import { gitSpawnOptions } from './git-env';
+import { execGit } from './git-env';
 import { isSafeRelativePath, isSingleLine } from './text-safety';
 import { gitState } from './worktree';
 
@@ -29,7 +28,7 @@ export function runGit(cwd: string, args: string[]): string | null {
     if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
     if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
     try {
-        return execFileSync('git', args, gitSpawnOptions(cwd, { maxBuffer: MAX_OUTPUT }));
+        return execGit(cwd, args, { maxBuffer: MAX_OUTPUT });
     } catch {
         return null;
     }

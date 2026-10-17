@@ -1,5 +1,7 @@
 // Leaf module: how every git child of the change-record code is spawned. No sibling imports.
 
+import { execFileSync } from 'child_process';
+
 export const GIT_TIMEOUT_MS = 15000;
 
 /**
@@ -46,4 +48,14 @@ export function gitSpawnOptions(cwd: string, extras: GitSpawnExtras = {}) {
         env: gitChildEnv(),
         ...(extras.maxBuffer === undefined ? {} : { maxBuffer: extras.maxBuffer }),
     };
+}
+
+/**
+ * Runs `git args` in `cwd` with gitSpawnOptions and returns its stdout. The one execFileSync of the change-record code: the
+ * stdio option is spelled out at the call (never left to Node's default relay of the child's stderr onto ours), as
+ * tests/structural/exec-invocation-explicit-stdio.test.ts requires. Throws like execFileSync does.
+ */
+export function execGit(cwd: string, args: string[], extras: GitSpawnExtras = {}): string {
+    const options = gitSpawnOptions(cwd, extras);
+    return execFileSync('git', args, { ...options, stdio: options.stdio });
 }

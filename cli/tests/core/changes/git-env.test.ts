@@ -1,5 +1,8 @@
-import { GIT_TIMEOUT_MS, gitChildEnv, gitSpawnOptions } from '../../../src/core/changes/git-env';
-import { withEnv } from './helpers';
+import childProcess from 'child_process';
+import { GIT_TIMEOUT_MS, execGit, gitChildEnv, gitSpawnOptions } from '../../../src/core/changes/git-env';
+import { runGit } from '../../../src/core/changes/git';
+import { gitState } from '../../../src/core/changes/worktree';
+import { makeRepo, withEnv } from './helpers';
 
 describe('gitSpawnOptions', () => {
     test('has the cwd, utf8, the shared timeout, stderr piped by default and a scrubbed environment', () => {
@@ -50,5 +53,40 @@ describe('gitChildEnv', () => {
             gitChildEnv();
             expect(process.env.GIT_LITERAL_PATHSPECS).toBe('1');
         });
+    });
+});
+
+describe('the options every git child is really spawned with (stdio is explicit at the call)', () => {
+    const optionsOfCalls = (fn: () => void): Record<string, unknown>[] => {
+        const real = childProcess.execFileSync as (...a: unknown[]) => unknown;
+        const seen: Record<string, unknown>[] = [];
+        const spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: Record<string, unknown>) => {
+            seen.push(opts);
+            return real(cmd, args, opts);
+        }) as never);
+        try { fn(); } finally { spy.mockRestore(); }
+        return seen;
+    };
+
+    test('execGit returns stdout and passes stdin closed, stdout piped, stderr as asked', () => {
+        const repo = makeRepo();
+        try {
+            const piped = optionsOfCalls(() => expect(execGit(repo.root, ['rev-parse', 'HEAD'])).toBe(repo.git('rev-parse', 'HEAD') + '\n'));
+            expect(piped.map((o) => o.stdio)).toEqual([['ignore', 'pipe', 'pipe']]);
+            const ignored = optionsOfCalls(() => { execGit(repo.root, ['rev-parse', 'HEAD'], { stderr: 'ignore' }); });
+            expect(ignored.map((o) => o.stdio)).toEqual([['ignore', 'pipe', 'ignore']]);
+        } finally { repo.cleanup(); }
+    });
+
+    test('runGit and gitState keep stdin closed and stdout piped on every child; gitState discards stderr', () => {
+        const repo = makeRepo();
+        try {
+            const run = optionsOfCalls(() => { expect(runGit(repo.root, ['rev-parse', 'HEAD'])).not.toBeNull(); });
+            expect(run).toHaveLength(1);
+            expect(run[0]).toMatchObject({ cwd: repo.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS });
+            const state = optionsOfCalls(() => { expect(gitState(repo.root, true).kind).toBe('ok'); });
+            expect(state).toHaveLength(3);
+            for (const o of state) expect(o).toMatchObject({ encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: GIT_TIMEOUT_MS });
+        } finally { repo.cleanup(); }
     });
 });

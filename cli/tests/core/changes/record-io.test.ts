@@ -162,7 +162,6 @@ describe('readRecord', () => {
         const r = readRecord(path.join(scratch(), 'gone.md'), 'a\n\u001b[31m'.repeat(60));
         expect(r.ok).toBe(false);
         const message = r.ok ? '' : r.message;
-        // eslint-disable-next-line no-control-regex
         expect(message).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/);
         expect(message.length).toBeLessThanOrEqual(300);
     });

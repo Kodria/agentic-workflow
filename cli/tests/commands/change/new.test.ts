@@ -82,7 +82,6 @@ function expectFailure(r: CommandResult, code: string, remedy?: string): void {
     expect(lines[lines.length - 1]).toBe('');
     expect(lines[0].startsWith(`${code}: `)).toBe(true);
     expect(lines[0].length).toBeLessThanOrEqual(300);
-    // eslint-disable-next-line no-control-regex
     expect(r.stderr).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/);
     if (remedy !== undefined) expect(lines[1]).toBe(`  remedy: ${remedy}`);
     expect(lines.length).toBe(remedy === undefined ? 2 : 3);
