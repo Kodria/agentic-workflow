@@ -6,8 +6,7 @@ import { BODY_HEADINGS, DERIVED_KEYS, PENDING_MARKER, RECORD_SCHEMA, type Derive
 // CORE_SCHEMA on both sides: the validator parses with it, so what is dumped here is exactly what it will read back.
 const DUMP = { lineWidth: -1, noRefs: true, sortKeys: false, schema: yaml.CORE_SCHEMA } as const;
 const REPLACED: readonly string[] = [...DERIVED_KEYS, 'verification'];
-// A top-level `key:` line. Linear: anchored, no nested quantifiers.
-const KEY_LINE = /^[A-Za-z_][\w.-]*:(?:[ \t\r]|$)/;
+const isBareKeyChar = (c: string): boolean => /^[\w.-]$/.test(c);
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 const bare = (line: string): string => (line.endsWith('\r') ? line.slice(0, -1) : line);
@@ -50,6 +49,41 @@ export function renderSkeleton(input: SkeletonInput): string | null {
     }
 }
 
+/**
+ * The key of a top-level `key: ...` line, or null when the line does not start a mapping entry the scan understands. Accepted
+ * spellings: bare (`type:`), double- or single-quoted on one line, each with optional spaces or tabs before the colon. A quoted
+ * key that needs unescaping (`\"`, `\u0074`, `''`) returns its raw text, which never equals a derived key name: such an
+ * entry is kept as it is, and a record that only spells a derived key that way fails the "every key seen" check instead.
+ * A single left-to-right index scan: linear in the line, no regular expression over file text.
+ */
+function topKey(line: string): string | null {
+    let i = 0;
+    let key: string;
+    const first = line.charAt(0);
+    if (first === '"' || first === "'") {
+        for (i = 1; ; i++) {
+            if (i >= line.length) return null;
+            const c = line[i];
+            if (first === '"' && c === '\\') { i++; continue; }
+            if (c === first) {
+                if (first === "'" && line[i + 1] === "'") { i++; continue; }
+                break;
+            }
+        }
+        key = line.slice(1, i);
+        i++;
+    } else {
+        if (!/^[A-Za-z_]$/.test(first)) return null;
+        for (i = 1; i < line.length && isBareKeyChar(line[i]); i++);
+        key = line.slice(0, i);
+    }
+    while (line[i] === ' ' || line[i] === '\t') i++;
+    if (line[i] !== ':') return null;
+    const after = line[i + 1];
+    if (after !== undefined && after !== ' ' && after !== '\t' && after !== '\r') return null;
+    return key;
+}
+
 /** Blank lines and comments after a block's last content line belong to what follows, not to the value. */
 const isFiller = (line: string): boolean => {
     const t = bare(line).trim();
@@ -70,14 +104,18 @@ function splice(raw: string, fields: DerivedFields, verification: Verification):
     const close = lines.findIndex((l, i) => i > 0 && bare(l) === '---');
     if (bare(lines[0]) !== '---' || close < 1 || close >= lines.length - 1) return null;
     const starts: number[] = [];
-    for (let i = 1; i < close; i++) if (KEY_LINE.test(lines[i])) starts.push(i);
+    const keys: string[] = [];
+    for (let i = 1; i < close; i++) {
+        const key = topKey(lines[i]);
+        if (key !== null) { starts.push(i); keys.push(key); }
+    }
     if (starts.length === 0) return null;
 
     const seen = new Set<string>();
     const out: string[] = lines.slice(0, starts[0]);
     starts.forEach((start, n) => {
         const end = starts[n + 1] ?? close;
-        const key = lines[start].slice(0, lines[start].indexOf(':'));
+        const key = keys[n];
         if (!REPLACED.includes(key)) { out.push(...lines.slice(start, end)); return; }
         seen.add(key);
         let last = end - 1;

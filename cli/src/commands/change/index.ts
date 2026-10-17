@@ -19,6 +19,7 @@ export interface NewOpts { base?: string; plan?: string; issue?: string; model?:
 const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
 const MAX_PROVENANCE_VALUE = 200;
 const MAX_ISSUE_URL = 2048;
+const MOVED = 'HEAD moved during derivation';
 
 /** Exit 2 with `code: message` (single line, at most 300 units) and an optional static remedy line. Untrusted text is escaped by the caller with esc(). */
 const fail = (code: string, message: string, remedy?: string): CommandResult => ({
@@ -168,14 +169,18 @@ function createExclusive(file: string, content: string): 'ok' | 'exists' | 'erro
     }
 }
 
-/** Reads a record for refresh: a regular file, not a link, within the record size limit, valid UTF-8 (so it is written back byte for byte). */
+/**
+ * Reads a record for refresh: a regular file, not a link, within the record size limit, valid UTF-8 (so it is written back byte for
+ * byte). `ignoreBOM: true` keeps a leading BOM in the text as U+FEFF; by default the decoder would strip it, and the rewrite would
+ * silently drop it. With it kept, the record does not start with `---` and fails as `record-invalid`.
+ */
 function readRecord(target: string, name: string): { ok: true; text: string } | { ok: false; result: CommandResult } {
     try {
         const stat = fs.lstatSync(target);
         if (stat.isSymbolicLink()) return { ok: false, result: fail('unsafe-path', `${name} is a symlink; refusing to write`) };
         if (!stat.isFile()) return { ok: false, result: fail('record-invalid', `${name} is not a regular file`) };
         if (stat.size > MAX_RECORD_BYTES) return { ok: false, result: fail('record-invalid', `${name} is larger than ${MAX_RECORD_BYTES} bytes`) };
-        return { ok: true, text: new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(target)) };
+        return { ok: true, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(target)) };
     } catch (error) {
         return { ok: false, result: errorCode(error) === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? fail('record-invalid', `${name} is not valid UTF-8`) : fail('io-failed', `could not read ${name} (${esc(errorCode(error))})`) };
     }
@@ -204,6 +209,9 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     const flag = flagProblem(opts as Record<string, unknown>, root);
     if (flag) return fail('flag-invalid', flag);
 
+    // Pin HEAD before anything is derived: the fields, the dirty check and the receipt all describe this one commit.
+    const head = headSha(root);
+    if (head === null) return fail('git-failed', 'git could not read HEAD');
     if (opts.base !== undefined && !isSafeRef(opts.base)) return fail('invalid-input', `--base "${esc(opts.base)}" is not a safe git ref`);
     const base = resolveBase(root, opts.base);
     if (base === null) return fail('base-unresolved', 'could not resolve a base branch', 'pass --base <ref>');
@@ -211,11 +219,10 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     if (mergeBaseSha === null) return fail('base-unresolved', `no merge base between "${esc(base)}" and HEAD`, 'pass --base <ref>');
     const derived = deriveFields(root, mergeBaseSha);
     if (!derived.ok) return fail(derived.diagnostic.code, derived.diagnostic.message);
+    if (headSha(root) !== head) return fail('git-failed', MOVED);
 
     // R3.6: the tree equals HEAD (apart from docs/changes and the runtime state) and a receipt vouches for HEAD.
     if (isDirtyOutside(root, [RECORD_DIR])) return fail('tree-dirty', `working tree has uncommitted changes outside ${RECORD_DIR}/`, REMEDY_RECEIPT);
-    const head = headSha(root);
-    if (head === null) return fail('git-failed', 'git could not read HEAD');
     const receipt = readReceipt(root, head);
     if (!receipt.ok) return fail(receipt.code, `no valid sensor receipt for HEAD ${head.slice(0, 12)}`, REMEDY_RECEIPT);
     const verification: Verification = { commit: receipt.receipt.commit, overall: receipt.receipt.overall, sensors: receipt.receipt.sensors, receipt_digest: receipt.receipt.digest };
@@ -240,7 +247,7 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     // Backstop: the only thing wrong with a skeleton may be its pending markers.
     const problem = validateRecordShape(`${id}.md`, content, { root }).diagnostics.find((d) => d.code !== 'pending-content');
     if (problem) return fail('skeleton-invalid', `the generated record failed validation: ${esc(problem.code)}${problem.field ? ` (${esc(problem.field)})` : ''}`);
-    if (headSha(root) !== head) return fail('git-failed', 'HEAD moved while the record was being prepared');
+    if (headSha(root) !== head) return fail('git-failed', MOVED);
 
     if (dir.kind === 'absent') dir = createRecordDir(root);
     if (dir.kind === 'unsafe') return fail('unsafe-path', `${RECORD_DIR} or its parent is a symlink or not a directory; refusing to write`);
@@ -261,7 +268,7 @@ function refresh(dir: Dir, existing: string[], slug: string, fields: Parameters<
     if (!current.ok) return current.result;
     const next = refreshDerived(current.text, fields, verification);
     if (next === null || Buffer.byteLength(next, 'utf8') > MAX_RECORD_BYTES) return fail('record-invalid', `${name} has unparseable frontmatter, misses a derived key, or cannot be refreshed safely`);
-    if (headSha(root) !== head) return fail('git-failed', 'HEAD moved while the record was being prepared');
+    if (headSha(root) !== head) return fail('git-failed', MOVED);
     try {
         writeFileAtomic(target, next, 0o644);
     } catch (error) {

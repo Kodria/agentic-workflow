@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
+import childProcess from 'child_process';
 import yaml from 'js-yaml';
 import { makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
@@ -241,6 +242,51 @@ describe('awm change new: HEAD moving while the command runs', () => {
             expectFailure(run('change-record', { refresh: true }), 'git-failed');
         } finally { spy.mockRestore(); }
         expect(read()).toBe(before);
+    });
+});
+
+describe('awm change new: HEAD is pinned before the derivation', () => {
+    /** Runs `act` once, right before (or after) the first git call whose first argument is `sub`. */
+    function onGit(sub: string, when: 'before' | 'after', act: () => void): jest.SpyInstance {
+        const real = childProcess.execFileSync;
+        let fired = false;
+        return jest.spyOn(childProcess, 'execFileSync').mockImplementation(((...args: Parameters<typeof real>) => {
+            const git = Array.isArray(args[1]) ? (args[1] as string[]) : [];
+            const hit = !fired && args[0] === 'git' && git.includes(sub);
+            if (hit) fired = true;
+            if (hit && when === 'before') act();
+            const out = real(...args);
+            if (hit && when === 'after') act();
+            return out;
+        }) as never);
+    }
+    const land = () => {
+        // A commit lands and leaves an untracked file: with no early check the dirty-tree diagnostic would come first.
+        repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late');
+        fs.writeFileSync(path.join(repo.root, 'late-untracked.txt'), 'x');
+    };
+    test('a commit landing between the pin and the derivation is git-failed, not a record of mixed commits', () => {
+        receiptForHead();
+        const spy = onGit('merge-base', 'after', land);
+        try {
+            expectFailure(run('change-record'), 'git-failed');
+        } finally { spy.mockRestore(); }
+        expect(recordFiles()).toEqual([]);
+    });
+    test('the message says HEAD moved during derivation', () => {
+        receiptForHead();
+        const spy = onGit('merge-base', 'after', land);
+        try {
+            expect(run('change-record').stderr).toContain('HEAD moved during derivation');
+        } finally { spy.mockRestore(); }
+    });
+    test('a commit landing after the derivation but before the write is git-failed', () => {
+        receiptForHead();
+        const spy = onGit('status', 'before', () => repo.commit({ 'cli/src/late.ts': '1' }, 'fix(core): late'));
+        try {
+            expectFailure(run('change-record'), 'git-failed');
+        } finally { spy.mockRestore(); }
+        expect(recordFiles()).toEqual([]);
     });
 });
 
@@ -670,6 +716,27 @@ describe('awm change new --refresh (R3.11)', () => {
         expectFailure(run('change-record', { refresh: true }), 'record-invalid');
         expect(fs.readFileSync(file()).equals(bytes)).toBe(true);
     });
+    test('a record with a UTF-8 BOM is record-invalid and its bytes are untouched', () => {
+        receiptForHead();
+        run('change-record');
+        const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), fs.readFileSync(file())]);
+        fs.writeFileSync(file(), bytes);
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): bom');
+        receiptForHead();
+        expectFailure(run('change-record', { refresh: true }), 'record-invalid');
+        expect(fs.readFileSync(file()).equals(bytes)).toBe(true);
+    });
+    test('a record without a BOM but with non-ASCII text still refreshes and keeps those bytes', () => {
+        receiptForHead();
+        run('change-record');
+        fs.writeFileSync(file(), fs.readFileSync(file(), 'utf8').split(PENDING_MARKER).join('Qué se probó ñandú \u{1F600}'));
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): text');
+        repo.commit({ 'cli/src/core/b.ts': '1' }, 'fix(core): b');
+        receiptForHead();
+        expect(run('change-record', { refresh: true }).code).toBe(0);
+        expect(read()).toContain('Qué se probó ñandú \u{1F600}');
+        expect(read().charCodeAt(0)).toBe('-'.charCodeAt(0));
+    });
     test('a record larger than the record limit is record-invalid', () => {
         receiptForHead();
         run('change-record');
@@ -677,6 +744,18 @@ describe('awm change new --refresh (R3.11)', () => {
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): big');
         receiptForHead();
         expectFailure(run('change-record', { refresh: true }), 'record-invalid');
+    });
+    test('a record whose derived keys are quoted is refreshed and still validates', () => {
+        receiptForHead();
+        run('change-record');
+        const quoted = read().replace(/^(type|semver) *:/gm, '"$1" :');
+        fs.writeFileSync(file(), quoted.split(PENDING_MARKER).join('written by agent'));
+        repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): quoted');
+        repo.commit({ 'cli/src/core/b.ts': '1' }, 'fix(core): b');
+        receiptForHead();
+        expect(run('change-record', { refresh: true }).code).toBe(0);
+        expect(read()).not.toContain('"semver"');
+        expect(validateRecordShape('2026-10-17-change-record.md', read(), { root: repo.root }).diagnostics).toEqual([]);
     });
     test('a record that is a symlink is refused and its target untouched', () => {
         if (process.platform === 'win32') return;
@@ -808,8 +887,9 @@ describe('render: refreshDerived', () => {
         ['a non-mapping frontmatter', '---\n- a\n- b\n---\n'],
         ['a duplicated key', lf(OLD).replace('title: Hello', 'type: fix\ntitle: Hello')],
         ['an anchor', lf(OLD).replace('title: Hello', 'title: &a Hello')],
-        ['a quoted derived key', lf(OLD).replace('semver: patch', '"semver": patch')],
-        ['a quoted key that the line scan would take for part of a replaced block', lf(OLD).replace('title: Hello', '"odd key": 1\ntitle: Hello')],
+        ['a key the line scan cannot recognise, right after a replaced block', lf(OLD).replace('title: Hello', 'odd key: 1\ntitle: Hello')],
+        ['an escaped spelling of a derived key next to the bare one', lf(OLD).replace('title: Hello', '"\\u0074ype": x\ntitle: Hello')],
+        ['an escaped spelling of a derived key instead of the bare one', lf(OLD).replace('type: fix\n', '"\\u0074ype": fix\n')],
         ['an empty string', ''],
     ])('returns null for %s', (_name, raw) => {
         expect(refreshDerived(raw, FRESH, FRESH_V)).toBeNull();
@@ -834,6 +914,54 @@ describe('render: refreshDerived', () => {
         const out = refreshDerived(raw, FRESH, FRESH_V) as string;
         expect(frontmatter(out).risks).toEqual(['r1', 'r2']);
         expect(out).toContain('risks:\n- r1\n- r2\n');
+    });
+    describe('recomputed keys written other than bare', () => {
+        const SPELLINGS: Array<[string, (k: string) => string]> = [
+            ['double-quoted', (k) => `"${k}":`],
+            ['single-quoted', (k) => `'${k}':`],
+            ['bare with a space before the colon', (k) => `${k} :`],
+            ['bare with a tab before the colon', (k) => `${k}\t:`],
+            ['double-quoted with spaces before the colon', (k) => `"${k}"  :`],
+            ['single-quoted with a tab before the colon', (k) => `'${k}'\t:`],
+        ];
+        const spell = (lines: string[], key: string, fn: (k: string) => string) => lines.map((l) => (l.startsWith(`${key}:`) ? fn(key) + l.slice(key.length + 1) : l));
+        const KEYS = ['type', 'scope', 'semver', 'breaking', 'modules', 'verification'];
+        test.each(SPELLINGS.flatMap(([name, fn]) => KEYS.map((key) => [name, key, fn] as const)))('%s %s is recomputed like a bare key', (_name, key, fn) => {
+            const old = spell(OLD, key, fn);
+            expect(old).not.toEqual(OLD);
+            expect(refreshDerived(lf(old), FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS));
+        });
+        test.each(SPELLINGS)('%s keys keep CRLF', (_name, fn) => {
+            const old = KEYS.reduce((lines, key) => spell(lines, key, fn), OLD);
+            expect(refreshDerived(crlf(old), FRESH, FRESH_V)).toBe(crlf(NEW_BLOCKS));
+        });
+        test('a spelled key is also found in the middle of a file next to other keys', () => {
+            const old = lf(OLD).replace('title: Hello', '"title": Hello');
+            expect(refreshDerived(old, FRESH, FRESH_V)).toBe(lf(NEW_BLOCKS).replace('title: Hello', '"title": Hello'));
+        });
+        test('a quoted key with an escaped quote is kept, never taken for a derived key', () => {
+            const line = '"sem\\"ver": 1';
+            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
+            expect(out).toBe(lf(NEW_BLOCKS).replace('title: Hello', `${line}\ntitle: Hello`));
+            expect(frontmatter(out)['sem"ver']).toBe(1);
+        });
+        test('a single-quoted key with a doubled quote is kept, never taken for a derived key', () => {
+            const line = "'it''s': 1";
+            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
+            expect(out).toBe(lf(NEW_BLOCKS).replace('title: Hello', `${line}\ntitle: Hello`));
+            expect(frontmatter(out)["it's"]).toBe(1);
+        });
+        test('a quoted key that merely contains a derived name is not recomputed', () => {
+            const line = '"type extra": 1';
+            const out = refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V) as string;
+            expect(out).toContain(`${line}\ntitle: Hello`);
+        });
+        test('a hostile very long quoted line is scanned in linear time', () => {
+            const line = `"${'\\'.repeat(200000)}`;
+            const started = Date.now();
+            expect(refreshDerived(lf(OLD).replace('title: Hello', `${line}\ntitle: Hello`), FRESH, FRESH_V)).toBeNull();
+            expect(Date.now() - started).toBeLessThan(5000);
+        });
     });
     test('the dumped blocks use the core schema (what the validator parses)', () => {
         const out = refreshDerived(lf(OLD), { ...FRESH, scope: 'null' }, FRESH_V) as string;
