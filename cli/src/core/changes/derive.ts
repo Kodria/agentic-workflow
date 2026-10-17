@@ -85,9 +85,10 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     const records = raw.split('\0').filter((record) => record !== '');
     if (records.length === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
     const commits = records.flatMap((record) => {
-        const clean = record.split(RS).join('');
-        const end = clean.indexOf(US);
-        return (end < 0 ? clean.length : end) > MAX_SUBJECT_UNITS ? [] : parseCommits(clean);
+        // Measured on the raw record, before RS is stripped (the stripped text is never longer). Like the release parser, the
+        // subject ends at the first US, so only the text before it counts.
+        const end = record.indexOf(US);
+        return (end < 0 ? record.length : end) > MAX_SUBJECT_UNITS ? [] : parseCommits(record.split(RS).join(''));
     });
     const derived = deriveFromCommits(commits);
     if (derived === null) return fail('no-conventional-commits', 'no commit in the range uses a conventional-commit subject (type(scope): subject)');

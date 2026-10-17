@@ -365,6 +365,22 @@ describe('deriveFields in a repository', () => {
         expect(long('fix!', 1025)).toHaveLength(1025);
         expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: null, semver: 'minor', breaking: false, modules: ['.'] } });
     });
+    test.each([
+        ['a trailing record separator makes a 1025-unit subject', `feat: ${'a'.repeat(1018)}\u001e`],
+        ['a record separator inside makes a 1025-unit subject', `feat: ${'a'.repeat(600)}\u001e${'a'.repeat(418)}`],
+    ])('R3.3 the subject cap counts the raw subject, before any separator is stripped (%s)', (_label, subject) => {
+        const base = branch();
+        expect(subject).toHaveLength(1025);
+        repo.commit({ 'a.ts': '1' }, subject);
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-conventional-commits' }) });
+    });
+    test('R3.3 a raw 1024-unit subject holding a record separator is still parsed', () => {
+        const base = branch();
+        const subject = `feat: ${'a'.repeat(600)}\u001e${'a'.repeat(417)}`;
+        expect(subject).toHaveLength(1024);
+        repo.commit({ 'a.ts': '1' }, subject);
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: null, semver: 'minor', breaking: false, modules: ['.'] } });
+    });
     test('R3.3 one HEAD is read and pinned: a commit made while deriving is not mixed in', () => {
         const base = branch();
         repo.commit({ 'cli/src/a.ts': '1' }, 'fix(a): before');
