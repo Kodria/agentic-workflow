@@ -62,6 +62,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `risks` is an array of non-empty strings and may be empty.
   - `rollback` is a non-empty string.
   - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all non-empty strings. Timestamps are canonical ISO-8601, meaning exactly the form `Date.prototype.toISOString()` produces (UTC with milliseconds, e.g. `2026-10-17T10:00:00.000Z`).
+- **R1.4 (text safety, part of R1.4):** single-line fields (`title`, `summary_short`, `scope`, `type`, `modules` entries, `links.*`, sensor names, `provenance` values) SHALL contain no line break (`\r`, `\n`, U+0085, U+2028, U+2029) and no control character (C0, DEL, C1); `modules` entries SHALL have no leading or trailing whitespace; multi-line fields (`rollback`, `risks` items, `manual_validation` `step` and `expected`) SHALL contain no control character other than `\n` and `\t`. Violations yield `field-invalid`.
 - **R1.5 — Verification block:** `verification` SHALL contain:
   - `commit`: 40 lowercase hex characters;
   - `overall`: the receipt verdict;
@@ -69,7 +70,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `receipt_digest`: `sha256:<64 hex>`.
 - **R1.6 — Body sections:** THE body SHALL contain the headings `## Qué se hizo`, `## Qué se probó`, `## Qué falta validar` and `## Riesgos y rollback`, in that order, each with non-empty content.
 - **R1.7 — No placeholders:** IF the raw frontmatter text, any parsed string value (after YAML unescaping), or any body section contains the literal marker `<!-- awm:pending -->`, THEN `validate` SHALL fail with diagnostic `pending-content`.
-- **R1.8 — Size bound:** IF a record file exceeds 64 KiB, THEN THE CLI SHALL reject it with diagnostic `record-too-large` without parsing it.
+- **R1.8 — Size bound:** IF a record file exceeds 64 KiB, THEN THE CLI SHALL reject it with diagnostic `record-too-large` without parsing it. THE validator SHALL never throw: a non-string `fileName` or `raw` yields diagnostic `input-invalid`; every diagnostic `message` and `field` SHALL be single-line with attacker-controlled text escaped (JSON string escaping), and at most 50 diagnostics are returned, the last being `diagnostics-truncated` when more existed.
 
 ### R2 — Sensor-run receipt
 

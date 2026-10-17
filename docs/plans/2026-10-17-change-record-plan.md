@@ -2099,3 +2099,7 @@ The S1 specification review found defects in the S1 code and wording as original
 - **Wording clarifications** (design R1.2, R1.4, R1.5, R1.7; code already matches): `CORE_SCHEMA`, non-empty `scope`/`risks` entries, canonical ISO means the `toISOString()` form, `links.plan` existence is checked whenever a repository root is available.
 - The S1 test count is 11, not 12.
 - **Second review (R1.4):** `provenance` values are non-empty strings; `summary_short` rejects `\r`, `\n`, U+0085, U+2028 and U+2029.
+
+### A2 — S1 code-quality review (2026-10-17)
+
+The S1 code-quality review found that untrusted-text handling was ad hoc per field. Behavior now required (design R1.4 text-safety bullet and R1.8): single-line fields and multi-line fields have the control-character rules stated in the design; `validateRecordShape` never throws (`input-invalid`); diagnostic `message`/`field` are single-line with escaped attacker text; at most 50 diagnostics (`diagnostics-truncated`). The implementation unifies the character classes in one shared constant, splits `validateRecordShape` into per-section validators, and adds direct unit tests for `splitRecord`, `loadFrontmatter`, `isValidSlug` plus hostile-input tests. Corrections to earlier text: S1 has 11+ tests (the count in the original slice text and in A1 is stale; the suite now has more).
