@@ -6,7 +6,7 @@ import { fail, failed, inCwd as inCwdShared, line } from '../../core/changes/com
 import { readJournal } from '../../core/journal/store';
 import { detectBranch } from '../../core/ledger/store';
 import { isRecordPath, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
-import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot, runGit } from '../../core/changes/git';
+import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot } from '../../core/changes/git';
 import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
 import { hasOptOut } from '../../core/changes/trailers';
