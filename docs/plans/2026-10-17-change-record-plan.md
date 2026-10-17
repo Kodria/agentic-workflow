@@ -2184,3 +2184,7 @@ The S6 review settled nine points in the design (R5.1 shallow clones and base wo
 
 R5.5 (`pr` from the true end of a long subject) and R5.7 (first-parent history read in pages of at most 10 000 commits, stop at the adoption point or at the first page with no commit in the window) were amended in the design; S6 is reworked to match.
 
+### A13 — S6 quality review, round two (2026-10-17)
+
+R5.7 now states that the no-lazy-fetch guarantee for partial clones requires git 2.43 or newer (the variable `GIT_NO_LAZY_FETCH` is ignored by older git); the partial-clone test is skipped, with a visible reason, on older git.
+
