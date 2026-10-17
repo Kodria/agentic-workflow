@@ -1,13 +1,17 @@
-jest.mock('../../../src/commands/sensors/run', () => ({ runSensors: jest.fn(), findManifestDir: jest.fn() }));
+// Only the sensor execution is faked; shouldRun stays real so the selection-parity test checks the production rule.
+jest.mock('../../../src/commands/sensors/run', () => ({
+    runSensors: jest.fn(), findManifestDir: jest.fn(),
+    shouldRun: jest.requireActual('../../../src/commands/sensors/run').shouldRun,
+}));
 
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
-import { RUNTIME_STATE_EXCLUDES, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
+import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
-import { runSensors } from '../../../src/commands/sensors/run';
+import { runSensors, shouldRun } from '../../../src/commands/sensors/run';
 
 const ENV_KEYS = ['HOME', 'AWM_HOME', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_NOSYSTEM'];
 let saved: Record<string, string | undefined> = {};
@@ -20,7 +24,7 @@ beforeEach(() => {
     saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
     Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcpt-')));
+    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcpt-')));
     g('init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
     fs.writeFileSync(path.join(root, 'a.txt'), 'a');
@@ -97,6 +101,18 @@ describe('receipt', () => {
         expect(isFullSelection({ slow: true })).toBe(false);
         expect(isFullSelection({ all: true, changed: true })).toBe(false);
     });
+    test('R2.1 isFullSelection agrees with shouldRun for every combination of fast, slow, all and changed', () => {
+        const values = [undefined, false, true];
+        let combinations = 0;
+        for (const fast of values) for (const slow of values) for (const all of values) for (const changed of values) {
+            const opts = { fast, slow, all, changed };
+            // shouldRun does not model `changed` (it only scopes files), but a --changed run is never a full selection.
+            const expected = shouldRun(true, opts as never) && shouldRun(false, opts as never) && !changed;
+            expect({ opts, full: isFullSelection(opts) }).toEqual({ opts, full: expected });
+            combinations++;
+        }
+        expect(combinations).toBe(81);
+    });
     test('R2.1 changed alone is a partial selection', () => {
         expect(isFullSelection({ changed: true })).toBe(false);
     });
@@ -123,9 +139,6 @@ describe('receipt', () => {
     test('R2.2 a staged change makes the tree dirty', () => {
         fs.writeFileSync(path.join(root, 'a.txt'), 'staged'); g('add', 'a.txt');
         expect(captureReceiptPrecondition(root).eligible).toBe(false);
-    });
-    test('R2.1 the runtime-state exclusion list is exactly the local state paths', () => {
-        expect([...RUNTIME_STATE_EXCLUDES]).toEqual(['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json']);
     });
     test('R2.1 a modified tracked .awm/sensors.json makes the tree dirty', () => {
         fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
@@ -250,12 +263,11 @@ describe('receipt', () => {
         } finally { fs.rmSync(plain, { recursive: true, force: true }); }
     });
     describe('git failures', () => {
-        let spy: jest.SpyInstance; let statusOpts: Record<string, unknown> | undefined;
+        let spy: jest.SpyInstance; 
         const failStatusWith = (code: string) => {
             const real = childProcess.execFileSync;
-            statusOpts = undefined;
             spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: Record<string, unknown>) => {
-                if (cmd === 'git' && args[0] === 'status') { statusOpts = opts; throw Object.assign(new Error(`spawnSync git ${code}`), { code }); }
+                if (cmd === 'git' && args[0] === 'status') { throw Object.assign(new Error(`spawnSync git ${code}`), { code }); }
                 return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
             }) as never);
         };
@@ -265,30 +277,21 @@ describe('receipt', () => {
             const pre = captureReceiptPrecondition(root);
             expect(pre).toEqual({ eligible: false, reason: 'git command failed or timed out' });
         });
-        test('R2.2 git status gets a large maxBuffer', () => {
-            failStatusWith('ENOBUFS');
-            captureReceiptPrecondition(root);
-            expect(statusOpts?.maxBuffer).toBeGreaterThanOrEqual(64 * 1024 * 1024);
-        });
         test('R2.2 a git failure during the post-run recheck withholds the receipt with the failure reason', () => {
             const pre = captureReceiptPrecondition(root);
             failStatusWith('ETIMEDOUT');
             expect(finalizeReceipt(pre, output as never)).toBe('no sensor receipt written: git command failed or timed out\n');
             expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
         });
-        test('R2.2 git missing from PATH is a git failure', () => {
-            const real = childProcess.execFileSync;
-            spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: Record<string, unknown>) => {
-                if (cmd === 'git' && args[0] === 'rev-parse') throw Object.assign(new Error('spawnSync git ENOENT'), { code: 'ENOENT' });
-                return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
-            }) as never);
-            expect(captureReceiptPrecondition(root)).toEqual({ eligible: false, reason: 'git command failed or timed out' });
-        });
     });
     test('R2.1 the precondition resolves the repository root from a subdirectory', () => {
         fs.mkdirSync(path.join(root, 'sub'));
         const pre = captureReceiptPrecondition(path.join(root, 'sub'));
-        expect(pre).toMatchObject({ eligible: true, root, commit: g('rev-parse', 'HEAD') });
+        // git prints forward slashes on Windows and may resolve short names: compare both sides through the OS.
+        expect(pre.eligible).toBe(true);
+        expect(pre.eligible && fs.realpathSync.native(pre.root)).toBe(fs.realpathSync.native(root));
+        expect(pre.eligible && pre.root).toBe(path.resolve(pre.eligible ? pre.root : ''));
+        expect(pre.eligible && pre.commit).toBe(g('rev-parse', 'HEAD'));
     });
     test('R2.2 HEAD moving during the run yields no receipt', () => {
         const pre = captureReceiptPrecondition(root);
@@ -339,7 +342,7 @@ describe('receipt', () => {
         } finally { fs.rmSync(plain, { recursive: true, force: true }); }
     });
     test('R2.2 a repository without a commit yields no receipt', () => {
-        const empty = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-')));
+        const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-')));
         try {
             execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: empty });
             expect(captureReceiptPrecondition(empty).eligible).toBe(false);

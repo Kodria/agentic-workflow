@@ -1,12 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execFileSync } from 'child_process';
 import { writeFileAtomic } from '../atomic-file';
 import { cliVersion } from '../cli-version';
 import type { RunOutput } from '../../commands/sensors/types';
 import type { Overall, SensorStatus } from './types';
 import { esc, isSingleLine } from './text-safety';
+import { REASON_GIT_FAILED, REASON_NOT_REPO, gitState } from './worktree';
 
 export interface SensorReceipt {
     schema: 1;
@@ -24,11 +24,6 @@ const STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
 const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 const MAX_SENSOR_NAME = 128;
-const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-/** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
-export const RUNTIME_STATE_EXCLUDES: readonly string[] = ['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json'];
-const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: 15000 };
-
 export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean }
 
 /** True when the run covers every sensor: `--changed` never does, `--all` always does, `--fast` xor `--slow` is partial. */
@@ -160,37 +155,6 @@ export function readReceipt(root: string, commit: string): ReadReceipt {
 }
 
 export type Precondition = { eligible: true; root: string; commit: string } | { eligible: false; reason: string };
-
-type GitState = { kind: 'ok'; root: string; commit: string; dirty: boolean } | { kind: 'not-repo' } | { kind: 'failed' };
-
-const REASON_NOT_REPO = 'not inside a git repository with a commit';
-const REASON_GIT_FAILED = 'git command failed or timed out';
-
-/** A git that ran and exited non-zero (no repo, no commit) is `not-repo`; one that could not run, timed out or overflowed is `failed`. */
-function gitFailure(error: unknown): GitState {
-    return typeof (error as { status?: unknown }).status === 'number' ? { kind: 'not-repo' } : { kind: 'failed' };
-}
-
-/**
- * `untracked` selects the pre-run measure (untracked files count, forced past any `status.showUntrackedFiles` config)
- * or the post-run recheck (tracked changes only).
- */
-function gitState(cwd: string, untracked: boolean): GitState {
-    let root: string; let commit: string;
-    try {
-        root = execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd }).trim();
-        commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root }).trim();
-    } catch (error) {
-        return gitFailure(error);
-    }
-    try {
-        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`)];
-        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root, maxBuffer: MAX_GIT_OUTPUT });
-        return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
-    } catch {
-        return { kind: 'failed' };
-    }
-}
 
 /** Measured BEFORE the run: a receipt certifies a commit only when the tree equals it. */
 export function captureReceiptPrecondition(cwd: string): Precondition {
