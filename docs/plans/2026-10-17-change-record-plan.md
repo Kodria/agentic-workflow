@@ -2123,3 +2123,9 @@ Three S2 findings changed the receipt semantics; the design clauses R2.1, R2.2 a
 - **Post-run recheck.** After the run, only HEAD movement or a changed *tracked* file (`--untracked-files=no`) withholds the receipt. Untracked sensor output does not.
 - **Mode on rewrite.** A receipt written over an existing file ends with mode 0600.
 
+### A5 — S2 quality review (2026-10-17): portability and cohesion
+
+- **Windows path convention (binds S3–S6, extends A3).** `git rev-parse --show-toplevel` prints forward slashes (`C:/Users/...`) on Windows. Every function that returns a path obtained from git returns `path.resolve(...)` (native separators), and every test that compares such a path normalizes both sides with `fs.realpathSync.native`. S3's planned test `expect(repoRoot(repo.root)).toBe(repo.root)` is replaced by `expect(fs.realpathSync.native(repoRoot(repo.root))).toBe(fs.realpathSync.native(repo.root))`. Release is gated on ubuntu, windows and macos (D-005).
+- **Worktree state module.** `gitState` and `RUNTIME_STATE_EXCLUDES` move from `receipt.ts` into `cli/src/core/changes/worktree.ts`. S3's `git.ts` (`repoRoot`, `isDirtyOutside`, `headSha`) reuses `worktree.ts` instead of duplicating it, and S4 imports `RUNTIME_STATE_EXCLUDES` from there.
+- **Selection parity.** `shouldRun` in `cli/src/commands/sensors/run.ts` gains the `export` keyword (no behavior change; this adds `run.ts` to S2's surfaces for that one word), and a test asserts `isFullSelection(opts) === (shouldRun(true, opts) && shouldRun(false, opts))` for every combination of `fast`, `slow`, `all` and `changed` that `shouldRun` models, so the two cannot drift apart.
+
