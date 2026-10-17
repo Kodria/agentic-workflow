@@ -184,7 +184,7 @@ describe('listChanges: subjects and tags beyond their caps are clipped, never an
 
 describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
     const isScan = (a: string[]): boolean => a.includes('log') && a.some((x) => x === '--format=%H%x1f%ct%x1f%P');
-    const isAdoptionPage = (a: string[]): boolean => a.includes('log') && a.includes(':(top,literal)docs/changes');
+    const isAdoptionPage = (a: string[]): boolean => a.includes('log') && a.some((x) => x.startsWith(':(top,glob)docs/changes/'));
     /** `n` commits in the window, `fix: n1` oldest. */
     const commits = (n: number, from = 1): void => { for (let i = from; i < from + n; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, '2026-10-16T10:00:00Z'); };
     const countCalls = (pred: (a: string[]) => boolean, opts: Record<string, unknown>): number => { const spy = spyOnGit(); listed(opts); spy.restore(); return spy.calls.filter(pred).length; };
@@ -290,20 +290,20 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
     });
     test('the adoption search is paged too: the oldest commit that touched docs/changes is found across pages', () => {
         repo.commit({ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
-        for (let i = 1; i <= 7; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        for (let i = 1; i <= 7; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
         const paged = listed({ pageSize: 3 });
         expect(subjects(paged)).toEqual(Array.from({ length: 7 }, (_, i) => `docs: note ${7 - i}`));
         expect(paged).toEqual(listed());
         expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
     });
     test('the adoption search reads one more, empty, page when the last one was full', () => {
-        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
         expect(subjects(listed({ pageSize: 3 }))).toHaveLength(6);
         expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
     });
     test('the adoption search skips commits that did not touch docs/changes between two pages', () => {
         for (let i = 1; i <= 3; i++) {
-            repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+            repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
             commits(2, i * 10);
         }
         const r = listed({ pageSize: 2 });
@@ -328,7 +328,7 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
         expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
     });
     test('a git failure on a later page of the adoption search is a git-failed failure', () => {
-        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
         let seen = 0;
         const spy = spyOnGit((args) => { if (isAdoptionPage(args) && ++seen === 2) throw new Error('boom'); });
         const outcome = list({ pageSize: 2 });
@@ -450,7 +450,7 @@ describe('listChanges: read-only and bounded (R5.7)', () => {
         for (const call of withPath) {
             const dash = call.indexOf('--');
             expect(dash).toBeGreaterThan(-1);
-            expect(call.slice(dash + 1).every((x) => x.startsWith(':(top,literal)') || /^docs\/changes\/[a-z0-9-]+\.md$/.test(x))).toBe(true);
+            expect(call.slice(dash + 1).every((x) => x.startsWith(':(top,literal)') || x.startsWith(':(top,glob)docs/changes/') || /^docs\/changes\/[a-z0-9-]+\.md$/.test(x))).toBe(true);
         }
     });
     test('the history is read along the first parent only, in pages', () => {

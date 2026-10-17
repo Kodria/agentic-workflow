@@ -96,6 +96,8 @@ type Read<T> = { ok: true; value: T } | { ok: false };
 const UNREADABLE: { ok: false } = { ok: false };
 
 const RECORD_PATHSPEC = `:(top,literal)${RECORD_DIR}`;
+/** Files directly in docs/changes whose name looks like a record's date prefix (`*` does not cross `/` in a glob pathspec). Narrows R5.4's search; the exact R1.1 shape is checked per commit. */
+const RECORD_SHAPED_PATHSPEC = `:(top,glob)${RECORD_DIR}/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md`;
 const SEP = '\x1f';
 const GIT_FAILED_RECORD: ListedRecord = { path: RECORD_DIR, diagnostics: [{ code: 'git-failed', message: 'git could not list the records added by this commit' }] };
 
@@ -247,26 +249,38 @@ function parseScan(out: string): Entry[] | null {
     return entries;
 }
 
+/** True/false whether `sha` added a record-shaped file (R1.1) under docs/changes; null when git cannot tell. */
+function addsRecordShapedFile(root: string, sha: string, firstParent: string | undefined): boolean | null {
+    const added = firstParent === undefined ? addedByRoot(root, sha) : addedFilesUnder(root, firstParent, sha, RECORD_DIR);
+    return added === null ? null : added.some(isRecordPath);
+}
+
 /**
- * R5.4: the oldest first-parent commit that touched `docs/changes` (the first one that ever touched it must have added a file),
- * read in pages of `pageSize` commits that touch it; each page continues from the first parent of the previous page's last
- * commit. `{ ok: true, value: null }` when there is none, `{ ok: false }` when git fails.
+ * R5.4: the oldest first-parent commit that added a record-shaped file (R1.1) under `docs/changes`; a README or any other file
+ * there does not count. The history is read in pages of `pageSize` commits that touch a file with a record-like name (each page
+ * continues from the first parent of the previous page's last commit), then the candidates are checked from the oldest up: the
+ * first that really added a record-shaped file is the adoption. `{ ok: true, value: null }` when there is none, `{ ok: false }`
+ * when git fails.
  */
 function findAdoption(root: string, pinned: string, pageSize: number): Read<string | null> {
     let start = pinned;
-    let oldest: string | null = null;
+    const candidates: Array<{ sha: string; firstParent: string | undefined }> = [];
     for (;;) {
-        const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', `--max-count=${pageSize}`, '-s', '-z', '--format=%H%x1f%P', '--end-of-options', start, '--', RECORD_PATHSPEC]);
+        const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', `--max-count=${pageSize}`, '-s', '-z', '--format=%H%x1f%P', '--end-of-options', start, '--', RECORD_SHAPED_PATHSPEC]);
         if (out === null) return UNREADABLE;
         const rows = out.split('\0').filter(Boolean).map((row) => row.split(SEP));
         if (!rows.every(([sha, parents, ...rest]) => rest.length === 0 && COMMIT_ID.test(sha) && parents !== undefined)) return UNREADABLE;
-        if (rows.length === 0) return { ok: true, value: oldest };
-        const [last, parents] = rows[rows.length - 1];
-        oldest = last;
-        const next = parents.split(' ').filter(Boolean)[0];
-        if (rows.length < pageSize || next === undefined || !COMMIT_ID.test(next)) return { ok: true, value: oldest };
+        for (const [sha, parents] of rows) candidates.push({ sha, firstParent: parents.split(' ').filter(Boolean)[0] });
+        const next = rows.length === 0 ? undefined : candidates[candidates.length - 1].firstParent;
+        if (rows.length < pageSize || next === undefined || !COMMIT_ID.test(next)) break;
         start = next;
     }
+    for (let i = candidates.length - 1; i >= 0; i--) {
+        const adds = addsRecordShapedFile(root, candidates[i].sha, candidates[i].firstParent);
+        if (adds === null) return UNREADABLE;
+        if (adds) return { ok: true, value: candidates[i].sha };
+    }
+    return { ok: true, value: null };
 }
 
 interface Window { selected: Entry[]; total: number }

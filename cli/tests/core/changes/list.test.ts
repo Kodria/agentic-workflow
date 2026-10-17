@@ -104,12 +104,29 @@ describe('listChanges: adoption point (R5.4)', () => {
         repo.commit({ 'a.ts': '1' }, 'feat: a', '2026-10-16T09:00:00Z');
         expect(listed()).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0 });
     });
-    test('any file added under docs/changes marks the adoption, even one that is not a record', () => {
+    test('R5.4 a docs/changes/README.md alone does not count: the repo has not adopted Change Records', () => {
         repo.commit({ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z');
         repo.commit({ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z');
+        expect(listed()).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0 });
+    });
+    test('R5.4 a README first and a record later: the adoption is the commit that added the record', () => {
+        repo.commit({ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z');
+        repo.commit({ 'a.ts': '1' }, 'feat: before the first record', '2026-10-16T10:00:00Z');
+        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'feat: first record', '2026-10-16T11:00:00Z');
+        repo.commit({ 'b.ts': '1' }, 'fix: after', '2026-10-16T12:00:00Z');
         const r = listed();
         expect(r.adopted).toBe(true);
-        expect(byClass(r)).toEqual({ 'feat: a': 'missing', 'docs: readme': 'missing' });
+        expect(subjects(r)).toEqual(['fix: after', 'feat: first record']);
+    });
+    test.each([
+        ['a record-shaped file in a subdirectory', 'docs/changes/sub/2026-10-10-x.md'],
+        ['a file with a record-like name but an uppercase slug', 'docs/changes/2026-10-10-Rec.md'],
+        ['a non-markdown file', 'docs/changes/2026-10-10-x.txt'],
+        ['a record-shaped name outside docs/changes', 'docs/other/2026-10-10-x.md'],
+    ])('R5.4 %s does not mark the adoption', (_label, file) => {
+        repo.commit({ [file]: 'x' }, 'docs: not a record', '2026-10-16T09:00:00Z');
+        repo.commit({ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z');
+        expect(listed()).toMatchObject({ adopted: false, changes: [] });
     });
     test('a record that was added and later deleted still marks the adoption', () => {
         adopt();
@@ -125,8 +142,8 @@ describe('listChanges: adoption point (R5.4)', () => {
     });
     test('modifying a file under docs/changes is not an adoption: only the commit that added the first file is', () => {
         repo.commit({ 'a.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
-        repo.commit({ 'docs/changes/x.txt': '1' }, 'docs: first file', '2026-10-16T10:00:00Z');
-        repo.commit({ 'docs/changes/x.txt': '2' }, 'docs: edit', '2026-10-16T11:00:00Z');
+        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'docs: first file', '2026-10-16T10:00:00Z');
+        repo.commit({ [recordPath(FIRST)]: record(FIRST, { summary: 'Edit.' }) }, 'docs: edit', '2026-10-16T11:00:00Z');
         expect(subjects(listed())).toEqual(['docs: edit', 'docs: first file']);
     });
     test('an adopted repo whose window holds no commit lists nothing', () => {
@@ -423,7 +440,8 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
     test('a failing listing of the added files makes that entry invalid-record with git-failed, not missing', () => {
         adopt();
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        const spy = spyOnGit((args) => { if (args.includes('diff')) throw new Error('boom'); });
+        let diffs = 0; // the first diff is the adoption check (R5.4), which must succeed
+        const spy = spyOnGit((args) => { if (args.includes('diff') && ++diffs > 1) throw new Error('boom'); });
         const r = listed();
         spy.restore();
         expect(r.changes[0].classification).toBe('invalid-record');
@@ -438,7 +456,7 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
     });
     test('a failing adoption lookup is a git-failed failure', () => {
         adopt();
-        const spy = spyOnGit((args) => { if (args.includes('log') && args.includes(':(top,literal)docs/changes')) throw new Error('boom'); });
+        const spy = spyOnGit((args) => { if (args.includes('log') && args.some((a) => a.startsWith(':(top,glob)docs/changes/'))) throw new Error('boom'); });
         const outcome = list();
         spy.restore();
         expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
