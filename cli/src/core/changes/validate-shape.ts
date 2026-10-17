@@ -43,11 +43,20 @@ function esc(text: string): string {
 
 const cleanText = (text: string): string => text.replace(SINGLE_LINE_UNSAFE_ALL, unicodeEscape);
 
+/** Clips to MAX_MESSAGE UTF-16 units including the ellipsis, without splitting a surrogate pair. */
+function clipMessage(message: string): string {
+    if (message.length <= MAX_MESSAGE) return message;
+    let end = MAX_MESSAGE - 1;
+    const last = message.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    return `${message.slice(0, end)}…`;
+}
+
 /** Last line of defense for R1.8: single-line message/field, bounded length, at most MAX_DIAGNOSTICS entries. */
 function finalize(list: Diagnostic[]): Diagnostic[] {
     const clean = list.map((d): Diagnostic => {
         const message = cleanText(d.message);
-        const base: Diagnostic = { code: d.code, message: message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message };
+        const base: Diagnostic = { code: d.code, message: clipMessage(message) };
         return d.field === undefined ? base : { ...base, field: cleanText(d.field) };
     });
     if (clean.length <= MAX_DIAGNOSTICS) return clean;

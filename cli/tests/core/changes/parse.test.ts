@@ -70,6 +70,16 @@ describe('loadFrontmatter', () => {
     test('merge keys are not expanded (CORE_SCHEMA)', () => {
         expect(loadFrontmatter('a: 1\n<<: {b: 2}')).toEqual({ ok: true, value: { a: 1, '<<': { b: 2 } } });
     });
+    test('the yaml-invalid reason is JSON-escaped and single-line', () => {
+        const r = loadFrontmatter('a: *x"\\y');
+        expect(r.ok).toBe(false);
+        const d = !r.ok ? r.diagnostic : undefined;
+        expect(d?.code).toBe('yaml-invalid');
+        expect(d?.message.startsWith('frontmatter is not valid YAML:')).toBe(true);
+        expect(d?.message).toContain('alias \\"x\\"\\\\y\\"');
+        expect(d?.message).not.toContain('alias "x"\\y"');
+        expect(d?.message).not.toMatch(/[\n\r]/);
+    });
     test('an alias without an anchor is yaml-invalid', () => {
         const r = loadFrontmatter('a: *x');
         expect(!r.ok && r.diagnostic.code).toBe('yaml-invalid');

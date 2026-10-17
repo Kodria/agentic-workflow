@@ -27,6 +27,11 @@ export function splitRecord(raw: string): Split {
     return { ok: true, frontmatterText: text.slice(4, end), body: text.slice(end + 5) };
 }
 
+/** The js-yaml reason can echo attacker text; JSON-escape it (plus the line breaks JSON leaves alone). */
+function escapeReason(reason: string): string {
+    return JSON.stringify(reason).slice(1, -1).replace(/[\u0085\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 export type Loaded = { ok: true; value: unknown } | { ok: false; diagnostic: Diagnostic };
 
 /**
@@ -46,7 +51,7 @@ export function loadFrontmatter(text: string): Loaded {
             },
         });
     } catch (error) {
-        return { ok: false, diagnostic: { code: 'yaml-invalid', message: `frontmatter is not valid YAML: ${(error as Error).message.split('\n')[0]}` } };
+        return { ok: false, diagnostic: { code: 'yaml-invalid', message: `frontmatter is not valid YAML: ${escapeReason((error as Error).message.split('\n')[0])}` } };
     }
     if (anchored) return { ok: false, diagnostic: { code: 'yaml-alias', message: 'YAML anchors/aliases are not allowed' } };
     return { ok: true, value };

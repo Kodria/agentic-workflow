@@ -349,6 +349,31 @@ describe('validateRecordShape', () => {
                 expect((d as { message: string }).message.length).toBeLessThan(250);
             } finally { fs.rmSync(root, { recursive: true, force: true }); }
         });
+        test('no diagnostic message is longer than 300 characters, ellipsis included', () => {
+            const r = validateRecordShape('\u0001'.repeat(80) + '.md', doc(fm()));
+            expect(r.diagnostics.length).toBeGreaterThan(0);
+            for (const d of r.diagnostics) expect(d.message.length).toBeLessThanOrEqual(300);
+            const long = validateRecordShape(NAME, `---\na: *${'"\\'.repeat(200)}\n---\n${BODY}`);
+            expect(codes(long)).toContain('yaml-invalid');
+            for (const d of long.diagnostics) expect(d.message.length).toBeLessThanOrEqual(300);
+            const clipped = long.diagnostics.find((d) => d.code === 'yaml-invalid');
+            expect(clipped?.message.length).toBe(300);
+            expect(clipped?.message.endsWith('…')).toBe(true);
+        });
+        test('clipping never splits a surrogate pair', () => {
+            const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+            for (const pad of ['', 'x']) {
+                const r = validateRecordShape(NAME, `---\na: *${pad}${'😀'.repeat(300)}\n---\n${BODY}`);
+                const d = r.diagnostics.find((x) => x.code === 'yaml-invalid');
+                expect(d).toBeDefined();
+                expect((d as { message: string }).message.length).toBeLessThanOrEqual(300);
+                expect((d as { message: string }).message).not.toMatch(lone);
+            }
+        });
+        test('a short message is left unchanged', () => {
+            const r = check({ rollback: 'rollback: ""' });
+            expect(r.diagnostics).toContainEqual({ code: 'field-invalid', field: 'rollback', message: 'rollback must be a non-empty string without control characters' });
+        });
         test('every diagnostic of a heavily hostile record is single-line', () => {
             const hostile = '"\\x1b\\n\\u2028\\u0085"';
             const r = check({
