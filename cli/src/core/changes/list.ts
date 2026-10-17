@@ -16,6 +16,8 @@ export const DEFAULT_LIMIT = 200;
 export const MAX_RECORDS_PER_ENTRY = 50;
 export const MAX_RECORDS_PER_RUN = 500;
 export const MAX_SUBJECT = 1024;
+/** The first-parent history is read in pages of at most this many commits, so no git output approaches the 16 MiB bound. */
+export const PAGE_SIZE = 10_000;
 const MAX_TAG_NAME = 255;
 const MAX_IDENTITY = 300;
 /** The largest instant a Date can hold, in seconds. */
@@ -26,6 +28,8 @@ const MAX_EPOCH_SECONDS = 8.64e12;
  */
 const SUBJECT_COLUMNS = 2100;
 const SUBJECT_UNAVAILABLE = '<subject unavailable>';
+/** Columns of the END of the subject that git is asked to print: the trailing `(#<n>)` is found there, however long the subject is. */
+const TAIL_COLUMNS = 64;
 
 export type Classification = 'recorded' | 'invalid-record' | 'exempt' | 'missing';
 
@@ -62,6 +66,8 @@ export interface ListOptions {
     limit?: number;
     maxRecordsPerEntry?: number;
     maxRecords?: number;
+    /** Commits per page of the first-parent scan (at most PAGE_SIZE); tests use a small one. */
+    pageSize?: number;
 }
 
 export type ListOutcome = { ok: true; result: ListResult } | { ok: false; failure: Failure };
@@ -160,33 +166,33 @@ function trimPadding(text: string): string {
     return text.slice(0, end);
 }
 
-/** `<sha> SEP <subject, at most SUBJECT_COLUMNS columns>` for the given commits in one call; null when git fails. */
-function readSubjectBatch(root: string, shas: string[]): Map<string, string> | null {
-    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-walk=unsorted', '-z', `--format=%H%x1f%<(${SUBJECT_COLUMNS},trunc)%s`, '--end-of-options', ...shas, '--']);
+/** `<sha> SEP <field>` for the given commits in one call (`field` is a bounded git placeholder); null when git fails. */
+function readFormatted(root: string, shas: string[], field: string): Map<string, string> | null {
+    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-walk=unsorted', '-z', `--format=%H%x1f${field}`, '--end-of-options', ...shas, '--']);
     if (out === null) return null;
-    const subjects = new Map<string, string>();
+    const values = new Map<string, string>();
     for (const entry of out.split('\0')) {
         if (entry === '') continue;
         const at = entry.indexOf(SEP);
         const sha = at < 0 ? '' : entry.slice(0, at);
         if (!COMMIT_ID.test(sha)) return null;
-        subjects.set(sha, trimPadding(entry.slice(at + 1)));
+        values.set(sha, trimPadding(entry.slice(at + 1)));
     }
-    return subjects;
+    return values;
 }
 
 /**
- * The subjects of the given commits, bounded by git itself. When the batch fails (a subject that still outgrows git's output
- * bound, for instance one made of zero-width characters, which `trunc` does not count) each commit is asked for on its own, and one
- * that still fails gets a placeholder: a subject never makes the run fail.
+ * A bounded placeholder of every commit, asked from git in one call. When the batch fails (a value that still outgrows git's
+ * output bound, for instance one made of zero-width characters, which the column bound does not count) each commit is asked for
+ * on its own, and one that still fails gets `fallback`: a subject never makes the run fail.
  */
-function readSubjects(root: string, shas: string[]): Map<string, string> {
+function readBounded(root: string, shas: string[], field: string, fallback: string): Map<string, string> {
     if (shas.length === 0) return new Map();
-    const batch = readSubjectBatch(root, shas);
+    const batch = readFormatted(root, shas, field);
     if (batch !== null && shas.every((s) => batch.has(s))) return batch;
-    const subjects = new Map<string, string>();
-    for (const sha of shas) subjects.set(sha, readSubjectBatch(root, [sha])?.get(sha) ?? SUBJECT_UNAVAILABLE);
-    return subjects;
+    const values = new Map<string, string>();
+    for (const sha of shas) values.set(sha, readFormatted(root, [sha], field)?.get(sha) ?? fallback);
+    return values;
 }
 
 /** The tag with the earliest creator date that contains `sha` (ties by name ascending); undefined when git fails. */
@@ -273,7 +279,56 @@ function parseScan(out: string): Entry[] | null {
     return entries;
 }
 
-function classifyEntry(root: string, entry: Entry, subject: string, budget: Budget): ListedChange | null {
+/**
+ * R5.4: the oldest first-parent commit that touched `docs/changes` (the first one that ever touched it must have added a file),
+ * read in pages of `pageSize` commits that touch it; each page continues from the first parent of the previous page's last
+ * commit. null when there is none, undefined when git fails.
+ */
+function findAdoption(root: string, pinned: string, pageSize: number): string | null | undefined {
+    let start = pinned;
+    let oldest: string | null = null;
+    for (;;) {
+        const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', `--max-count=${pageSize}`, '-s', '-z', '--format=%H%x1f%P', '--end-of-options', start, '--', RECORD_PATHSPEC]);
+        if (out === null) return undefined;
+        const rows = out.split('\0').filter(Boolean).map((row) => row.split(SEP));
+        if (!rows.every(([sha, parents, ...rest]) => rest.length === 0 && COMMIT_ID.test(sha) && parents !== undefined)) return undefined;
+        if (rows.length === 0) return oldest;
+        const [last, parents] = rows[rows.length - 1];
+        oldest = last;
+        const next = parents.split(' ').filter(Boolean)[0];
+        if (rows.length < pageSize || next === undefined || !COMMIT_ID.test(next)) return oldest;
+        start = next;
+    }
+}
+
+interface Window { selected: Entry[]; total: number }
+
+/**
+ * R5.7: the first-parent commits from `pinned` down to the adopting commit, in pages of `pageSize`, each starting at the first
+ * parent of the previous page's last commit. Every commit is tested individually against the window; the first `cap` that are
+ * in it are kept and all of them are counted. The scan stops at the adoption point (the walk ends there) or at the first page
+ * with no commit in the window: dates are assumed not to decrease along the chain, so a commit dated inside the window beyond
+ * such a page is not listed. Null when git fails or prints something unexpected.
+ */
+function scanWindow(root: string, pinned: string, adoption: string, sinceMs: number, pageSize: number, cap: number): Window | null {
+    const window: Window = { selected: [], total: 0 };
+    let start = pinned;
+    for (;;) {
+        const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', `--max-count=${pageSize}`, '-z', '--format=%H%x1f%ct%x1f%P', '--end-of-options', start, `^${adoption}^@`, '--']);
+        const page = out === null ? null : parseScan(out);
+        if (page === null) return null;
+        const inside = page.filter((e) => e.ms === null || e.ms >= sinceMs);
+        if (inside.length === 0) return window;
+        for (const entry of inside) if (window.selected.length < cap) window.selected.push(entry);
+        window.total += inside.length;
+        const last = page[page.length - 1];
+        const next = last.parents[0];
+        if (page.length < pageSize || last.sha === adoption || next === undefined) return window;
+        start = next;
+    }
+}
+
+function classifyEntry(root: string, entry: Entry, subject: string, tail: string, budget: Budget): ListedChange | null {
     const [first] = entry.parents;
     const added = first === undefined ? addedByRoot(root, entry.sha) : addedFilesUnder(root, first, entry.sha, RECORD_DIR);
     const names = added === null ? null : added.filter(isRecordPath);
@@ -300,7 +355,7 @@ function classifyEntry(root: string, entry: Entry, subject: string, budget: Budg
         subject: cleanLine(subject, MAX_SUBJECT),
         classification,
         merged_at: entry.ms === null ? null : new Date(entry.ms).toISOString(),
-        pr: parsePr(subject),
+        pr: parsePr(tail),
         release,
         records,
     };
@@ -318,9 +373,9 @@ function safeRepo(root: string): string | null {
 function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     if (typeof root !== 'string' || root.length === 0 || root.includes('\0')) return fail('invalid-input', 'the repository root must be a non-empty string');
     if (!isObj(opts)) return fail('invalid-input', 'the options must be an object');
-    const { base: explicit, since, limit, maxRecordsPerEntry, maxRecords } = opts;
+    const { base: explicit, since, limit, maxRecordsPerEntry, maxRecords, pageSize } = opts;
     if (!(since instanceof Date) || Number.isNaN(since.getTime())) return fail('invalid-input', 'the window start must be a valid date');
-    if (!optionalCount(limit) || !optionalCount(maxRecordsPerEntry) || !optionalCount(maxRecords)) return fail('invalid-input', 'limits must be positive integers');
+    if (!optionalCount(limit) || !optionalCount(maxRecordsPerEntry) || !optionalCount(maxRecords) || !optionalCount(pageSize)) return fail('invalid-input', 'limits must be positive integers');
     if (explicit !== undefined && !isSafeRef(explicit)) return fail('invalid-input', `--base "${esc(explicit as string)}" is not a safe git ref`);
 
     const base = resolveBase(root, explicit as string | undefined);
@@ -333,30 +388,28 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     if (shallow === 'true') return fail('shallow-history', 'this repository is a shallow clone; its oldest commits cannot be told from root commits', 'git fetch --unshallow');
     if (shallow !== 'false') return fail('git-failed', 'git could not tell whether the repository is shallow');
 
-    // R5.4: the first commit, in first-parent order, that added a file under docs/changes (the last one the log prints).
-    const adopting = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', '--diff-merges=first-parent', '--root', '--no-renames', '--diff-filter=A', '-s', '-z', '--format=%H', '--end-of-options', pinned, '--', RECORD_PATHSPEC]);
-    if (adopting === null) return fail('git-failed', 'git could not read the history');
-    const adoption = adopting.split('\0').filter(Boolean).pop();
+    const page = Math.min((pageSize as number | undefined) ?? PAGE_SIZE, PAGE_SIZE);
+    // R5.4: the first commit, in first-parent order, that touched docs/changes.
+    const adoption = findAdoption(root, pinned, page);
+    if (adoption === undefined) return fail('git-failed', 'git could not read the history');
     const result: ListResult = { repo: safeRepo(root), base: cleanLine(base, MAX_TAG_NAME), since: since.toISOString(), adopted: false, truncated: false, omitted: 0, changes: [] };
-    if (adoption === undefined) return { ok: true, result };
-    if (!COMMIT_ID.test(adoption)) return fail('git-failed', 'git printed an unexpected commit id');
+    if (adoption === null) return { ok: true, result };
     result.adopted = true;
 
-    // Everything from the base down to (and including) the adopting commit; the window is applied here, commit by commit.
-    const scanned = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', '-z', '--format=%H%x1f%ct%x1f%P', '--end-of-options', pinned, `^${adoption}^@`, '--']);
-    const entries = scanned === null ? null : parseScan(scanned);
-    if (entries === null) return fail('git-failed', 'git could not read the history');
-    const inWindow = entries.filter((e) => e.ms === null || e.ms >= since.getTime());
     const cap = Math.min((limit as number | undefined) ?? DEFAULT_LIMIT, DEFAULT_LIMIT);
-    const selected = inWindow.slice(0, cap);
-    result.truncated = inWindow.length > selected.length;
-    result.omitted = inWindow.length - selected.length;
+    const window = scanWindow(root, pinned, adoption, since.getTime(), page, cap);
+    if (window === null) return fail('git-failed', 'git could not read the history');
+    const selected = window.selected;
+    result.truncated = window.total > selected.length;
+    result.omitted = window.total - selected.length;
 
-    const subjects = readSubjects(root, selected.map((e) => e.sha));
+    const shas = selected.map((e) => e.sha);
+    const subjects = readBounded(root, shas, `%<(${SUBJECT_COLUMNS},trunc)%s`, SUBJECT_UNAVAILABLE);
+    const tails = readBounded(root, shas, `%<(${TAIL_COLUMNS},ltrunc)%s`, '');
     const run = (maxRecords as number | undefined) ?? MAX_RECORDS_PER_RUN;
     const budget: Budget = { entry: (maxRecordsPerEntry as number | undefined) ?? MAX_RECORDS_PER_ENTRY, run };
     for (const entry of selected) {
-        const change = classifyEntry(root, entry, subjects.get(entry.sha) as string, budget);
+        const change = classifyEntry(root, entry, subjects.get(entry.sha) as string, tails.get(entry.sha) as string, budget);
         if (change === null) return fail('git-failed', `git could not tell which tags contain ${entry.sha.slice(0, 12)}`);
         result.changes.push(change);
     }

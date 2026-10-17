@@ -6,7 +6,7 @@ import { NOW, SINCE_48H, commitLiterally, record, recordPath } from './list-fixt
 import { resolveBase } from '../../../src/core/changes/git';
 import { resolveRange } from '../../../src/core/changes/range';
 import { pathToFileURL } from 'url';
-import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_SUBJECT, listChanges, parseSince, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
+import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_SUBJECT, PAGE_SIZE, listChanges, parseSince, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
 let repo: TestRepo;
@@ -563,7 +563,7 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
     });
     test('a failing adoption lookup is a git-failed failure', () => {
         adopt();
-        const spy = spyOnGit((args) => { if (args.includes('--diff-filter=A') && args.includes('log')) throw new Error('boom'); });
+        const spy = spyOnGit((args) => { if (args.includes('log') && args.includes(':(top,literal)docs/changes')) throw new Error('boom'); });
         const outcome = list();
         spy.restore();
         expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
@@ -786,6 +786,208 @@ describe('listChanges: subjects and tags beyond their caps are clipped, never an
     });
 });
 
+describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
+    const isScan = (a: string[]): boolean => a.includes('log') && a.some((x) => x === '--format=%H%x1f%ct%x1f%P');
+    const isAdoptionPage = (a: string[]): boolean => a.includes('log') && a.includes(':(top,literal)docs/changes');
+    /** `n` commits in the window, `fix: n1` oldest. */
+    const commits = (n: number, from = 1): void => { for (let i = from; i < from + n; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, '2026-10-16T10:00:00Z'); };
+    const countCalls = (pred: (a: string[]) => boolean, opts: Record<string, unknown>): number => { const spy = spyOnGit(); listed(opts); spy.restore(); return spy.calls.filter(pred).length; };
+
+    test('the real page size is 10 000 commits and is what a default run asks git for', () => {
+        expect(PAGE_SIZE).toBe(10_000);
+        adopt();
+        const spy = spyOnGit();
+        listed();
+        spy.restore();
+        expect(spy.calls.filter(isScan).every((a) => a.includes('--max-count=10000'))).toBe(true);
+        expect(spy.calls.filter(isAdoptionPage).every((a) => a.includes('--max-count=10000'))).toBe(true);
+    });
+    test('a page size above the real one is capped to it', () => {
+        adopt();
+        const spy = spyOnGit();
+        listed({ pageSize: 1_000_000 });
+        spy.restore();
+        expect(spy.calls.filter(isScan).every((a) => a.includes('--max-count=10000'))).toBe(true);
+    });
+    test.each([0, -1, 1.5, Number.NaN, '3', null])('the page size %j is invalid-input', (pageSize) => {
+        expect(list({ pageSize })).toMatchObject({ ok: false, failure: { code: 'invalid-input' } });
+    });
+    test('entries across page boundaries are listed exactly as with one page', () => {
+        adopt();
+        commits(8);
+        const paged = listed({ pageSize: 3 });
+        expect(paged.changes).toHaveLength(8);
+        expect(paged).toEqual(listed());
+        expect(subjects(paged)[0]).toBe('fix: n8');
+        expect(subjects(paged)[7]).toBe('fix: n1');
+    });
+    test('a page size of 1 gives the same answer', () => {
+        adopt();
+        commits(4);
+        expect(listed({ pageSize: 1 })).toEqual(listed());
+    });
+    test('the scan stops at the adoption point: no page is read beyond the one holding it', () => {
+        repo.commit({ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
+        repo.commit({ 'old2.ts': '1' }, 'feat: before too', '2026-10-16T09:30:00Z');
+        adopt('2026-10-16-first');
+        commits(5);
+        const r = listed({ pageSize: 2 });
+        expect(subjects(r)).toEqual(['fix: n5', 'fix: n4', 'fix: n3', 'fix: n2', 'fix: n1']);
+        expect(countCalls(isScan, { pageSize: 2 })).toBe(3);
+    });
+    test('the scan stops at the first page without a commit in the window', () => {
+        adopt();
+        for (let i = 1; i <= 6; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commits(2);
+        expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n2', 'fix: n1']);
+        expect(countCalls(isScan, { pageSize: 2 })).toBe(2);
+    });
+    test('a window with no commit in it reads one page only', () => {
+        adopt();
+        for (let i = 1; i <= 6; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        expect(listed({ pageSize: 2 })).toMatchObject({ adopted: true, changes: [], truncated: false, omitted: 0 });
+        expect(countCalls(isScan, { pageSize: 2 })).toBe(1);
+    });
+    test('a page that holds some commits of the window and some older ones is followed by one more page', () => {
+        adopt();
+        for (let i = 1; i <= 4; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commits(1);
+        expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n1']);
+        expect(countCalls(isScan, { pageSize: 2 })).toBe(2);
+    });
+    test('a commit dated inside the window beyond a page with none is not listed (dates are assumed not to decrease)', () => {
+        adopt();
+        commits(1);
+        for (let i = 1; i <= 3; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commits(1, 2);
+        expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n2']);
+        expect(subjects(listed({ pageSize: 10 }))).toEqual(['fix: n2', 'fix: n1']);
+    });
+    test('an unusable date counts as inside the window when it decides whether to read on', () => {
+        adopt();
+        for (let i = 1; i <= 4; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commitLiterally(repo, '');
+        repo.commit({ 'o5.ts': '1' }, 'fix: old5', '2026-10-01T10:00:00Z');
+        expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: odd date']);
+        expect(countCalls(isScan, { pageSize: 2 })).toBe(2);
+    });
+    test('the omitted entries are counted over every page', () => {
+        adopt();
+        commits(8);
+        expect(listed({ pageSize: 3, limit: 3 })).toMatchObject({ truncated: true, omitted: 5 });
+        expect(listed({ pageSize: 3, limit: 3 })).toEqual(listed({ limit: 3 }));
+    });
+    test('merge commits count as one commit of the first-parent chain, across pages', () => {
+        adopt();
+        repo.git('checkout', '-q', '-b', 'side1');
+        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'feat: side1', '2026-10-16T08:00:00Z');
+        repo.git('checkout', '-q', 'main');
+        repo.gitAt('2026-10-16T09:00:00Z', 'merge', '--no-ff', '-q', 'side1', '-m', 'Merge side1');
+        repo.git('checkout', '-q', '-b', 'side2');
+        repo.commit({ 's2.ts': '1' }, 'chore: side2\n\nChange-Record: none', '2026-10-16T10:00:00Z');
+        repo.git('checkout', '-q', 'main');
+        repo.gitAt('2026-10-16T11:00:00Z', 'merge', '--no-ff', '-q', 'side2', '-m', 'Merge side2');
+        commits(1);
+        const paged = listed({ pageSize: 2 });
+        expect(byClass(paged)).toEqual({ 'fix: n1': 'missing', 'Merge side2': 'exempt', 'Merge side1': 'recorded' });
+        expect(paged).toEqual(listed());
+    });
+    test('the adoption search is paged too: the oldest commit that touched docs/changes is found across pages', () => {
+        repo.commit({ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
+        for (let i = 1; i <= 7; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        const paged = listed({ pageSize: 3 });
+        expect(subjects(paged)).toEqual(Array.from({ length: 7 }, (_, i) => `docs: note ${7 - i}`));
+        expect(paged).toEqual(listed());
+        expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
+    });
+    test('the adoption search reads one more, empty, page when the last one was full', () => {
+        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        expect(subjects(listed({ pageSize: 3 }))).toHaveLength(6);
+        expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
+    });
+    test('the adoption search skips commits that did not touch docs/changes between two pages', () => {
+        for (let i = 1; i <= 3; i++) {
+            repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+            commits(2, i * 10);
+        }
+        const r = listed({ pageSize: 2 });
+        expect(r.changes.map((c) => c.subject).filter((x) => x.startsWith('docs:'))).toEqual(['docs: note 3', 'docs: note 2', 'docs: note 1']);
+        expect(r).toEqual(listed());
+    });
+    test('a root commit that adopts ends the paging', () => {
+        repo.git('checkout', '-q', '--orphan', 'orph');
+        repo.git('rm', '-rfq', '.');
+        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'feat: root record', '2026-10-16T20:00:00Z');
+        repo.commit({ 'z.ts': '1' }, 'fix: after root', '2026-10-16T21:00:00Z');
+        expect(listed({ base: 'orph', pageSize: 1 })).toEqual(listed({ base: 'orph' }));
+        expect(subjects(listed({ base: 'orph', pageSize: 1 }))).toEqual(['fix: after root', 'feat: root record']);
+    });
+    test('a git failure on a later page is a git-failed failure, not a partial list', () => {
+        adopt();
+        commits(6);
+        let seen = 0;
+        const spy = spyOnGit((args) => { if (isScan(args) && ++seen === 2) throw new Error('boom'); });
+        const outcome = list({ pageSize: 2 });
+        spy.restore();
+        expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
+    });
+    test('a git failure on a later page of the adoption search is a git-failed failure', () => {
+        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/n${i}.txt`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        let seen = 0;
+        const spy = spyOnGit((args) => { if (isAdoptionPage(args) && ++seen === 2) throw new Error('boom'); });
+        const outcome = list({ pageSize: 2 });
+        spy.restore();
+        expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
+    });
+});
+
+describe('listChanges: the pr comes from the true end of the full subject (R5.5)', () => {
+    const prOf = (subject: string): number | null => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, subject, '2026-10-16T10:00:00Z');
+        return listed().changes[0].pr;
+    };
+    test.each([
+        ['5000 characters long', `fix: ${'a'.repeat(5000)} (#12)`, 12],
+        ['1030 characters long (just beyond the subject cap)', `fix: ${'a'.repeat(1030 - 12)} (#12)`, 12],
+        ['exactly the width of the tail', `${'x'.repeat(64 - 6)} (#12)`, 12],
+        ['one column beyond the width of the tail', `${'x'.repeat(65 - 6)} (#12)`, 12],
+        ['one column short of the width of the tail', `${'x'.repeat(63 - 6)} (#12)`, 12],
+        ['shorter than the tail', 'fix: x (#3)', 3],
+        ['with (#12) glued to a longer token at the end', `fix: ${'a'.repeat(300)}tok(#12)`, 12],
+        ['with (#12) followed by more text', `fix: ${'a'.repeat(300)} (#12)x`, null],
+        ['with (#12) early and a long tail after it', `fix: (#12) ${'a'.repeat(5000)}`, null],
+        ['with a pr number longer than the tail would keep', `fix: ${'a'.repeat(300)} (#${'9'.repeat(60)})`, null],
+        ['with the largest safe number at the end', `fix: ${'a'.repeat(300)} (#9007199254740991)`, 9007199254740991],
+        ['with wide characters at the cut', `${'\u6f22'.repeat(100)} (#12)`, 12],
+        ['with accented characters at the cut', `${'\u00e9'.repeat(100)} (#12)`, 12],
+        ['with astral characters at the cut', `${'\u{1F600}'.repeat(100)} (#12)`, 12],
+        ['with two (#n) at the end', `fix: ${'a'.repeat(300)} (#1) (#2)`, 2],
+    ])('a subject %s', (_label, subject, pr) => {
+        expect(prOf(subject)).toBe(pr);
+    });
+    test('the end of the subject is asked from git bounded to the tail width', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        const spy = spyOnGit();
+        listed();
+        spy.restore();
+        expect(spy.calls.some((a) => a.includes('--format=%H%x1f%<(64,ltrunc)%s'))).toBe(true);
+    });
+    test('the subject itself is still clipped while the pr is read from its end', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, `fix: ${'a'.repeat(5000)} (#12)`, '2026-10-16T10:00:00Z');
+        const entry = listed().changes[0];
+        expect(entry.subject.length).toBe(MAX_SUBJECT);
+        expect(entry.pr).toBe(12);
+    });
+    test('the tail never leaks into the subject', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: short (#4)', '2026-10-16T10:00:00Z');
+        expect(listed().changes[0].subject).toBe('fix: short (#4)');
+    });
+});
+
 describe('listChanges: shallow clones and the default base (R5.1)', () => {
     function clone(depth?: number): string {
         const dest = path.join(repo.home, `clone-${depth ?? 'full'}`);
@@ -964,14 +1166,14 @@ describe('listChanges: read-only and bounded (R5.7)', () => {
             expect(call.slice(dash + 1).every((x) => x.startsWith(':(top,literal)') || /^docs\/changes\/[a-z0-9-]+\.md$/.test(x))).toBe(true);
         }
     });
-    test('the first-parent history is read with the merge diff against the first parent', () => {
+    test('the history is read along the first parent only, in pages', () => {
         history();
         const spy = spyOnGit();
         listed();
         spy.restore();
-        const scans = spy.calls.filter((a) => a.includes('log') && a.includes('--first-parent'));
+        const scans = spy.calls.filter((a) => a.includes('log') && a.some((x) => x.startsWith('--max-count=')));
         expect(scans.length).toBeGreaterThanOrEqual(2);
-        for (const call of scans.filter((a) => a.includes('--diff-filter=A'))) expect(call).toContain('--diff-merges=first-parent');
+        for (const call of scans) { expect(call).toContain('--first-parent'); expect(call).toContain(`--max-count=${PAGE_SIZE}`); }
     });
     test('git calls per entry are constant: recorded entries cost the same however long the history', () => {
         adopt();
