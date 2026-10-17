@@ -45,7 +45,7 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
 ### R1 — Record format (`awm.change-record/v1`)
 
 - **R1.1 — Location and name:** THE CLI SHALL treat as Change Records exactly the files matching `docs/changes/<YYYY-MM-DD>-<slug>.md`, where `<slug>` matches `^[a-z0-9]+(-[a-z0-9]+)*$` and is at most 64 characters.
-- **R1.2 — Frontmatter delimiting:** THE record SHALL start with a YAML frontmatter block delimited by `---` lines. THE CLI SHALL parse it with js-yaml's safe (default) schema and SHALL reject anchors, aliases and custom tags.
+- **R1.2 — Frontmatter delimiting:** THE record SHALL start with a YAML frontmatter block delimited by `---` lines. THE CLI SHALL parse it with js-yaml's `CORE_SCHEMA` (a strict subset of the default safe schema: no custom tags, no implicit timestamps, no merge keys) and SHALL reject every YAML anchor and alias, including scalar and unused ones.
 - **R1.3 — Allowed keys:** THE frontmatter SHALL contain only these keys: `schema`, `id`, `title`, `summary_short`, `type`, `scope`, `semver`, `breaking`, `modules`, `links`, `verification`, `manual_validation`, `risks`, `rollback`, `provenance`. IF any other key is present at any level, THEN `validate` SHALL fail with diagnostic `unknown-field` naming the field path.
 - **R1.4 — Field rules:**
   - `schema` is exactly `awm.change-record/v1`.
@@ -53,22 +53,22 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `title` is 1–120 characters.
   - `summary_short` is 1–280 characters, with no line breaks.
   - `type` is a lowercase conventional-commit type.
-  - `scope` is a string or `null`.
+  - `scope` is a non-empty string or `null`.
   - `semver` is one of `major | minor | patch | none`.
   - `breaking` is a boolean.
   - `modules` is a sorted, deduplicated array of repo-relative directory paths using `/`.
-  - `links` is optional and may contain only `plan` (a repo-relative path that exists) and `issue` (an https URL).
+  - `links` is optional and may contain only `plan` (a safe repo-relative path; its existence as a regular file is verified whenever a repository root is available, as in `validate`, and not when records are read from history, as in `list`) and `issue` (an https URL).
   - `manual_validation` is either a non-empty array of `{step, expected}` objects with non-empty strings, or the object `{none: <non-empty reason>}`.
-  - `risks` is an array of strings and may be empty.
+  - `risks` is an array of non-empty strings and may be empty.
   - `rollback` is a non-empty string.
-  - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all strings. Timestamps are canonical ISO-8601.
+  - `provenance` is optional and may contain only `agent`, `model`, `session`, `started_at` and `finished_at`, all strings. Timestamps are canonical ISO-8601, meaning exactly the form `Date.prototype.toISOString()` produces (UTC with milliseconds, e.g. `2026-10-17T10:00:00.000Z`).
 - **R1.5 — Verification block:** `verification` SHALL contain:
   - `commit`: 40 lowercase hex characters;
   - `overall`: the receipt verdict;
-  - `sensors`: a map from sensor name to `pass | fail | inconclusive | skipped`;
+  - `sensors`: a map from sensor name (a non-empty single-line string of at most 128 characters without control characters) to `pass | fail | inconclusive | skipped`;
   - `receipt_digest`: `sha256:<64 hex>`.
 - **R1.6 — Body sections:** THE body SHALL contain the headings `## Qué se hizo`, `## Qué se probó`, `## Qué falta validar` and `## Riesgos y rollback`, in that order, each with non-empty content.
-- **R1.7 — No placeholders:** IF any string field or body section contains the literal marker `<!-- awm:pending -->`, THEN `validate` SHALL fail with diagnostic `pending-content`.
+- **R1.7 — No placeholders:** IF the raw frontmatter text, any parsed string value (after YAML unescaping), or any body section contains the literal marker `<!-- awm:pending -->`, THEN `validate` SHALL fail with diagnostic `pending-content`.
 - **R1.8 — Size bound:** IF a record file exceeds 64 KiB, THEN THE CLI SHALL reject it with diagnostic `record-too-large` without parsing it.
 
 ### R2 — Sensor-run receipt
