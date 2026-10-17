@@ -135,17 +135,18 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
   - `invalid-record` if it adds a record that fails base-shape validation (R1 only);
   - `exempt` if any commit of that change carries `Change-Record: none` (the commits of a change are the first-parent commit itself plus, for a merge commit, `<commit>^1..<commit>`; trailers are read via `git log --format=%(trailers:key=Change-Record,valueonly)`);
   - `missing` otherwise.
+  The first matching rule in this order wins, so a commit that adds a record and also carries the opt-out trailer is `recorded`. A record counts only when the commit adds it (status `A`, renames not followed) under `docs/changes/` with a name accepted by R1.7; a commit that adds several records is `invalid-record` when any of them fails shape validation and `recorded` otherwise. Shape validation here never touches the working tree (no `root` option): link files are not checked.
 - **R5.4 — Adoption point:** THE CLI SHALL classify commits older than the first commit that ever added a file under `docs/changes/` as `pre-adoption` and SHALL omit them from output. IF no record ever existed, THEN it SHALL print a single line stating that the repo has not adopted Change Records and SHALL exit 0.
 - **R5.5 — Derived fields:** For each entry, THE CLI SHALL derive:
-  - `merged_at`: the commit date;
+  - `merged_at`: the committer date of the commit as a UTC ISO-8601 instant (`%ct` seconds), which is also the date the window of R5.2 compares against (commits are listed in first-parent order and each is tested individually; a future-dated commit is included);
   - `pr`: from a trailing `(#<n>)` in the subject, else `null`;
   - `release`: the earliest-created tag that contains the commit, else `null`;
   - `repo`: `host/owner/name` parsed from `remote.origin.url` with credentials stripped, else `null`.
 - **R5.6 — Formats:**
   - `text`: a human table.
-  - `json`: one JSON document `{repo, base, since, changes:[…]}`. Each change has `classification`, the derived fields and, for `recorded`, the full frontmatter.
+  - `json`: one JSON document `{repo, base, since, truncated, omitted, changes:[…]}`. Each change is `{sha, subject, classification, merged_at, pr, release, records:[…]}`; `records` is empty for `exempt` and `missing`, holds `{path, …full frontmatter}` for `recorded`, and `{path, diagnostics}` for `invalid-record`. `subject` is escaped and clipped like any untrusted text.
   - `voice`: one sentence per change, `"<repo-name>: <summary_short>. <type>, <verificado|sin verificar>, <n> validaciones manuales pendientes."`, followed by a closing count of `missing` and `invalid-record`.
-- **R5.7 — Read-only and bounded:** `list` SHALL NOT write files. It SHALL resolve tags with one `git for-each-ref`/`git tag --contains` strategy per entry, bounded to 200 entries (with a truncation notice beyond that).
+- **R5.7 — Read-only and bounded:** `list` SHALL NOT write files. It SHALL resolve tags with one `git for-each-ref`/`git tag --contains` strategy per entry, bounded to the newest 200 entries of the window (beyond that, `truncated` is true, `omitted` counts the rest, and the text and voice formats end with a notice). The earliest-created tag is decided by creator date, ties broken by tag name ascending. Every record read from history is size-checked before it is read (R1.8) and every path git prints is validated before use.
 
 ### R6 — Release script opt-out
 
