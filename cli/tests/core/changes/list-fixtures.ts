@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+import type { TestRepo } from './helpers';
+
 // Shared by the tests of `awm changes list`: a valid record text and the clock every list test runs at.
 
 export const SHA = 'a'.repeat(40);
@@ -56,3 +60,17 @@ d
 }
 
 export const recordPath = (id: string): string => `docs/changes/${id}.md`;
+
+let oddCommits = 0;
+/**
+ * A commit on top of HEAD whose committer line is `committer t <t@t> <committerDate>` verbatim (git itself would never write an
+ * empty, negative or garbage date), written straight into the object store and checked out. Returns its id.
+ */
+export function commitLiterally(repo: TestRepo, committerDate: string, message = 'fix: odd date'): string {
+    const body = [`tree ${repo.git('write-tree')}`, `parent ${repo.git('rev-parse', 'HEAD')}`, 'author t <t@t> 1700000000 +0000', `committer t <t@t> ${committerDate}`, '', message, ''].join('\n');
+    const file = path.join(repo.home, `odd-commit-${oddCommits++}.txt`);
+    fs.writeFileSync(file, body);
+    const sha = repo.git('hash-object', '-t', 'commit', '-w', '--literally', file);
+    repo.git('reset', '-q', '--hard', sha);
+    return sha;
+}

@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { Command } from 'commander';
 import { bad, makeRepo, nonRepoDir, type TestRepo } from '../../core/changes/helpers';
-import { now, record, recordPath } from '../../core/changes/list-fixtures';
+import { pathToFileURL } from 'url';
+import { commitLiterally, now, record, recordPath } from '../../core/changes/list-fixtures';
 import { registerChangesCommand, runChangesList } from '../../../src/commands/changes';
 import * as listModule from '../../../src/core/changes/list';
 import type { CommandResult } from '../../../src/core/command-result';
@@ -151,7 +152,7 @@ describe('awm changes list: adoption (R5.4)', () => {
     test('a repo without records prints an empty JSON document', () => {
         const r = run({ format: 'json' });
         expect(r.code).toBe(0);
-        expect(JSON.parse(r.stdout)).toMatchObject({ changes: [], truncated: false, omitted: 0, base: 'main' });
+        expect(JSON.parse(r.stdout)).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0, base: 'main' });
     });
     test('a repo without records is named after its directory when it has no remote', () => {
         expect(run().stdout.startsWith(`${path.basename(repo.root)} has not adopted`)).toBe(true);
@@ -194,12 +195,58 @@ describe('awm changes list: classification and derived fields (R5.1, R5.3, R5.4,
     });
 });
 
+describe('awm changes list: mixed invalid commits, odd dates and shallow clones (R5.1, R5.5, R5.6)', () => {
+    const mixed = (): void => {
+        history();
+        repo.commit({ [recordPath('2026-10-17-aaa')]: record('2026-10-17-aaa', { summary: 'Valido.' }), [recordPath('2026-10-17-zzz')]: 'junk' }, 'feat: mixed', '2026-10-17T03:00:00Z');
+    };
+    test('json lists both records of the mixed commit: the valid one with empty diagnostics, the junk one with its diagnostics', () => {
+        mixed();
+        const entry = json().changes[0];
+        expect(entry.classification).toBe('invalid-record');
+        expect(entry.records).toEqual([
+            { path: recordPath('2026-10-17-aaa'), diagnostics: [] },
+            { path: recordPath('2026-10-17-zzz'), diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'frontmatter-missing' })]) },
+        ]);
+    });
+    test('the text row of the mixed commit shows the junk record diagnostic, not the valid first record', () => {
+        mixed();
+        const row = run({ since: '48h' }).stdout.split('\n')[1];
+        expect(row).toContain('feat: mixed');
+        expect(row).toContain('(frontmatter-missing)');
+    });
+    test('voice counts the mixed commit as invalid and does not speak its valid record', () => {
+        mixed();
+        const out = run({ since: '48h', format: 'voice' }).stdout;
+        expect(out).not.toContain('Valido.');
+        expect(out).toMatch(/1 cambio\(s\) sin record y 2 con record inválido/);
+    });
+    test.each(['text', 'json', 'voice'])('a commit with an unusable committer date is listed in the %s format', (format) => {
+        history();
+        commitLiterally(repo, '');
+        const r = run({ since: '48h', format });
+        expect(r.code).toBe(0);
+        if (format === 'json') expect(json().changes[0]).toMatchObject({ subject: 'fix: odd date', merged_at: null });
+        if (format === 'text') expect(r.stdout.split('\n')[1]).toMatch(/^unknown\s+missing\s/);
+        if (format === 'voice') expect(r.stdout).toMatch(/2 cambio\(s\) sin record/);
+    });
+    test('a shallow clone exits 2 with shallow-history and its remedy', () => {
+        history();
+        const dest = path.join(repo.home, 'shallow');
+        repo.git('clone', '-q', '--depth', '1', pathToFileURL(repo.root).href, dest);
+        const r = runChangesList(dest, { since: '48h', format: 'json' }, { now });
+        failure(r, 'shallow-history');
+        expect(r.stderr).toContain('remedy: git fetch --unshallow');
+    });
+});
+
 describe('awm changes list: formats (R5.6)', () => {
     test('json is one document on one line', () => {
         history();
         const r = run({ since: '48h', format: 'json' });
         expect(r.stdout.split('\n')).toHaveLength(2);
-        expect(Object.keys(JSON.parse(r.stdout))).toEqual(['repo', 'base', 'since', 'truncated', 'omitted', 'changes']);
+        expect(Object.keys(JSON.parse(r.stdout))).toEqual(['repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
+        expect(JSON.parse(r.stdout).adopted).toBe(true);
     });
     test('voice speaks recorded changes and counts the rest', () => {
         history();

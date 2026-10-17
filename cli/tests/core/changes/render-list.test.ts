@@ -26,7 +26,7 @@ describe('renderJson (R5.6)', () => {
         expect(lines(out)).toHaveLength(1);
     });
     test('has exactly the documented keys, in order', () => {
-        expect(Object.keys(JSON.parse(renderJson(result())))).toEqual(['repo', 'base', 'since', 'truncated', 'omitted', 'changes']);
+        expect(Object.keys(JSON.parse(renderJson(result())))).toEqual(['repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
     });
     test('each change has exactly the documented keys, in order', () => {
         const out = JSON.parse(renderJson(result({ changes: [change()] })));
@@ -48,8 +48,18 @@ describe('renderJson (R5.6)', () => {
     });
     test('a repository that has not adopted records is still a valid document with no changes', () => {
         const out = JSON.parse(renderJson(result({ adopted: false })));
-        expect(out).toMatchObject({ changes: [], truncated: false, omitted: 0 });
-        expect(out).not.toHaveProperty('adopted');
+        expect(out).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0 });
+    });
+    test('an adopted repository says so, with or without changes', () => {
+        expect(JSON.parse(renderJson(result())).adopted).toBe(true);
+        expect(JSON.parse(renderJson(result({ changes: [change()] }))).adopted).toBe(true);
+    });
+    test('a change whose date is unusable keeps merged_at null', () => {
+        expect(JSON.parse(renderJson(result({ changes: [change({ merged_at: null })] }))).changes[0].merged_at).toBeNull();
+    });
+    test('an invalid-record entry lists every added record, the valid ones with empty diagnostics', () => {
+        const records = [{ path: 'docs/changes/a.md', diagnostics: [] }, { path: 'docs/changes/z.md', diagnostics: [{ code: 'name-invalid', message: 'm' }] }];
+        expect(JSON.parse(renderJson(result({ changes: [change({ classification: 'invalid-record', records })] }))).changes[0].records).toEqual(records);
     });
     test('a null repo stays null', () => {
         expect(JSON.parse(renderJson(result({ repo: null }))).repo).toBeNull();
@@ -87,6 +97,13 @@ describe('renderText (R5.6)', () => {
     test('an invalid record shows the code of its first diagnostic', () => {
         const entry = change({ classification: 'invalid-record', subject: 'feat: bad', records: [{ path: 'docs/changes/x.md', diagnostics: [{ code: 'name-invalid', message: 'm' }, { code: 'other', message: 'm' }] }] });
         expect(lines(renderText(result({ changes: [entry] }), 'f'))[1]).toBe('2026-10-16 20:00  invalid-record  abcdef01  -       feat: bad  (name-invalid)');
+    });
+    test('a mixed invalid-record commit shows the first FAILING record, not the first record', () => {
+        const entry = change({ classification: 'invalid-record', subject: 'feat: mixed', records: [{ path: 'docs/changes/a.md', diagnostics: [] }, { path: 'docs/changes/z.md', diagnostics: [{ code: 'name-invalid', message: 'm' }, { code: 'other', message: 'm' }] }] });
+        expect(lines(renderText(result({ changes: [entry] }), 'f'))[1]).toBe('2026-10-16 20:00  invalid-record  abcdef01  -       feat: mixed  (name-invalid)');
+    });
+    test('a change whose date is unusable shows unknown in place of the time', () => {
+        expect(lines(renderText(result({ changes: [change({ merged_at: null })] }), 'f'))[1]).toBe('unknown           missing         abcdef01  -       feat: x');
     });
     test('a truncated list ends with a notice naming how many were left out', () => {
         const out = lines(renderText(result({ truncated: true, omitted: 7, changes: [change()] }), 'f'));
@@ -144,6 +161,13 @@ describe('renderVoice (R5.6)', () => {
     ])('the summary %j is spoken as %j followed by the type', (summary, spoken) => {
         const out = renderVoice(result({ changes: [recorded({ summary_short: summary, type: 'fix' })] }), 'f');
         expect(lines(out)[0]).toBe(`belanz: ${spoken} fix, verificado, 2 validaciones manuales pendientes.`);
+    });
+    test('a mixed invalid-record commit is counted, not spoken', () => {
+        const entry = change({ classification: 'invalid-record', records: [{ path: 'docs/changes/a.md', diagnostics: [] }, { path: 'docs/changes/z.md', diagnostics: [{ code: 'x', message: 'm' }] }] });
+        expect(lines(renderVoice(result({ changes: [entry] }), 'f'))).toEqual(['Además: 0 cambio(s) sin record y 1 con record inválido.']);
+    });
+    test('a change whose date is unusable is spoken like any other', () => {
+        expect(lines(renderVoice(result({ changes: [recorded({}, { merged_at: null })] }), 'f'))[0]).toBe('belanz: Primer cambio. feat, verificado, 2 validaciones manuales pendientes.');
     });
     test('only recorded changes get a sentence; exempt ones are silent', () => {
         const out = renderVoice(result({ changes: [change({ classification: 'exempt' }), recorded()] }), 'f');

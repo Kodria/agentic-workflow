@@ -23,7 +23,7 @@ export function renderJson(result: ListResult): string {
     try {
         if (!usable(result)) return '{"error":"invalid-input"}\n';
         const changes = result.changes.map((c: ListedChange) => ({ sha: c.sha, subject: c.subject, classification: c.classification, merged_at: c.merged_at, pr: c.pr, release: c.release, records: c.records }));
-        return `${JSON.stringify({ repo: result.repo, base: result.base, since: result.since, truncated: result.truncated, omitted: result.omitted, changes })}\n`;
+        return `${JSON.stringify({ repo: result.repo, base: result.base, since: result.since, adopted: result.adopted, truncated: result.truncated, omitted: result.omitted, changes })}\n`;
     } catch {
         return '{"error":"invalid-input"}\n';
     }
@@ -34,9 +34,12 @@ const header = ['WHEN'.padEnd(16), 'CLASSIFICATION'.padEnd(14), 'SHA'.padEnd(8),
 function textRow(c: ListedChange): string {
     const first = c.records[0];
     const title = first !== undefined && isValid(first) ? first.title : c.subject;
-    const diagnostic = first !== undefined && !isValid(first) && Array.isArray(first.diagnostics) ? first.diagnostics[0] : undefined;
+    // The first FAILING record of an invalid-record commit (the valid ones carry an empty diagnostics list).
+    const failing = c.records.find((r) => Array.isArray((r as { diagnostics?: unknown }).diagnostics) && (r as { diagnostics: unknown[] }).diagnostics.length > 0);
+    const diagnostic = failing !== undefined && !isValid(failing) ? failing.diagnostics[0] : undefined;
+    const when = c.merged_at === null ? 'unknown' : String(c.merged_at).slice(0, 16).replace('T', ' ');
     const cells = [
-        cleanLine(String(c.merged_at).slice(0, 16).replace('T', ' '), 16).padEnd(16),
+        cleanLine(when, 16).padEnd(16),
         cleanLine(c.classification, 14).padEnd(14),
         cleanLine(String(c.sha).slice(0, 8), 8).padEnd(8),
         (c.pr === null ? '-' : cleanLine(`#${c.pr}`, 12)).padEnd(6),

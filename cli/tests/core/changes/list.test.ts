@@ -2,7 +2,10 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { LINEAR_TIME_BOUND_MS, bad, commitForgedSigned, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
-import { NOW, SINCE_48H, record, recordPath } from './list-fixtures';
+import { NOW, SINCE_48H, commitLiterally, record, recordPath } from './list-fixtures';
+import { resolveBase } from '../../../src/core/changes/git';
+import { resolveRange } from '../../../src/core/changes/range';
+import { pathToFileURL } from 'url';
 import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_SUBJECT, listChanges, parseSince, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
@@ -42,16 +45,31 @@ describe('parseSince (R5.2)', () => {
         ['1h', '2026-10-17T11:00:00.000Z'],
         ['3650d', '2016-10-19T12:00:00.000Z'],
         ['87600h', '2016-10-19T12:00:00.000Z'],
+        ['3651d', '2016-10-18T12:00:00.000Z'],
+        ['87601h', '2016-10-19T11:00:00.000Z'],
+        ['99999d', '1753-01-02T12:00:00.000Z'],
+        ['12345h', '2025-05-21T03:00:00.000Z'],
         ['2026-10-01', '2026-10-01T00:00:00.000Z'],
         ['2026-02-28', '2026-02-28T00:00:00.000Z'],
         ['2028-02-29', '2028-02-29T00:00:00.000Z'],
     ])('accepts %s', (value, iso) => {
         expect(parseSince(value, NOW)?.toISOString()).toBe(iso);
     });
-    test.each(['', '0h', '0d', '00d', '-1h', '+1h', '1.5h', '24', 'h', '24x', '24H', '24 h', ' 24h', '24h ', '24h\n', '3651d', '87601h', '99999d',
+    test.each(['', '0h', '0d', '00d', '-1h', '+1h', '1.5h', '24', 'h', '24x', '24H', '24 h', ' 24h', '24h ', '24h\n', '1234567890h', '1234567890d', '0000000000h', '999999999d',
         '2026-02-30', '2026-13-01', '2026-00-10', '2026-1-1', '2026-10-1', '2026-10-01T00:00:00Z', '2026-10-01 ', 'soon', 'now', '\u0661\u0662h', '1e3h', '0x10h',
-        'x'.repeat(100_000)])('rejects %j', (value) => {
-        expect(parseSince(value.slice(0, 200_000), NOW)).toBeNull();
+        ])('rejects %j', (value) => {
+        expect(parseSince(value, NOW)).toBeNull();
+    });
+    test('a count of 9 digits is valid while the resulting instant is a valid date', () => {
+        expect(parseSince('999999999h', NOW)).toBeInstanceOf(Date);
+        expect(parseSince('100000000d', NOW)).toBeInstanceOf(Date);
+        expect(parseSince('999999999d', NOW)).toBeNull();
+    });
+    test('rejects a very long text without scanning it more than once', () => {
+        const start = Date.now();
+        expect(parseSince(`${'9'.repeat(1_000_000)}h`, NOW)).toBeNull();
+        expect(parseSince('x'.repeat(1_000_000), NOW)).toBeNull();
+        expect(Date.now() - start).toBeLessThan(LINEAR_TIME_BOUND_MS);
     });
     test.each([undefined, null, 24, {}, [], true])('rejects the non-string %j without throwing', (value) => {
         expect(parseSince(bad(value), NOW)).toBeNull();
@@ -243,7 +261,10 @@ describe('listChanges: classification (R5.3)', () => {
         const entry = listed().changes[0];
         expect(entry.classification).toBe('invalid-record');
         expect(entry.records.map((r) => r.path).sort()).toEqual([recordPath('2026-10-16-broken'), recordPath('2026-10-16-good')]);
-        expect(entry.records.filter((r) => 'diagnostics' in r).map((r) => r.path)).toEqual([recordPath('2026-10-16-broken')]);
+        const diagnostics = Object.fromEntries(entry.records.map((r) => [r.path, (r as { diagnostics: unknown[] }).diagnostics.length]));
+        expect(diagnostics[recordPath('2026-10-16-good')]).toBe(0);
+        expect(diagnostics[recordPath('2026-10-16-broken')]).toBeGreaterThan(0);
+        expect(entry.records.every((r) => !('schema' in r))).toBe(true);
     });
     test('a commit adding two valid records is recorded and lists both', () => {
         adopt();
@@ -404,44 +425,58 @@ describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T00:00:00Z');
         expect(listed({ limit: 100_000 })).toMatchObject({ truncated: false });
     });
-    test('one record is read per record added, up to the per-entry cap; the rest is reported, never silently dropped', () => {
+    const files = (n: number, from = 0): Record<string, string> => Object.fromEntries(Array.from({ length: n }, (_, i) => {
+        const id = `2026-10-16-r${String(from + i).padStart(3, '0')}`;
+        return [recordPath(id), record(id)];
+    }));
+    test('a commit adding more records than the per-commit bound is not read: one too-many-records diagnostic stands for it', () => {
         adopt();
-        const files: Record<string, string> = {};
-        for (let i = 0; i < MAX_RECORDS_PER_ENTRY + 1; i++) {
-            const id = `2026-10-16-r${String(i).padStart(3, '0')}`;
-            files[recordPath(id)] = record(id);
-        }
-        repo.commit(files, 'feat: many', '2026-10-16T20:00:00Z');
+        repo.commit(files(MAX_RECORDS_PER_ENTRY + 1), 'feat: many', '2026-10-16T20:00:00Z');
+        const spy = spyOnGit();
         const entry = listed().changes[0];
+        spy.restore();
         expect(entry.classification).toBe('invalid-record');
-        expect(entry.records).toHaveLength(MAX_RECORDS_PER_ENTRY + 1);
-        expect(entry.records.slice(0, MAX_RECORDS_PER_ENTRY).every((r) => !('diagnostics' in r))).toBe(true);
-        expect(entry.records[MAX_RECORDS_PER_ENTRY]).toMatchObject({ path: 'docs/changes', diagnostics: [{ code: 'too-many-records' }] });
+        expect(entry.records).toEqual([{ path: 'docs/changes', diagnostics: [expect.objectContaining({ code: 'too-many-records' })] }]);
+        expect(spy.calls.filter((a) => a.includes('ls-tree') || a.includes('show'))).toEqual([]);
     });
-    test('exactly the per-entry cap is recorded', () => {
+    test('a commit adding exactly the per-commit bound of valid records is recorded and all are read', () => {
         adopt();
-        const files: Record<string, string> = {};
-        for (let i = 0; i < MAX_RECORDS_PER_ENTRY; i++) {
-            const id = `2026-10-16-r${String(i).padStart(3, '0')}`;
-            files[recordPath(id)] = record(id);
-        }
-        repo.commit(files, 'feat: many', '2026-10-16T20:00:00Z');
+        repo.commit(files(MAX_RECORDS_PER_ENTRY), 'feat: many', '2026-10-16T20:00:00Z');
         const entry = listed().changes[0];
         expect(entry.classification).toBe('recorded');
         expect(entry.records).toHaveLength(MAX_RECORDS_PER_ENTRY);
+        expect(entry.records.every((r) => 'schema' in r)).toBe(true);
     });
-    test('the per-run record budget fails closed on the entries that come after it is spent', () => {
+    test('the per-commit bound can be lowered, and the commit is then not read at all', () => {
+        adopt();
+        repo.commit(files(2), 'feat: two', '2026-10-16T20:00:00Z');
+        const entry = listed({ maxRecordsPerEntry: 1 }).changes[0];
+        expect(entry.classification).toBe('invalid-record');
+        expect(entry.records).toEqual([{ path: 'docs/changes', diagnostics: [expect.objectContaining({ code: 'too-many-records' })] }]);
+        expect(listed({ maxRecordsPerEntry: 2 }).changes[0].classification).toBe('recorded');
+    });
+    test('the per-run budget fails closed on the commits that come after it is spent', () => {
         adopt();
         for (let i = 1; i <= 3; i++) repo.commit({ [recordPath(`2026-10-16-r${i}`)]: record(`2026-10-16-r${i}`) }, `feat: r${i}`, `2026-10-16T0${i}:00:00Z`);
         const r = listed({ maxRecords: 2 });
         expect(byClass(r)).toEqual({ 'feat: r3': 'recorded', 'feat: r2': 'recorded', 'feat: r1': 'invalid-record' });
         expect(r.changes[2].records).toEqual([{ path: 'docs/changes', diagnostics: [expect.objectContaining({ code: 'too-many-records' })] }]);
     });
-    test('the per-entry cap can be lowered', () => {
+    test('the per-run budget is spent on records actually read: a commit refused for being too large does not use it up', () => {
         adopt();
-        repo.commit({ [recordPath('2026-10-16-a')]: record('2026-10-16-a'), [recordPath('2026-10-16-b')]: record('2026-10-16-b') }, 'feat: two', '2026-10-16T20:00:00Z');
-        expect(listed({ maxRecordsPerEntry: 1 }).changes[0].records).toHaveLength(2);
-        expect(listed({ maxRecordsPerEntry: 1 }).changes[0].classification).toBe('invalid-record');
+        repo.commit(files(1, 100), 'feat: small', '2026-10-16T01:00:00Z');
+        repo.commit(files(3, 200), 'feat: big', '2026-10-16T02:00:00Z');
+        repo.commit(files(2, 300), 'feat: medium', '2026-10-16T03:00:00Z');
+        const r = listed({ maxRecords: 3 });
+        expect(byClass(r)).toEqual({ 'feat: medium': 'recorded', 'feat: big': 'invalid-record', 'feat: small': 'recorded' });
+        expect(r.changes.find((c) => c.subject === 'feat: big')?.records).toHaveLength(1);
+    });
+    test('a budget of exactly the records of the run reads them all', () => {
+        adopt();
+        repo.commit(files(2, 100), 'feat: a', '2026-10-16T01:00:00Z');
+        repo.commit(files(1, 200), 'feat: b', '2026-10-16T02:00:00Z');
+        expect(Object.values(byClass(listed({ maxRecords: 3 })))).toEqual(['recorded', 'recorded']);
+        expect(Object.values(byClass(listed({ maxRecords: 2 })))).toEqual(['recorded', 'invalid-record']);
     });
 });
 
@@ -468,7 +503,7 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
         adopt();
         repo.commit({ [recordPath('2026-10-16-big')]: record('2026-10-16-big') + 'x'.repeat(MAX_RECORD_BYTES), [recordPath('2026-10-16-ok')]: record('2026-10-16-ok') }, 'feat: both', '2026-10-16T20:00:00Z');
         const entry = listed().changes[0];
-        expect(entry.records.map((r) => [r.path, 'diagnostics' in r])).toEqual([[recordPath('2026-10-16-big'), true], [recordPath('2026-10-16-ok'), false]]);
+        expect(entry.records.map((r) => [r.path, (r as { diagnostics: unknown[] }).diagnostics.length > 0])).toEqual([[recordPath('2026-10-16-big'), true], [recordPath('2026-10-16-ok'), false]]);
     });
     posixOnly('a record that is a symlink in history is invalid-record and its target is never read', () => {
         adopt();
@@ -653,6 +688,148 @@ describe('listChanges: derived fields (R5.5)', () => {
         repo.git('config', 'remote.origin.url', 'https://host.example/o/n\u001b[31m');
         const r = listed();
         expect(r.repo === null || !UNSAFE.test(r.repo)).toBe(true);
+    });
+});
+
+describe('listChanges: a committer date that cannot be one (R5.5)', () => {
+    test.each([
+        ['empty', ''],
+        ['negative', '-5 +0000'],
+        ['not a number', 'abc +0000'],
+        ['without a time zone', '1700000000'],
+        ['beyond what a Date holds', '9000000000000 +0000'],
+        ['far beyond', '99999999999999 +0000'],
+        ['the largest 64-bit number', '18446744073709551615 +0000'],
+    ])('a %s date gives merged_at null, the commit is listed normally and the run does not fail', (_label, date) => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: before', '2026-10-16T10:00:00Z');
+        const sha = commitLiterally(repo, date);
+        repo.commit({ 'b.ts': '1' }, 'fix: after', '2026-10-16T12:00:00Z');
+        const r = listed();
+        expect(subjects(r)).toEqual(['fix: after', 'fix: odd date', 'fix: before']);
+        expect(r.changes[1]).toMatchObject({ sha, merged_at: null, classification: 'missing', pr: null });
+        expect(r.changes[0].merged_at).toBe('2026-10-16T12:00:00.000Z');
+    });
+    test('such a commit is inside any window, even a narrow one, since it cannot be shown to be outside it', () => {
+        adopt();
+        commitLiterally(repo, 'abc +0000');
+        expect(subjects(listed({ since: new Date('2026-10-17T11:59:00Z') }))).toEqual(['fix: odd date']);
+    });
+    test('it counts against the limit like any other entry', () => {
+        adopt();
+        commitLiterally(repo, '');
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        expect(listed({ limit: 1 })).toMatchObject({ truncated: true, omitted: 1 });
+    });
+    test('a record added by such a commit is read like any other', () => {
+        adopt();
+        const files = { [recordPath(FIRST)]: record(FIRST) };
+        for (const [rel, content] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(repo.root, rel)), { recursive: true }); fs.writeFileSync(path.join(repo.root, rel), content); }
+        repo.git('add', '-A');
+        commitLiterally(repo, '', 'feat: odd and recorded');
+        expect(byClass(listed())).toEqual({ 'feat: odd and recorded': 'recorded' });
+    });
+    test('the largest instant a Date can hold is representable: a future-dated commit that is included', () => {
+        adopt();
+        commitLiterally(repo, '8640000000000 +0000');
+        expect(listed().changes[0].merged_at).toBe('+275760-09-13T00:00:00.000Z');
+    });
+    test('the epoch itself is a date: such a commit is older than the window', () => {
+        adopt();
+        commitLiterally(repo, '0 +0000');
+        expect(listed().changes).toEqual([]);
+    });
+});
+
+describe('listChanges: subjects and tags beyond their caps are clipped, never an error (R5.5, R5.7)', () => {
+    const bigMessage = (first: string): string => { const file = path.join(repo.home, 'message.txt'); fs.writeFileSync(file, `${first}\n`); return file; };
+    test('a 17 MB subject is clipped to the cap and the run succeeds', () => {
+        adopt();
+        repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '-F', bigMessage(`feat: ${'x'.repeat(17_000_000)}`));
+        repo.commit({ 'b.ts': '1' }, 'fix: next', '2026-10-16T11:00:00Z');
+        const r = listed();
+        expect(subjects(r)[0]).toBe('fix: next');
+        expect(r.changes[1].subject.length).toBe(MAX_SUBJECT);
+        expect(r.changes[1].subject.startsWith('feat: xxxx')).toBe(true);
+        expect(r.changes[1].subject.endsWith('…')).toBe(true);
+    }, 120_000);
+    test('the subject is asked from git bounded, so that git never prints all of it', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        const spy = spyOnGit();
+        listed();
+        spy.restore();
+        const call = spy.calls.find((a) => a.some((x) => x.startsWith('--format=%H%x1f%<(')));
+        expect(call).toBeDefined();
+        expect(call?.some((x) => /%<\(\d+,trunc\)%s/.test(x))).toBe(true);
+    });
+    test('a short subject is returned without the padding git adds', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        expect(subjects(listed())).toEqual(['fix: a']);
+    });
+    test('a subject made of zero-width characters, which git does not count, gets a placeholder and the others are intact', () => {
+        adopt();
+        repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '-F', bigMessage(`fix: ${'\u0301'.repeat(9_000_000)}`));
+        repo.commit({ 'b.ts': '1' }, 'fix: next', '2026-10-16T11:00:00Z');
+        const r = listed();
+        expect(subjects(r)).toEqual(['fix: next', '<subject unavailable>']);
+    }, 120_000);
+    posixOnly('a tag name longer than 255 characters is clipped, never git-failed', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        repo.git('tag', `${'a'.repeat(120)}/${'b'.repeat(200)}`);
+        const release = listed().changes[0].release;
+        expect(release?.length).toBe(255);
+        expect(release?.startsWith('aaaa')).toBe(true);
+        expect(release?.endsWith('…')).toBe(true);
+    });
+});
+
+describe('listChanges: shallow clones and the default base (R5.1)', () => {
+    function clone(depth?: number): string {
+        const dest = path.join(repo.home, `clone-${depth ?? 'full'}`);
+        repo.git('clone', '-q', ...(depth === undefined ? [] : ['--depth', String(depth)]), pathToFileURL(repo.root).href, dest);
+        return dest;
+    }
+    test('a shallow clone fails with shallow-history and the remedy', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        repo.commit({ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z');
+        const dest = clone(1);
+        expect(repo.git('-C', dest, 'rev-parse', '--is-shallow-repository')).toBe('true');
+        expect(listChanges(dest, { since: SINCE_48H })).toMatchObject({ ok: false, failure: { code: 'shallow-history', remedy: 'git fetch --unshallow' } });
+    });
+    test('a full clone of the same repository is listed', () => {
+        adopt();
+        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+        const dest = clone();
+        expect(repo.git('-C', dest, 'rev-parse', '--is-shallow-repository')).toBe('false');
+        expect(subjects(ok(listChanges(dest, { since: SINCE_48H })))).toEqual(['fix: a']);
+    });
+    test('a git that cannot say whether the repository is shallow fails closed', () => {
+        adopt();
+        const spy = spyOnGit((args) => { if (args.includes('--is-shallow-repository')) throw new Error('old git'); });
+        const outcome = list();
+        spy.restore();
+        expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
+    });
+    test('list and change new resolve the same default base: origin/HEAD first', () => {
+        adopt();
+        repo.git('update-ref', 'refs/remotes/origin/main', repo.git('rev-parse', 'HEAD'));
+        repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
+        repo.commit({ 'a.ts': '1' }, 'fix: ahead of origin', '2026-10-16T10:00:00Z');
+        const r = listed();
+        expect(r.base).toBe('refs/remotes/origin/HEAD');
+        expect(r.base).toBe(resolveBase(repo.root));
+        expect(r.changes).toEqual([]);
+        const range = resolveRange(repo.root, undefined);
+        expect(range.ok && range.mergeBase).toBe(repo.git('merge-base', 'refs/remotes/origin/HEAD', 'HEAD'));
+    });
+    test('without origin/HEAD both fall back to the local main', () => {
+        adopt();
+        expect(listed().base).toBe('main');
+        expect(resolveBase(repo.root)).toBe('main');
     });
 });
 

@@ -20,6 +20,12 @@ const MAX_TAG_NAME = 255;
 const MAX_IDENTITY = 300;
 /** The largest instant a Date can hold, in seconds. */
 const MAX_EPOCH_SECONDS = 8.64e12;
+/**
+ * Columns of the subject that git is asked to print (`%<(N,trunc)`): enough for MAX_SUBJECT code units even when every character
+ * is two columns wide, and it bounds the output however long a subject is. Shorter subjects come back padded with spaces.
+ */
+const SUBJECT_COLUMNS = 2100;
+const SUBJECT_UNAVAILABLE = '<subject unavailable>';
 
 export type Classification = 'recorded' | 'invalid-record' | 'exempt' | 'missing';
 
@@ -31,7 +37,8 @@ export interface ListedChange {
     /** Escaped and clipped to MAX_SUBJECT. */
     subject: string;
     classification: Classification;
-    merged_at: string;
+    /** The committer date as a UTC instant; null when it is empty, negative, not a number or not representable. */
+    merged_at: string | null;
     pr: number | null;
     release: string | null;
     records: ListedRecord[];
@@ -94,11 +101,11 @@ const cleanDiagnostics = (list: Diagnostic[]): Diagnostic[] => list.map((d) => (
 
 // ---- R5.2 ----
 
-const RELATIVE = /^(\d{1,5})([hd])$/;
+const RELATIVE = /^(\d{1,9})([hd])$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_SINCE_TEXT = 16;
 
-/** `<n>h`, `<n>d` (1..87600 hours, 1..3650 days) or a calendar date `YYYY-MM-DD`; null for anything else. Never throws. */
+/** `<n>h` or `<n>d` (n of 1 to 9 digits, at least 1, the result a valid date) or a calendar date `YYYY-MM-DD`; null for anything else. Never throws. */
 export function parseSince(value: unknown, now: unknown): Date | null {
     if (typeof value !== 'string' || value.length > MAX_SINCE_TEXT || !(now instanceof Date)) return null;
     const nowMs = now.getTime();
@@ -107,7 +114,7 @@ export function parseSince(value: unknown, now: unknown): Date | null {
     if (rel) {
         const n = Number(rel[1]);
         const hours = rel[2] === 'h';
-        if (n < 1 || n > (hours ? 87600 : 3650)) return null;
+        if (n < 1) return null;
         const since = new Date(nowMs - n * (hours ? 3600e3 : 86400e3));
         return Number.isNaN(since.getTime()) ? null : since;
     }
@@ -146,25 +153,40 @@ function addedByRoot(root: string, sha: string): string[] | null {
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 
-interface Detail { parents: string[]; subject: string }
+/** `text` without the spaces `%<(N,trunc)` pads a short subject with (a subject has no meaningful trailing blanks). */
+function trimPadding(text: string): string {
+    let end = text.length;
+    while (end > 0 && text[end - 1] === ' ') end--;
+    return text.slice(0, end);
+}
 
-/** Parents and subjects of the given commits in ONE call. Null when git fails or prints something unexpected. */
-function readDetails(root: string, shas: string[]): Map<string, Detail> | null {
-    const details = new Map<string, Detail>();
-    if (shas.length === 0) return details;
-    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-walk=unsorted', '-z', '--format=%H%x1f%P%x1f%s', '--end-of-options', ...shas, '--']);
+/** `<sha> SEP <subject, at most SUBJECT_COLUMNS columns>` for the given commits in one call; null when git fails. */
+function readSubjectBatch(root: string, shas: string[]): Map<string, string> | null {
+    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-walk=unsorted', '-z', `--format=%H%x1f%<(${SUBJECT_COLUMNS},trunc)%s`, '--end-of-options', ...shas, '--']);
     if (out === null) return null;
+    const subjects = new Map<string, string>();
     for (const entry of out.split('\0')) {
         if (entry === '') continue;
-        const a = entry.indexOf(SEP);
-        const b = a < 0 ? -1 : entry.indexOf(SEP, a + 1);
-        if (b < 0) return null;
-        const sha = entry.slice(0, a);
-        const parents = entry.slice(a + 1, b).split(' ').filter(Boolean);
-        if (!COMMIT_ID.test(sha) || !parents.every((p) => COMMIT_ID.test(p))) return null;
-        details.set(sha, { parents, subject: entry.slice(b + 1) });
+        const at = entry.indexOf(SEP);
+        const sha = at < 0 ? '' : entry.slice(0, at);
+        if (!COMMIT_ID.test(sha)) return null;
+        subjects.set(sha, trimPadding(entry.slice(at + 1)));
     }
-    return shas.every((s) => details.has(s)) ? details : null;
+    return subjects;
+}
+
+/**
+ * The subjects of the given commits, bounded by git itself. When the batch fails (a subject that still outgrows git's output
+ * bound, for instance one made of zero-width characters, which `trunc` does not count) each commit is asked for on its own, and one
+ * that still fails gets a placeholder: a subject never makes the run fail.
+ */
+function readSubjects(root: string, shas: string[]): Map<string, string> {
+    if (shas.length === 0) return new Map();
+    const batch = readSubjectBatch(root, shas);
+    if (batch !== null && shas.every((s) => batch.has(s))) return batch;
+    const subjects = new Map<string, string>();
+    for (const sha of shas) subjects.set(sha, readSubjectBatch(root, [sha])?.get(sha) ?? SUBJECT_UNAVAILABLE);
+    return subjects;
 }
 
 /** The tag with the earliest creator date that contains `sha` (ties by name ascending); undefined when git fails. */
@@ -175,7 +197,8 @@ function earliestTag(root: string, sha: string): string | null | undefined {
     const ref = out.split('\n')[0];
     if (ref === '') return null;
     const name = ref.slice('refs/tags/'.length);
-    return ref.startsWith('refs/tags/') && name !== '' && name.length <= MAX_TAG_NAME ? cleanLine(name, MAX_TAG_NAME) : undefined;
+    // A name longer than the cap is clipped, never an error.
+    return ref.startsWith('refs/tags/') && name !== '' ? cleanLine(name, MAX_TAG_NAME) : undefined;
 }
 
 interface TreeEntry { mode: string; type: string; oid: string; size: number }
@@ -212,41 +235,46 @@ function readOne(root: string, rel: string, info: TreeEntry | undefined): Listed
 
 interface Budget { entry: number; run: number }
 
-/** The records a commit added (at most the per-entry and the remaining per-run budget), and a synthetic record for what was not read. */
+/**
+ * The records a commit added. A commit with more records than the per-commit bound, or than what is left of the per-run budget, is
+ * not read at all: one `too-many-records` diagnostic stands for it. The budget is spent only on records actually read.
+ */
 function readRecords(root: string, sha: string, names: string[], budget: Budget): ListedRecord[] {
-    const allowed = Math.min(names.length, budget.entry, budget.run);
-    budget.run -= allowed;
-    const records: ListedRecord[] = [];
-    if (allowed > 0) {
-        const read = names.slice(0, allowed);
-        const tree = readTreeEntries(root, sha, read);
-        for (const rel of read) records.push(tree === null ? invalid(rel, 'git-failed', 'git could not read the record') : readOne(root, rel, tree.get(rel)));
+    if (names.length > budget.entry || names.length > budget.run) {
+        return [invalid(RECORD_DIR, 'too-many-records', `${names.length} records were added; more than the read limit allows, none was read`)];
     }
-    if (allowed < names.length) records.push(invalid(RECORD_DIR, 'too-many-records', `${names.length} records were added; only the first ${allowed} were read`));
-    return records;
+    budget.run -= names.length;
+    const tree = readTreeEntries(root, sha, names);
+    return names.map((rel) => (tree === null ? invalid(rel, 'git-failed', 'git could not read the record') : readOne(root, rel, tree.get(rel))));
 }
 
 const isInvalid = (r: ListedRecord): boolean => 'diagnostics' in r;
 
-interface Entry { sha: string; ms: number }
+interface Entry {
+    sha: string;
+    /** The committer date in ms; null when it cannot be one (such a commit is always in the window). */
+    ms: number | null;
+    parents: string[];
+}
 
-/** First-parent commits, newest first, with the committer date in ms. Null when git prints something unexpected. */
+/** First-parent commits, newest first, with committer date and parents. Null when git prints something unexpected. */
 function parseScan(out: string): Entry[] | null {
     const entries: Entry[] = [];
     for (const row of out.split('\0')) {
         if (row === '') continue;
-        const at = row.indexOf(SEP);
-        const sha = at < 0 ? '' : row.slice(0, at);
-        const seconds = at < 0 ? '' : row.slice(at + 1);
-        if (!COMMIT_ID.test(sha) || seconds.length === 0 || seconds.length > 14 || !/^\d+$/.test(seconds)) return null;
-        // A date no Date can hold cannot be placed in any window: the commit is left out.
-        if (Number(seconds) <= MAX_EPOCH_SECONDS) entries.push({ sha, ms: Number(seconds) * 1000 });
+        const [sha, seconds, parentText, ...rest] = row.split(SEP);
+        if (rest.length > 0 || sha === undefined || seconds === undefined || parentText === undefined || !COMMIT_ID.test(sha)) return null;
+        const parents = parentText.split(' ').filter(Boolean);
+        if (!parents.every((p) => COMMIT_ID.test(p))) return null;
+        // An empty, negative, non-numeric or out-of-range committer date is a date that cannot be shown to be outside any window.
+        const valid = seconds.length > 0 && seconds.length <= 13 && /^\d+$/.test(seconds) && Number(seconds) <= MAX_EPOCH_SECONDS;
+        entries.push({ sha, ms: valid ? Number(seconds) * 1000 : null, parents });
     }
     return entries;
 }
 
-function classifyEntry(root: string, entry: Entry, detail: Detail, budget: Budget): ListedChange | null {
-    const [first] = detail.parents;
+function classifyEntry(root: string, entry: Entry, subject: string, budget: Budget): ListedChange | null {
+    const [first] = entry.parents;
     const added = first === undefined ? addedByRoot(root, entry.sha) : addedFilesUnder(root, first, entry.sha, RECORD_DIR);
     const names = added === null ? null : added.filter(isRecordPath);
     let records: ListedRecord[];
@@ -257,20 +285,22 @@ function classifyEntry(root: string, entry: Entry, detail: Detail, budget: Budge
     } else if (names.length > 0) {
         records = readRecords(root, entry.sha, names, budget);
         classification = records.some(isInvalid) ? 'invalid-record' : 'recorded';
+        // An invalid-record commit lists EVERY added record: the valid ones with no diagnostics.
+        if (classification === 'invalid-record') records = records.map((r) => (isInvalid(r) ? r : { path: r.path, diagnostics: [] }));
     } else {
         records = [];
         // The commits of a change: the commit itself, plus for a merge commit everything it brought in.
-        const revArgs = detail.parents.length > 1 ? [`${first}..${entry.sha}`] : ['-1', entry.sha];
+        const revArgs = entry.parents.length > 1 ? [`${first}..${entry.sha}`] : ['-1', entry.sha];
         classification = hasOptOut(root, revArgs) ? 'exempt' : 'missing';
     }
     const release = earliestTag(root, entry.sha);
     if (release === undefined) return null;
     return {
         sha: entry.sha,
-        subject: cleanLine(detail.subject, MAX_SUBJECT),
+        subject: cleanLine(subject, MAX_SUBJECT),
         classification,
-        merged_at: new Date(entry.ms).toISOString(),
-        pr: parsePr(detail.subject),
+        merged_at: entry.ms === null ? null : new Date(entry.ms).toISOString(),
+        pr: parsePr(subject),
         release,
         records,
     };
@@ -298,6 +328,11 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     const pinned = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${base}^{commit}`])?.trim();
     if (pinned === undefined || !COMMIT_ID.test(pinned)) return fail('git-failed', `git could not read "${esc(base)}"`);
 
+    // R5.1: at a shallow boundary a commit looks like a root commit, so a shallow history cannot be classified.
+    const shallow = runGit(root, ['rev-parse', '--is-shallow-repository'])?.trim();
+    if (shallow === 'true') return fail('shallow-history', 'this repository is a shallow clone; its oldest commits cannot be told from root commits', 'git fetch --unshallow');
+    if (shallow !== 'false') return fail('git-failed', 'git could not tell whether the repository is shallow');
+
     // R5.4: the first commit, in first-parent order, that added a file under docs/changes (the last one the log prints).
     const adopting = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', '--diff-merges=first-parent', '--root', '--no-renames', '--diff-filter=A', '-s', '-z', '--format=%H', '--end-of-options', pinned, '--', RECORD_PATHSPEC]);
     if (adopting === null) return fail('git-failed', 'git could not read the history');
@@ -308,21 +343,20 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     result.adopted = true;
 
     // Everything from the base down to (and including) the adopting commit; the window is applied here, commit by commit.
-    const scanned = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', '-z', '--format=%H%x1f%ct', '--end-of-options', pinned, `^${adoption}^@`, '--']);
+    const scanned = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', '-z', '--format=%H%x1f%ct%x1f%P', '--end-of-options', pinned, `^${adoption}^@`, '--']);
     const entries = scanned === null ? null : parseScan(scanned);
     if (entries === null) return fail('git-failed', 'git could not read the history');
-    const inWindow = entries.filter((e) => e.ms >= since.getTime());
+    const inWindow = entries.filter((e) => e.ms === null || e.ms >= since.getTime());
     const cap = Math.min((limit as number | undefined) ?? DEFAULT_LIMIT, DEFAULT_LIMIT);
     const selected = inWindow.slice(0, cap);
     result.truncated = inWindow.length > selected.length;
     result.omitted = inWindow.length - selected.length;
 
-    const details = readDetails(root, selected.map((e) => e.sha));
-    if (details === null) return fail('git-failed', 'git could not read the commits');
+    const subjects = readSubjects(root, selected.map((e) => e.sha));
     const run = (maxRecords as number | undefined) ?? MAX_RECORDS_PER_RUN;
     const budget: Budget = { entry: (maxRecordsPerEntry as number | undefined) ?? MAX_RECORDS_PER_ENTRY, run };
     for (const entry of selected) {
-        const change = classifyEntry(root, entry, details.get(entry.sha) as Detail, budget);
+        const change = classifyEntry(root, entry, subjects.get(entry.sha) as string, budget);
         if (change === null) return fail('git-failed', `git could not tell which tags contain ${entry.sha.slice(0, 12)}`);
         result.changes.push(change);
     }
