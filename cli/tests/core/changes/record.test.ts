@@ -117,6 +117,19 @@ describe('validateRecordShape', () => {
             expect(codes(plan('docs/link/secret.md'))).toContain('field-invalid');
         } finally { fs.rmSync(base, { recursive: true, force: true }); }
     });
+    test('R1.4 links.plan accepts in-repo files whose names start with two dots', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-'));
+        try {
+            fs.mkdirSync(path.join(root, '..d'));
+            fs.writeFileSync(path.join(root, '..notes.md'), 'x');
+            fs.writeFileSync(path.join(root, '..d', 'p.md'), 'x');
+            for (const plan of ['..notes.md', '..d/p.md']) {
+                const r = validateRecordShape(NAME, doc(fm({ links: `links:\n  plan: ${plan}` })), { root });
+                expect(r.diagnostics).toEqual([]);
+            }
+            expect(codes(validateRecordShape(NAME, doc(fm({ links: 'links:\n  plan: ../outside.md' })), { root }))).toContain('field-invalid');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
     test('R1.5 enforces the verification block', () => {
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: 'verification:\n  commit: abc\n  overall: pass\n  sensors: {}\n  receipt_digest: x' }))))).toContain('field-invalid');
         expect(codes(validateRecordShape(NAME, doc(fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n    lint: green\n  receipt_digest: ${DIGEST}` }))))).toContain('field-invalid');

@@ -38,7 +38,7 @@ function isRegularFileInside(root: string, rel: string): boolean {
     try {
         if (!fs.lstatSync(abs).isFile()) return false;
         const relToRoot = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-        return relToRoot !== '' && !relToRoot.startsWith('..') && !path.isAbsolute(relToRoot);
+        return relToRoot !== '' && relToRoot !== '..' && !relToRoot.startsWith('..' + path.sep) && !path.isAbsolute(relToRoot);
     } catch { return false; }
 }
 const isCanonicalIso = (v: unknown): boolean => typeof v === 'string' && !Number.isNaN(Date.parse(v)) && new Date(v).toISOString() === v;
