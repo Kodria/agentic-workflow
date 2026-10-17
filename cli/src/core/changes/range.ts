@@ -16,20 +16,31 @@ export const HEAD_MOVED: Failure = { code: 'git-failed', message: 'HEAD moved du
 const KINDS: readonly string[] = ['ok', 'absent', 'unsafe', 'error'];
 
 export type Range = { ok: true; head: string; mergeBase: string } | { ok: false; failure: Failure };
+export type BaseRef = { ok: true; base: string } | { ok: false; failure: Failure };
+
+const failure = (code: string, message: string, remedy?: string): { ok: false; failure: Failure } => ({ ok: false, failure: remedy === undefined ? { code, message } : { code, message, remedy } });
+
+/**
+ * R3.1/R3.2/R3.5: the base ref: `explicitBase` (checked with `isSafeRef` before git sees it: `invalid-input`), else origin/HEAD,
+ * main, master; `base-unresolved` when none resolves. The one place that decides it, for `change new`, `change validate` and `changes list`.
+ */
+export function resolveBaseRef(root: string, explicitBase: string | undefined): BaseRef {
+    if (explicitBase !== undefined && !isSafeRef(explicitBase)) return failure('invalid-input', `--base "${esc(explicitBase)}" is not a safe git ref`);
+    const base = resolveBase(root, explicitBase);
+    return base === null ? failure('base-unresolved', 'could not resolve a base branch', REMEDY_BASE) : { ok: true, base };
+}
 
 /**
  * R3.1/R3.2/R3.5: pins HEAD, then resolves the base (explicit `--base`, else origin/HEAD, main, master) and its merge base with HEAD.
  * An explicit base is checked with `isSafeRef` before git sees it.
  */
 export function resolveRange(root: string, explicitBase: string | undefined): Range {
-    const fail = (code: string, message: string, remedy?: string): Range => ({ ok: false, failure: remedy === undefined ? { code, message } : { code, message, remedy } });
     const head = headSha(root);
-    if (head === null) return fail('git-failed', 'git could not read HEAD');
-    if (explicitBase !== undefined && !isSafeRef(explicitBase)) return fail('invalid-input', `--base "${esc(explicitBase)}" is not a safe git ref`);
-    const base = resolveBase(root, explicitBase);
-    if (base === null) return fail('base-unresolved', 'could not resolve a base branch', REMEDY_BASE);
-    const mergeBaseSha = mergeBase(root, base);
-    if (mergeBaseSha === null) return fail('base-unresolved', `no merge base between "${esc(base)}" and HEAD`, REMEDY_BASE);
+    if (head === null) return failure('git-failed', 'git could not read HEAD');
+    const resolved = resolveBaseRef(root, explicitBase);
+    if (!resolved.ok) return resolved;
+    const mergeBaseSha = mergeBase(root, resolved.base);
+    if (mergeBaseSha === null) return failure('base-unresolved', `no merge base between "${esc(resolved.base)}" and HEAD`, REMEDY_BASE);
     return { ok: true, head, mergeBase: mergeBaseSha };
 }
 

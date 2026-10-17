@@ -117,10 +117,16 @@ export function repoRoot(cwd: string): string | null {
     return out ? path.resolve(out) : null;
 }
 
+/** Full id of the commit a safe ref names; null for an unsafe ref, no such commit or a git failure. Only `rev-parse`. */
+export function commitSha(root: string, ref: string): string | null {
+    if (!isSafeRef(ref)) return null;
+    const out = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`])?.trim();
+    return out !== undefined && COMMIT_ID.test(out) ? out : null;
+}
+
 /** Full id of HEAD; null when there is no commit or git fails. Only `rev-parse`: never a `status`. */
 export function headSha(root: string): string | null {
-    const out = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', 'HEAD^{commit}'])?.trim();
-    return out !== undefined && COMMIT_ID.test(out) ? out : null;
+    return commitSha(root, 'HEAD');
 }
 
 /** Removes any run of `/` from the start and the end of `s` (index scan: linear, unlike /\/+$/). */

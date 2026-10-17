@@ -1,8 +1,9 @@
 import path from 'path';
-import { COMMIT_ID, LOG_SAFETY_ARGS, addedFilesUnder, isSafeRef, repoIdentity, resolveBase, runGit } from './git';
+import { COMMIT_ID, LOG_SAFETY_ARGS, addedFilesUnder, commitSha, repoIdentity, runGit } from './git';
 import { RECORD_FILE_RE } from './parse';
-import { REMEDY_BASE, type Failure } from './range';
-import { NON_STRING, cleanText, esc, isObj, sliceNoSplit } from './text-safety';
+import { resolveBaseRef, type Failure } from './range';
+import { esc, isObj } from './text-safety';
+import { cleanLine, escapeBidi, parsePr } from './list-parse';
 import { hasOptOut } from './trailers';
 import { MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type Diagnostic } from './types';
 import { validateRecordShape } from './validate-shape';
@@ -76,23 +77,6 @@ const fail = (code: string, message: string, remedy?: string): ListOutcome => ({
 
 // ---- Text ----
 
-const BIDI = /[؜‎‏‪-‮⁦-⁩]/g;
-const hex4 = (c: string): string => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
-/** Bidirectional controls would reorder what a terminal shows around them; they are written as \uXXXX. */
-const escapeBidi = (text: string): string => text.replace(BIDI, hex4);
-
-/**
- * Untrusted text as one clean line of at most `max` UTF-16 units: controls, line breaks and bidi marks escaped, an ellipsis
- * where it was cut, a surrogate pair never split. Never throws.
- */
-export function cleanLine(text: unknown, max: number): string {
-    if (typeof text !== 'string') return NON_STRING;
-    const raw = sliceNoSplit(text, max);
-    let out = escapeBidi(cleanText(raw));
-    if (raw.length < text.length || out.length > max) out = `${out.length > max - 1 ? sliceNoSplit(out, max - 1) : out}…`;
-    return out;
-}
-
 /** A value read from a valid record with bidi marks escaped in every string and key (the shape was validated, so it is shallow). */
 function cleanValue(value: unknown, depth = 0): unknown {
     if (typeof value === 'string') return escapeBidi(value);
@@ -105,48 +89,11 @@ function cleanValue(value: unknown, depth = 0): unknown {
 
 const cleanDiagnostics = (list: Diagnostic[]): Diagnostic[] => list.map((d) => ({ ...d, message: escapeBidi(d.message), ...(d.field === undefined ? {} : { field: escapeBidi(d.field) }) }));
 
-// ---- R5.2 ----
-
-const RELATIVE = /^(\d{1,9})([hd])$/;
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_SINCE_TEXT = 16;
-
-/** `<n>h` or `<n>d` (n of 1 to 9 digits, at least 1, the result a valid date) or a calendar date `YYYY-MM-DD`; null for anything else. Never throws. */
-export function parseSince(value: unknown, now: unknown): Date | null {
-    if (typeof value !== 'string' || value.length > MAX_SINCE_TEXT || !(now instanceof Date)) return null;
-    const nowMs = now.getTime();
-    if (!Number.isFinite(nowMs)) return null;
-    const rel = RELATIVE.exec(value);
-    if (rel) {
-        const n = Number(rel[1]);
-        const hours = rel[2] === 'h';
-        if (n < 1) return null;
-        const since = new Date(nowMs - n * (hours ? 3600e3 : 86400e3));
-        return Number.isNaN(since.getTime()) ? null : since;
-    }
-    if (ISO_DATE.test(value)) {
-        const since = new Date(`${value}T00:00:00Z`);
-        return !Number.isNaN(since.getTime()) && since.toISOString().slice(0, 10) === value ? since : null;
-    }
-    return null;
-}
-
-/** The number of a trailing `(#<n>)`; null when there is none or n is not a safe integer. Index scans only. */
-export function parsePr(subject: string): number | null {
-    if (typeof subject !== 'string') return null;
-    let end = subject.length;
-    while (end > 0 && (subject[end - 1] === ' ' || subject[end - 1] === '\t' || subject[end - 1] === '\r' || subject[end - 1] === '\n')) end--;
-    if (end < 4 || subject[end - 1] !== ')') return null;
-    const open = subject.lastIndexOf('(#', end - 1);
-    if (open < 0) return null;
-    const digits = subject.slice(open + 2, end - 1);
-    if (digits.length === 0 || digits.length > 16) return null;
-    for (let i = 0; i < digits.length; i++) if (digits[i] < '0' || digits[i] > '9') return null;
-    const n = Number(digits);
-    return Number.isSafeInteger(n) ? n : null;
-}
-
 // ---- Git reading ----
+
+/** What a git read gave: a value (null for "none"), or that git could not tell. A falsy check can never mistake the second for the first. */
+type Read<T> = { ok: true; value: T } | { ok: false };
+const UNREADABLE: { ok: false } = { ok: false };
 
 const isRecordPath = (rel: string): boolean => path.posix.dirname(rel) === RECORD_DIR && RECORD_FILE_RE.test(path.posix.basename(rel));
 const RECORD_PATHSPEC = `:(top,literal)${RECORD_DIR}`;
@@ -183,28 +130,39 @@ function readFormatted(root: string, shas: string[], field: string): Map<string,
 
 /**
  * A bounded placeholder of every commit, asked from git in one call. When the batch fails (a value that still outgrows git's
- * output bound, for instance one made of zero-width characters, which the column bound does not count) each commit is asked for
- * on its own, and one that still fails gets `fallback`: a subject never makes the run fail.
+ * output bound, for instance one made of zero-width characters, which the column bound does not count) it is halved until the
+ * commit at fault is alone; that one gets `fallback`: a subject never makes the run fail.
  */
 function readBounded(root: string, shas: string[], field: string, fallback: string): Map<string, string> {
-    if (shas.length === 0) return new Map();
-    const batch = readFormatted(root, shas, field);
-    if (batch !== null && shas.every((s) => batch.has(s))) return batch;
     const values = new Map<string, string>();
-    for (const sha of shas) values.set(sha, readFormatted(root, [sha], field)?.get(sha) ?? fallback);
+    // A failing batch is halved until the commit that breaks it is alone: one bad commit among N costs about 2 log2(N) calls.
+    const fill = (part: string[]): void => {
+        if (part.length === 0) return;
+        const batch = readFormatted(root, part, field);
+        if (batch !== null && part.every((s) => batch.has(s))) {
+            for (const sha of part) values.set(sha, batch.get(sha) as string);
+        } else if (part.length === 1) {
+            values.set(part[0], fallback);
+        } else {
+            const middle = part.length >> 1;
+            fill(part.slice(0, middle));
+            fill(part.slice(middle));
+        }
+    };
+    fill(shas);
     return values;
 }
 
 /** The tag with the earliest creator date that contains `sha` (ties by name ascending); undefined when git fails. */
-function earliestTag(root: string, sha: string): string | null | undefined {
+function earliestTag(root: string, sha: string): Read<string | null> {
     // For-each-ref sorts by the LAST --sort first: creation date, then name.
     const out = runGit(root, ['for-each-ref', '--contains', sha, '--sort=refname', '--sort=creatordate', '--count=1', '--format=%(refname)', 'refs/tags/']);
-    if (out === null) return undefined;
+    if (out === null) return UNREADABLE;
     const ref = out.split('\n')[0];
-    if (ref === '') return null;
+    if (ref === '') return { ok: true, value: null };
     const name = ref.slice('refs/tags/'.length);
     // A name longer than the cap is clipped, never an error.
-    return ref.startsWith('refs/tags/') && name !== '' ? cleanLine(name, MAX_TAG_NAME) : undefined;
+    return ref.startsWith('refs/tags/') && name !== '' ? { ok: true, value: cleanLine(name, MAX_TAG_NAME) } : UNREADABLE;
 }
 
 interface TreeEntry { mode: string; type: string; oid: string; size: number }
@@ -284,19 +242,19 @@ function parseScan(out: string): Entry[] | null {
  * read in pages of `pageSize` commits that touch it; each page continues from the first parent of the previous page's last
  * commit. null when there is none, undefined when git fails.
  */
-function findAdoption(root: string, pinned: string, pageSize: number): string | null | undefined {
+function findAdoption(root: string, pinned: string, pageSize: number): Read<string | null> {
     let start = pinned;
     let oldest: string | null = null;
     for (;;) {
         const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--first-parent', `--max-count=${pageSize}`, '-s', '-z', '--format=%H%x1f%P', '--end-of-options', start, '--', RECORD_PATHSPEC]);
-        if (out === null) return undefined;
+        if (out === null) return UNREADABLE;
         const rows = out.split('\0').filter(Boolean).map((row) => row.split(SEP));
-        if (!rows.every(([sha, parents, ...rest]) => rest.length === 0 && COMMIT_ID.test(sha) && parents !== undefined)) return undefined;
-        if (rows.length === 0) return oldest;
+        if (!rows.every(([sha, parents, ...rest]) => rest.length === 0 && COMMIT_ID.test(sha) && parents !== undefined)) return UNREADABLE;
+        if (rows.length === 0) return { ok: true, value: oldest };
         const [last, parents] = rows[rows.length - 1];
         oldest = last;
         const next = parents.split(' ').filter(Boolean)[0];
-        if (rows.length < pageSize || next === undefined || !COMMIT_ID.test(next)) return oldest;
+        if (rows.length < pageSize || next === undefined || !COMMIT_ID.test(next)) return { ok: true, value: oldest };
         start = next;
     }
 }
@@ -349,14 +307,14 @@ function classifyEntry(root: string, entry: Entry, subject: string, tail: string
         classification = hasOptOut(root, revArgs) ? 'exempt' : 'missing';
     }
     const release = earliestTag(root, entry.sha);
-    if (release === undefined) return null;
+    if (!release.ok) return null;
     return {
         sha: entry.sha,
         subject: cleanLine(subject, MAX_SUBJECT),
         classification,
         merged_at: entry.ms === null ? null : new Date(entry.ms).toISOString(),
         pr: parsePr(tail),
-        release,
+        release: release.value,
         records,
     };
 }
@@ -376,12 +334,13 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
     const { base: explicit, since, limit, maxRecordsPerEntry, maxRecords, pageSize } = opts;
     if (!(since instanceof Date) || Number.isNaN(since.getTime())) return fail('invalid-input', 'the window start must be a valid date');
     if (!optionalCount(limit) || !optionalCount(maxRecordsPerEntry) || !optionalCount(maxRecords) || !optionalCount(pageSize)) return fail('invalid-input', 'limits must be positive integers');
-    if (explicit !== undefined && !isSafeRef(explicit)) return fail('invalid-input', `--base "${esc(explicit as string)}" is not a safe git ref`);
 
-    const base = resolveBase(root, explicit as string | undefined);
-    if (base === null) return fail('base-unresolved', 'could not resolve a base branch', REMEDY_BASE);
-    const pinned = runGit(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${base}^{commit}`])?.trim();
-    if (pinned === undefined || !COMMIT_ID.test(pinned)) return fail('git-failed', `git could not read "${esc(base)}"`);
+    // R3.1/R3.2/R3.5, as `change new`; then the base is pinned to one commit id: history cannot move under the run.
+    const resolved = resolveBaseRef(root, explicit as string | undefined);
+    if (!resolved.ok) return { ok: false, failure: resolved.failure };
+    const base = resolved.base;
+    const pinned = commitSha(root, base);
+    if (pinned === null) return fail('git-failed', `git could not read "${esc(base)}"`);
 
     // R5.1: at a shallow boundary a commit looks like a root commit, so a shallow history cannot be classified.
     const shallow = runGit(root, ['rev-parse', '--is-shallow-repository'])?.trim();
@@ -390,8 +349,9 @@ function listUnsafe(root: unknown, opts: unknown): ListOutcome {
 
     const page = Math.min((pageSize as number | undefined) ?? PAGE_SIZE, PAGE_SIZE);
     // R5.4: the first commit, in first-parent order, that touched docs/changes.
-    const adoption = findAdoption(root, pinned, page);
-    if (adoption === undefined) return fail('git-failed', 'git could not read the history');
+    const adopting = findAdoption(root, pinned, page);
+    if (!adopting.ok) return fail('git-failed', 'git could not read the history');
+    const adoption = adopting.value;
     const result: ListResult = { repo: safeRepo(root), base: cleanLine(base, MAX_TAG_NAME), since: since.toISOString(), adopted: false, truncated: false, omitted: 0, changes: [] };
     if (adoption === null) return { ok: true, result };
     result.adopted = true;

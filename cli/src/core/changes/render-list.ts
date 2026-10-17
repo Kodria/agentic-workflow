@@ -1,4 +1,5 @@
-import { cleanLine, type ListedChange, type ListedRecord, type ListResult } from './list';
+import { cleanLine } from './list-parse';
+import type { ListedChange, ListedRecord, ListResult } from './list';
 import { clipMessage, isObj, sliceNoSplit } from './text-safety';
 
 // The three renderings of `awm changes list` (R5.6). The result already holds clean values (list.ts escapes what git printed);

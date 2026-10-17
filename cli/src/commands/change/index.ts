@@ -1,18 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import { Command } from 'commander';
-import { emit, type CommandResult } from '../../core/command-result';
+import type { CommandResult } from '../../core/command-result';
+import { fail, failed, inCwd as inCwdShared, line } from '../../core/changes/command';
 import { readJournal } from '../../core/journal/store';
 import { RECORD_FILE_RE, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
 import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot, runGit } from '../../core/changes/git';
-import { headMovedFailure, recordDirProblem, resolveRange, type Failure } from '../../core/changes/range';
+import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
 import { hasOptOut } from '../../core/changes/trailers';
 import { readReceipt } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
 import { isRegularFileInside } from '../../core/changes/fs-safe';
 import { createExclusive, createRecordDir, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
-import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSingleLine, isWellFormed, sliceNoSplit } from '../../core/changes/text-safety';
+import { esc, isCanonicalIso, isHttpsUrl, isObj, isSingleLine, isWellFormed, sliceNoSplit } from '../../core/changes/text-safety';
 import { DERIVED_KEYS, MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type DerivedFields, type Diagnostic, type Verification } from '../../core/changes/types';
 import { validateRecordShape } from '../../core/changes/validate-shape';
 
@@ -23,21 +24,6 @@ const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
 const MAX_PROVENANCE_VALUE = 200;
 const MAX_ISSUE_URL = 2048;
 const CREATION_ONLY_FLAGS = ['plan', 'issue', 'model', 'session'] as const;
-
-/** One line of output: control characters escaped, at most 300 UTF-16 units (an ellipsis replaces the cut), never splitting a surrogate pair. */
-const line = (text: string): string => clipMessage(cleanText(text));
-
-/**
- * Exit 2 with `code: message` as ONE clipped line (the code counts), and an optional static remedy as a second clipped line.
- * Untrusted text is escaped by the caller with esc().
- */
-const fail = (code: string, message: string, remedy?: string): CommandResult => ({
-    code: 2, stdout: '',
-    stderr: `${line(`${code}: ${message}`)}\n${remedy ? `${line(`  remedy: ${remedy}`)}\n` : ''}`,
-});
-
-/** A shared-helper Failure as the stderr form of this module. */
-const failed = (f: Failure): CommandResult => fail(f.code, f.message, f.remedy);
 
 // ---- Flags (R3.11b, R3.12) ----
 
@@ -444,9 +430,7 @@ export function runChangeValidate(cwd: string, target: string | undefined, opts:
 
 /** The action wrapper: the working directory may be gone, and nothing may throw out of the action. */
 function inCwd(command: (cwd: string) => CommandResult, json = false): void {
-    let cwd: string;
-    try { cwd = process.cwd(); } catch { emit(failure(json, 'not-a-git-repo', 'the working directory is not accessible')); return; }
-    emit(command(cwd));
+    inCwdShared(command, () => failure(json, 'not-a-git-repo', 'the working directory is not accessible'));
 }
 
 export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): void {

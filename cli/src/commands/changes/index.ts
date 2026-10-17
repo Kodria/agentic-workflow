@@ -1,31 +1,18 @@
 import path from 'path';
 import { Command } from 'commander';
-import { emit, type CommandResult } from '../../core/command-result';
+import type { CommandResult } from '../../core/command-result';
+import { fail, failed, inCwd } from '../../core/changes/command';
 import { repoRoot } from '../../core/changes/git';
-import { listChanges, parseSince } from '../../core/changes/list';
+import { listChanges } from '../../core/changes/list';
+import { parseSince } from '../../core/changes/list-parse';
 import { renderJson, renderText, renderVoice } from '../../core/changes/render-list';
-import type { Failure } from '../../core/changes/range';
-import { clipMessage, cleanText, esc, isObj } from '../../core/changes/text-safety';
+import { esc, isObj } from '../../core/changes/text-safety';
 
 export interface ChangesDeps { now?: () => Date; limit?: number }
 export interface ListOpts { since?: string; base?: string; format?: string }
 
 const FORMATS: readonly string[] = ['text', 'json', 'voice'];
 const DEFAULT_SINCE = '24h';
-
-/** One line of output: control characters escaped, at most 300 UTF-16 units. */
-const line = (text: string): string => clipMessage(cleanText(text));
-
-/**
- * Exit 2 with `code: message` as ONE clipped line and an optional static remedy as a second one, on stderr, whatever the format
- * (like `change new`: with --format json an operational failure prints nothing on stdout). Untrusted text is escaped by the caller.
- */
-const fail = (code: string, message: string, remedy?: string): CommandResult => ({
-    code: 2, stdout: '',
-    stderr: `${line(`${code}: ${message}`)}\n${remedy ? `${line(`  remedy: ${remedy}`)}\n` : ''}`,
-});
-
-const failed = (f: Failure): CommandResult => fail(f.code, f.message, f.remedy);
 
 /** A static description of the first flag of the wrong type, or null. */
 function flagProblem(opts: Record<string, unknown>): string | null {
@@ -79,13 +66,6 @@ export function runChangesList(cwd: string, opts: ListOpts, deps: ChangesDeps = 
     }
 }
 
-/** The action wrapper: the working directory may be gone, and nothing may throw out of the action. */
-function inCwd(command: (cwd: string) => CommandResult): void {
-    let cwd: string;
-    try { cwd = process.cwd(); } catch { emit(fail('not-a-git-repo', 'the working directory is not accessible')); return; }
-    emit(command(cwd));
-}
-
 export function registerChangesCommand(program: Command, deps: ChangesDeps = {}): void {
     const changes = program.command('changes').description('query the Change Records merged into the base branch');
     changes
@@ -94,5 +74,5 @@ export function registerChangesCommand(program: Command, deps: ChangesDeps = {})
         .option('--since <window>', '<n>h, <n>d or YYYY-MM-DD (default 24h)')
         .option('--base <ref>', 'base branch (default: origin/HEAD, main, master)')
         .option('--format <format>', 'text | json | voice (default text)')
-        .action((opts: ListOpts) => inCwd((cwd) => runChangesList(cwd, opts, deps)));
+        .action((opts: ListOpts) => inCwd((cwd) => runChangesList(cwd, opts, deps), () => fail('not-a-git-repo', 'the working directory is not accessible')));
 }

@@ -10,10 +10,18 @@ export const GIT_TIMEOUT_MS = 15000;
  */
 const PATHSPEC_ENV = new Set(['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS']);
 
-/** The environment every git child of the change-record code runs in. */
+/** Makes git fail on a missing object (partial clone) instead of fetching it from the promisor remote. */
+const NO_LAZY_FETCH = 'GIT_NO_LAZY_FETCH';
+
+/** The environment every git child of the change-record code runs in: pathspec variables removed, lazy fetching off. */
 export function gitChildEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };
     for (const name of Object.keys(env)) if (PATHSPEC_ENV.has(name.toUpperCase())) delete env[name];
+    // A partial clone would otherwise fetch a missing object from its promisor remote the moment a read needs it: that writes
+    // the object database and uses the network. Reading must stay read-only, so a missing object is a plain failure instead.
+    // (Windows environment names are case-insensitive: drop any other spelling first.)
+    for (const name of Object.keys(env)) if (name.toUpperCase() === NO_LAZY_FETCH) delete env[name];
+    env[NO_LAZY_FETCH] = '1';
     return env;
 }
 

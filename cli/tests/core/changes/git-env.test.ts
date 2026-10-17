@@ -10,6 +10,9 @@ describe('gitSpawnOptions', () => {
             expect(opts.env.GIT_AUTHOR_NAME).toBe('a');
         });
     });
+    test('every git child runs with lazy fetching off', () => {
+        expect(gitSpawnOptions('/some/dir').env.GIT_NO_LAZY_FETCH).toBe('1');
+    });
     test('takes the stderr handling and the output buffer from explicit parameters', () => {
         const opts = gitSpawnOptions('/d', { stderr: 'ignore', maxBuffer: 64 * 1024 * 1024 });
         expect(opts.stdio).toEqual(['ignore', 'pipe', 'ignore']);
@@ -28,6 +31,18 @@ describe('gitChildEnv', () => {
             expect(env.GIT_CONFIG_NOSYSTEM).toBe('1');
             expect(env.GIT_AUTHOR_NAME).toBe('a');
             expect(env.AWM_KEEP_ME).toBe('k');
+        });
+    });
+    test('turns lazy fetching off, whatever the caller has set, so that reading never fetches from a promisor remote', () => {
+        for (const value of [undefined, '0', 'false', '']) {
+            withEnv(value === undefined ? {} : { GIT_NO_LAZY_FETCH: value }, () => expect(gitChildEnv().GIT_NO_LAZY_FETCH).toBe('1'));
+        }
+    });
+    test('turns lazy fetching off under any spelling of the name (environment names are case-insensitive on Windows)', () => {
+        withEnv({ git_no_lazy_fetch: '0' }, () => {
+            const env = gitChildEnv();
+            expect(Object.keys(env).filter((k) => k.toUpperCase() === 'GIT_NO_LAZY_FETCH')).toEqual(['GIT_NO_LAZY_FETCH']);
+            expect(env.GIT_NO_LAZY_FETCH).toBe('1');
         });
     });
     test('does not modify process.env', () => {
