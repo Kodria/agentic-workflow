@@ -13,16 +13,25 @@ export const GIT_TIMEOUT_MS = 15000;
 const PATHSPEC_ENV = new Set(['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS']);
 
 /**
+ * Variables that relocate the repository, its index or its object store: inherited ones would make git answer for a different
+ * repository than the `cwd` we pass (a fail-open). The same set read-only-observation.ts removes for its own git children.
+ */
+const LOCATION_ENV = new Set([
+    'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_PREFIX',
+]);
+
+/**
  * Makes git fail on a missing object (partial clone) instead of fetching it from the promisor remote. Needs git 2.43 or newer:
  * an older git ignores the variable and keeps its previous behaviour (it fetches the object), so the read-only guarantee for
  * partial clones is only given from 2.43 on.
  */
 const NO_LAZY_FETCH = 'GIT_NO_LAZY_FETCH';
 
-/** The environment every git child of the change-record code runs in: pathspec variables removed, lazy fetching off. */
+/** The environment every git child of the change-record code runs in: pathspec and repository-location variables removed, lazy fetching off. */
 export function gitChildEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };
-    for (const name of Object.keys(env)) if (PATHSPEC_ENV.has(name.toUpperCase())) delete env[name];
+    for (const name of Object.keys(env)) if (PATHSPEC_ENV.has(name.toUpperCase()) || LOCATION_ENV.has(name.toUpperCase())) delete env[name];
     // A partial clone would otherwise fetch a missing object from its promisor remote the moment a read needs it: that writes
     // the object database and uses the network. Reading must stay read-only, so a missing object is a plain failure instead.
     // (Windows environment names are case-insensitive: drop any other spelling first.)
@@ -38,12 +47,11 @@ export interface GitSpawnExtras {
     stderr?: 'pipe' | 'ignore';
 }
 
-/** The one place the options of every git child are built: no shell, utf8, stdin closed, bounded time, scrubbed environment. */
+/** The options of every git child except `stdio` (execGit spells that out): no shell, utf8, bounded time, scrubbed environment. */
 export function gitSpawnOptions(cwd: string, extras: GitSpawnExtras = {}) {
     return {
         cwd,
         encoding: 'utf8' as const,
-        stdio: ['ignore', 'pipe', extras.stderr ?? 'pipe'] as ['ignore', 'pipe', 'pipe' | 'ignore'],
         timeout: GIT_TIMEOUT_MS,
         env: gitChildEnv(),
         ...(extras.maxBuffer === undefined ? {} : { maxBuffer: extras.maxBuffer }),
@@ -51,11 +59,10 @@ export function gitSpawnOptions(cwd: string, extras: GitSpawnExtras = {}) {
 }
 
 /**
- * Runs `git args` in `cwd` with gitSpawnOptions and returns its stdout. The one execFileSync of the change-record code: the
- * stdio option is spelled out at the call (never left to Node's default relay of the child's stderr onto ours), as
- * tests/structural/exec-invocation-explicit-stdio.test.ts requires. Throws like execFileSync does.
+ * Runs `git args` in `cwd` with gitSpawnOptions and returns its stdout. The one execFileSync of the change-record code, with the
+ * stdio option spelled out at the call (stdin closed, stdout piped, stderr as asked; never Node's default relay of the child's
+ * stderr onto ours), as tests/structural/exec-invocation-explicit-stdio.test.ts requires. Throws like execFileSync does.
  */
 export function execGit(cwd: string, args: string[], extras: GitSpawnExtras = {}): string {
-    const options = gitSpawnOptions(cwd, extras);
-    return execFileSync('git', args, { ...options, stdio: options.stdio });
+    return execFileSync('git', args, { ...gitSpawnOptions(cwd, extras), stdio: ['ignore', 'pipe', extras.stderr ?? 'pipe'] });
 }
