@@ -2138,3 +2138,12 @@ S2 is complete and approved at `703ed46`. Lessons that bind S3–S6:
 - **Test count and isolation.** No test may write inside the real checkout. Tests assert the real checkout is untouched when they could leak.
 - **Review economy.** Each slice is reviewed against its clauses and A3–A6; reviewers report only concrete clause violations.
 
+### A7 — S3 quality review (2026-10-17): shared predicates and a small S2 extension
+
+- **One relative-path predicate.** `isSafeRelativePath` (git.ts) and `isSafeRelative` (validate-shape.ts) become a single exported predicate in `text-safety.ts` (path-safety belongs with the other untrusted-text rules); both call sites import it. S1's validator keeps its behavior.
+- **`worktree.ts` gains an optional `extraExcludes` parameter on `gitState`** (additive; default behavior and every existing S2 test unchanged). `isDirtyOutside` in `git.ts` is built on it instead of re-running `git status` itself. This is the only S2 file touched by S3.
+- **Linear-time parsing of untrusted text.** Parsers of commit messages and other untrusted strings never use a backtracking regex that can go quadratic; trimming and line splitting are index scans.
+- **Derivation pins one HEAD.** `deriveFields` reads HEAD once and uses that sha for the log and the diff; the redundant `rev-list --count` is dropped (an empty log means `no-commits`, a non-empty log with no parseable subject means `no-conventional-commits`).
+- **Repo identity.** `repoIdentity` lowercases the host in both the scp-style and URL branches.
+- **Tests.** `derive.test.ts` is split into `git.test.ts`, `derive.test.ts` and `trailers.test.ts`; pure-function tests do not create a repo. `helpers.ts` also sets `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` on `process.env` (restored after) so code under test never reads the developer's git config, and drops its unused `date` parameter. A test that sets `LC_ALL` at runtime to prove locale independence is removed (ICU is fixed at process start); the code-unit assertions stay.
+
