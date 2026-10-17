@@ -1,11 +1,11 @@
 import path from 'path';
-import { COMMIT_ID, LOG_SAFETY_ARGS, addedFilesUnder, repoIdentity, runGit } from './git';
+import { LOG_SAFETY_ARGS, addedFilesUnder, repoIdentity, runGit } from './git';
 import { RECORD_FILE_RE } from './parse';
 import { resolveBaseRef, type Failure } from './range';
 import { esc, isObj } from './text-safety';
 import { cleanLine, escapeBidi, parsePr } from './list-parse';
 import { hasOptOut } from './trailers';
-import { MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type Diagnostic } from './types';
+import { COMMIT_ID, MAX_RECORD_BYTES, RECORD_DIR, type ChangeRecord, type Diagnostic } from './types';
 import { validateRecordShape } from './validate-shape';
 
 // `awm changes list` (R5): the first-parent history of the base ref, classified commit by commit. Everything here is read-only

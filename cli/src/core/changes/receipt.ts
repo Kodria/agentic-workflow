@@ -5,7 +5,7 @@ import { writeFileAtomic } from '../atomic-file';
 import { cliVersion } from '../cli-version';
 import { sameExistingPath } from '../paths';
 import type { RunOutput } from '../../commands/sensors/types';
-import type { Overall, SensorStatus } from './types';
+import { MAX_SENSOR_NAME, isCommitId, isOverall, isSensorName, isSensorStatus, type Overall, type SensorStatus } from './types';
 import { esc, isCanonicalIso, isSingleLine } from './text-safety';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, gitState } from './worktree';
 
@@ -19,12 +19,8 @@ export interface SensorReceipt {
     digest: string;
 }
 
-const SHA_RE = /^[0-9a-f]{40}$/;
-const OVERALL = ['pass', 'fail', 'skipped', 'not_certified'];
-const STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
 const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
 const MAX_RECEIPT_BYTES = 1024 * 1024;
-const MAX_SENSOR_NAME = 128;
 export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean }
 
 /** True when the run covers every sensor: `--changed` never does, `--all` always does, `--fast` xor `--slow` is partial. */
@@ -49,8 +45,6 @@ export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): strin
     return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
-const isSensorName = (name: string): boolean => isSingleLine(name) && [...name].length >= 1 && [...name].length <= MAX_SENSOR_NAME;
-
 /**
  * The ONE receipt shape check, shared by build, write and read so that nothing is written that cannot be read back.
  * Returns a static description of the first problem (never echoes the offending value), or null when the receipt is pristine.
@@ -61,15 +55,15 @@ function receiptProblem(x: unknown): string | null {
     const keys = Object.keys(r);
     if (keys.length !== RECEIPT_KEYS.length || !RECEIPT_KEYS.every((k) => k in r)) return 'receipt must have exactly the schema keys';
     if (r.schema !== 1) return 'schema must be 1';
-    if (typeof r.commit !== 'string' || !SHA_RE.test(r.commit)) return 'commit must be 40 lowercase hex characters';
+    if (!isCommitId(r.commit)) return 'commit must be 40 or 64 lowercase hex characters';
     if (!isCanonicalIso(r.ranAt)) return 'ranAt must be a canonical ISO timestamp';
     if (!isSingleLine(r.cliVersion)) return 'cliVersion must be a single line';
-    if (typeof r.overall !== 'string' || !OVERALL.includes(r.overall)) return 'overall is not a known verdict';
+    if (!isOverall(r.overall)) return 'overall is not a known verdict';
     const sensors = r.sensors;
     if (sensors === null || typeof sensors !== 'object' || Array.isArray(sensors)) return 'sensors must be an object';
     for (const [name, status] of Object.entries(sensors)) {
         if (!isSensorName(name)) return `sensor names must be a single line of 1 to ${MAX_SENSOR_NAME} characters`;
-        if (typeof status !== 'string' || !STATUS.includes(status)) return 'a sensor status is not a known status';
+        if (!isSensorStatus(status)) return 'a sensor status is not a known status';
     }
     if (typeof r.digest !== 'string') return 'digest must be a string';
     const { digest, ...body } = r as unknown as SensorReceipt;
@@ -150,7 +144,7 @@ const INVALID: ReadReceipt = { ok: false, code: 'receipt-invalid' };
 
 /** Reads and verifies a receipt. Anything that is not a pristine, digest-matching receipt for `commit` reads as invalid (or missing). */
 export function readReceipt(root: string, commit: string): ReadReceipt {
-    if (typeof root !== 'string' || root.length === 0 || typeof commit !== 'string' || !SHA_RE.test(commit)) return INVALID;
+    if (typeof root !== 'string' || root.length === 0 || !isCommitId(commit)) return INVALID;
     let raw: string;
     try {
         assertNoSymlinkChain(root);
@@ -178,7 +172,7 @@ export function captureReceiptPrecondition(cwd: string): Precondition {
     if (state.kind === 'not-repo') return { eligible: false, reason: REASON_NOT_REPO };
     if (state.kind === 'failed') return { eligible: false, reason: REASON_GIT_FAILED };
     if (state.dirty) return { eligible: false, reason: 'working tree has uncommitted changes (commit them first)' };
-    if (!SHA_RE.test(state.commit)) return { eligible: false, reason: 'HEAD is not a 40-hex commit' };
+    if (!isCommitId(state.commit)) return { eligible: false, reason: 'HEAD is not a full commit id' };
     return { eligible: true, root: state.root, commit: state.commit };
 }
 

@@ -1,6 +1,7 @@
 import path from 'path';
 import { execGit } from './git-env';
 import { isSafeRelativePath, isSingleLine } from './text-safety';
+import { COMMIT_ID } from './types';
 import { gitState } from './worktree';
 
 // Every function here takes values that may be influenced by a user or by repository content (refs, paths, remote URLs).
@@ -9,8 +10,6 @@ import { gitState } from './worktree';
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
 const SAFE_REF = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
-/** A full commit id (SHA-1 or SHA-256). */
-export const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const MAX_REF = 255;
 const MAX_IDENTITY = 300;
 const MAX_REMOTE_URL = 2048;

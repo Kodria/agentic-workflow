@@ -540,10 +540,10 @@ describe('receipt', () => {
         expect((caught as Error).message).toMatch(/^invalid receipt: digest body (sensors )?must be an object$/);
         if (!/sensors/.test(_n)) expect((caught as Error).message).toBe('invalid receipt: digest body must be an object');
     });
-    test('R2.3 buildReceipt rejects a commit that is not 40 lowercase hex', () => {
+    test('R2.3 buildReceipt rejects a commit that is not lowercase hex', () => {
         const mk = (commit: string) => () => buildReceipt({ commit, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1', output: output as never });
-        expect(mk('../x')).toThrow(/40 lowercase hex/);
-        expect(mk('A'.repeat(40))).toThrow(/40 lowercase hex/);
+        expect(mk('../x')).toThrow(/lowercase hex/);
+        expect(mk('A'.repeat(40))).toThrow(/lowercase hex/);
         expect(mk('a'.repeat(40))).not.toThrow();
     });
     test('R2.5 an extra key invalidates the receipt even with a recomputed digest', () => {

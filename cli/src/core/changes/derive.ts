@@ -1,8 +1,8 @@
 import path from 'path';
 import { determineBump, GIT_LOG_FORMAT, parseCommits, RS, US, type Commit } from '../../release/core';
-import { COMMIT_ID, LOG_SAFETY_ARGS, changedFiles, headSha, runGit } from './git';
+import { LOG_SAFETY_ARGS, changedFiles, headSha, runGit } from './git';
 import { esc, clipMessage, isSafeRelativePath, isSingleLine } from './text-safety';
-import { RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './types';
+import { COMMIT_ID, RECORD_DIR, type DerivedFields, type Diagnostic, type Semver } from './types';
 
 // Pathspecs relative to the repository top, so the result does not depend on the directory git runs in.
 const ALL_FILES = ':/';

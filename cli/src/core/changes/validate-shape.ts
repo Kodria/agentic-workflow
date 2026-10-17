@@ -1,15 +1,12 @@
 import { isValidRecordFileName, loadFrontmatter, splitRecord } from './parse';
 import { isRegularFileInside } from './fs-safe';
 import { clipMessage, cleanText, esc, isCanonicalIso, isHttpsUrl, isObj, isSafeMultiline, isSafeRelativePath, isSingleLine } from './text-safety';
-import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, PENDING_MARKER, RECORD_SCHEMA, type ChangeRecord, type Diagnostic } from './types';
+import { BODY_HEADINGS, MAX_DIAGNOSTICS, MAX_RECORD_BYTES, OVERALLS, PENDING_MARKER, RECORD_SCHEMA, isCommitId, isSensorName, isSensorStatus, type ChangeRecord, type Diagnostic } from './types';
 
 const TOP_KEYS = ['schema', 'id', 'title', 'summary_short', 'type', 'scope', 'semver', 'breaking', 'modules', 'links', 'verification', 'manual_validation', 'risks', 'rollback', 'provenance'];
 const REQUIRED_KEYS = TOP_KEYS.filter((k) => k !== 'links' && k !== 'provenance');
-const SENSOR_STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
-const OVERALL = ['pass', 'fail', 'skipped', 'not_certified'];
 const PROVENANCE_KEYS = ['agent', 'model', 'session', 'started_at', 'finished_at'];
 const SEMVER = ['major', 'minor', 'patch', 'none'];
-const SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 type Obj = Record<string, unknown>;
@@ -29,7 +26,6 @@ function finalize(list: Diagnostic[]): { diagnostics: Diagnostic[]; omitted?: nu
 }
 
 // ---- Value predicates ----
-const isSensorName = (k: string): boolean => k.length > 0 && [...k].length <= 128 && isSingleLine(k);
 
 function isModulePath(m: unknown): boolean {
     return m === '.' || isSafeRelativePath(m);
@@ -108,9 +104,9 @@ function checkVerification(fm: Obj, out: Diagnostic[]): void {
     const v = fm.verification;
     if (!isObj(v)) { bad(out, 'verification', 'verification must be a mapping'); return; }
     unknownKeys(v, ['commit', 'overall', 'sensors', 'receipt_digest'], 'verification.', out);
-    if (typeof v.commit !== 'string' || !SHA_RE.test(v.commit)) bad(out, 'verification.commit', 'verification.commit must be 40 lowercase hex characters');
-    if (!OVERALL.includes(v.overall as string)) bad(out, 'verification.overall', `overall must be one of ${OVERALL.join('|')}`);
-    if (!isObj(v.sensors) || !Object.entries(v.sensors).every(([k, s]) => isSensorName(k) && SENSOR_STATUS.includes(s as string))) {
+    if (!isCommitId(v.commit)) bad(out, 'verification.commit', 'verification.commit must be 40 or 64 lowercase hex characters');
+    if (!(OVERALLS as readonly string[]).includes(v.overall as string)) bad(out, 'verification.overall', `overall must be one of ${OVERALLS.join('|')}`);
+    if (!isObj(v.sensors) || !Object.entries(v.sensors).every(([k, s]) => isSensorName(k) && isSensorStatus(s))) {
         bad(out, 'verification.sensors', 'sensors must map sensor names to pass|fail|inconclusive|skipped');
     }
     if (typeof v.receipt_digest !== 'string' || !DIGEST_RE.test(v.receipt_digest)) bad(out, 'verification.receipt_digest', 'receipt_digest must be sha256:<64 hex>');
