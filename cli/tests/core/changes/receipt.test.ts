@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { Command } from 'commander';
-import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
+import { RUNTIME_STATE_EXCLUDES, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors } from '../../../src/commands/sensors/run';
 
@@ -22,7 +22,7 @@ beforeEach(() => {
     Object.assign(process.env, { HOME: home, AWM_HOME: path.join(home, '.awm'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcpt-')));
     g('init', '-q', '-b', 'main');
-    fs.writeFileSync(path.join(root, '.gitignore'), '.awm/*\n!.awm/sensors.json\n');
+    fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
     fs.writeFileSync(path.join(root, 'a.txt'), 'a');
     g('add', '.'); g('commit', '-q', '-m', 'feat: a');
 });
@@ -65,6 +65,24 @@ describe('receipt', () => {
         const r = buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', output: { overall: 'fail', sensors: [{ name: 'lint', status: 'fail', errors: [] }] } as never });
         expect(r).toMatchObject({ schema: 1, commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', overall: 'fail', sensors: { lint: 'fail' } });
     });
+    test('R2.1 a receipt replacing an existing 0666 file ends with mode 0600', () => {
+        if (process.platform === 'win32') return;
+        const head = g('rev-parse', 'HEAD');
+        fs.mkdirSync(path.dirname(runsFile(head)), { recursive: true });
+        fs.writeFileSync(runsFile(head), 'stale');
+        fs.chmodSync(runsFile(head), 0o666);
+        const pre = captureReceiptPrecondition(root);
+        expect(finalizeReceipt(pre, output as never)).toBe('');
+        expect(fs.statSync(runsFile(head)).mode & 0o777).toBe(0o600);
+        expect(readReceipt(root, head).ok).toBe(true);
+    });
+    test('R2.1 writeReceipt forces mode 0600 on an existing file', () => {
+        if (process.platform === 'win32') return;
+        const head = writeValid();
+        fs.chmodSync(runsFile(head), 0o644);
+        writeValid();
+        expect(fs.statSync(runsFile(head)).mode & 0o777).toBe(0o600);
+    });
     test('R2.1 the receipt directory is 0700', () => {
         if (process.platform === 'win32') return;
         writeValid();
@@ -105,13 +123,42 @@ describe('receipt', () => {
         fs.writeFileSync(path.join(root, 'a.txt'), 'staged'); g('add', 'a.txt');
         expect(captureReceiptPrecondition(root).eligible).toBe(false);
     });
-    test('R2.1 a change under .awm/ does not make the tree dirty', () => {
+    test('R2.1 the runtime-state exclusion list is exactly the local state paths', () => {
+        expect([...RUNTIME_STATE_EXCLUDES]).toEqual(['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json']);
+    });
+    test('R2.1 a modified tracked .awm/sensors.json makes the tree dirty', () => {
         fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{}');
         g('add', '.'); g('commit', '-q', '-m', 'chore: sensors');
+        expect(captureReceiptPrecondition(root).eligible).toBe(true);
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{"edited":true}');
+        expect(captureReceiptPrecondition(root).eligible).toBe(false);
+    });
+    test('R2.1 a modified tracked .awm/profile.json makes the tree dirty', () => {
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'profile.json'), '{}');
+        g('add', '.'); g('commit', '-q', '-m', 'chore: profile');
+        fs.writeFileSync(path.join(root, '.awm', 'profile.json'), '{"edited":true}');
+        expect(captureReceiptPrecondition(root).eligible).toBe(false);
+    });
+    test('R2.1 an untracked file elsewhere under .awm/ makes the tree dirty', () => {
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(root, '.awm', 'scratch.txt'), 'x');
+        expect(captureReceiptPrecondition(root).eligible).toBe(false);
+    });
+    test.each([
+        ['.awm/sensors/runs/x.json'], ['.awm/journal/entry.json'], ['.awm/ledger/l.jsonl'], ['.awm/evidence/e.txt'], ['.awm/track.json'],
+    ])('R2.1 an untracked %s does not make the tree dirty', (rel) => {
+        fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+        fs.writeFileSync(path.join(root, rel), 'x');
         expect(g('status', '--porcelain')).not.toBe('');
+        expect(captureReceiptPrecondition(root).eligible).toBe(true);
+    });
+    test('R2.1 a modified tracked file under an excluded runtime path does not make the tree dirty', () => {
+        fs.mkdirSync(path.join(root, '.awm', 'journal'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), '{}');
+        g('add', '.'); g('commit', '-q', '-m', 'chore: journal');
+        fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), '{"edited":true}');
         expect(captureReceiptPrecondition(root).eligible).toBe(true);
     });
     test('R2.1 the precondition resolves the repository root from a subdirectory', () => {
@@ -122,14 +169,42 @@ describe('receipt', () => {
     test('R2.2 HEAD moving during the run yields no receipt', () => {
         const pre = captureReceiptPrecondition(root);
         fs.writeFileSync(path.join(root, 'c.txt'), 'c'); g('add', '.'); g('commit', '-q', '-m', 'fix: c');
-        expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or working tree changed/);
+        expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or tracked files changed/);
         expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
     });
-    test('R2.2 the tree becoming dirty during the run yields no receipt', () => {
+    test('R2.2 a tracked file modified during the run yields no receipt and a note', () => {
         const pre = captureReceiptPrecondition(root);
         fs.writeFileSync(path.join(root, 'a.txt'), 'auto-fixed by a sensor');
-        expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or working tree changed/);
+        expect(finalizeReceipt(pre, output as never)).toMatch(/^no sensor receipt written: HEAD or tracked files changed during the run\n$/);
         expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
+    });
+    test('R2.2 a tracked file staged for deletion during the run yields no receipt', () => {
+        const pre = captureReceiptPrecondition(root);
+        g('rm', '-q', 'a.txt');
+        expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or tracked files changed/);
+    });
+    test('R2.2 an untracked file created by a sensor during the run does not prevent the receipt', () => {
+        const pre = captureReceiptPrecondition(root);
+        fs.mkdirSync(path.join(root, 'coverage'));
+        fs.writeFileSync(path.join(root, 'coverage', 'lcov.info'), 'x');
+        expect(finalizeReceipt(pre, output as never)).toBe('');
+        expect(readReceipt(root, g('rev-parse', 'HEAD')).ok).toBe(true);
+    });
+    test('R2.2 a tracked change under an excluded runtime path during the run does not prevent the receipt', () => {
+        fs.mkdirSync(path.join(root, '.awm', 'journal'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), '{}');
+        g('add', '.'); g('commit', '-q', '-m', 'chore: journal');
+        const pre = captureReceiptPrecondition(root);
+        fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), '{"edited":true}');
+        expect(finalizeReceipt(pre, output as never)).toBe('');
+    });
+    test('R2.2 a tracked .awm/sensors.json modified during the run yields no receipt', () => {
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{}');
+        g('add', '.'); g('commit', '-q', '-m', 'chore: sensors');
+        const pre = captureReceiptPrecondition(root);
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{"edited":true}');
+        expect(finalizeReceipt(pre, output as never)).toMatch(/HEAD or tracked files changed/);
     });
     test('R2.2 outside git yields no receipt', () => {
         const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plain-'));
@@ -345,10 +420,16 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(process.exitCode).toBe(1);
         expect(fs.existsSync(receiptsDir())).toBe(false);
     });
-    test('R2.2 the precondition is measured before the run', async () => {
+    test('R2.2 untracked sensor output during the run still gets a receipt with no stderr', async () => {
         (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'c.txt'), 'c'); return output; });
         await runCli();
-        expect(written(stderr)).toMatch(/HEAD or working tree changed/);
+        expect(written(stderr)).toBe('');
+        expect(fs.readdirSync(receiptsDir())).toEqual([`${g('rev-parse', 'HEAD')}.json`]);
+    });
+    test('R2.2 a tracked file changed during the run withholds the receipt with one stderr line', async () => {
+        (runSensors as jest.Mock).mockImplementation(async () => { fs.writeFileSync(path.join(root, 'a.txt'), 'fixed'); return output; });
+        await runCli();
+        expect(written(stderr)).toMatch(/HEAD or tracked files changed/);
         expect(fs.existsSync(receiptsDir())).toBe(false);
         expect(process.exitCode).toBe(0);
     });

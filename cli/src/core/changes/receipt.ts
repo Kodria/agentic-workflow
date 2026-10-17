@@ -23,6 +23,8 @@ const OVERALL = ['pass', 'fail', 'skipped', 'not_certified'];
 const STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
 const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
 const MAX_RECEIPT_BYTES = 1024 * 1024;
+/** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
+export const RUNTIME_STATE_EXCLUDES: readonly string[] = ['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json'];
 const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: 15000 };
 
 export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean }
@@ -78,6 +80,8 @@ export function writeReceipt(root: string, receipt: SensorReceipt): string {
     assertNoSymlinkChain(root);
     const file = path.join(runsDir(root), `${receipt.commit}.json`);
     writeFileAtomic(file, JSON.stringify(receipt, null, 2) + '\n', 0o600);
+    // writeFileAtomic keeps the mode of a file it replaces; a receipt is always owner-only.
+    fs.chmodSync(file, 0o600);
     return file;
 }
 
@@ -123,11 +127,13 @@ export function readReceipt(root: string, commit: string): ReadReceipt {
 
 export type Precondition = { eligible: true; root: string; commit: string } | { eligible: false; reason: string };
 
-function gitState(cwd: string): { root: string; commit: string; dirty: boolean } | null {
+/** `dirty` counts untracked files only when `untracked` is true (the pre-run measure); the post-run recheck ignores them. */
+function gitState(cwd: string, untracked: boolean): { root: string; commit: string; dirty: boolean } | null {
     try {
         const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd }).trim();
         const commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root }).trim();
-        const status = execFileSync('git', ['status', '--porcelain', '--', '.', ':(exclude).awm'], { ...GIT_OPTS, cwd: root });
+        const args = ['status', '--porcelain', ...(untracked ? [] : ['--untracked-files=no']), '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`)];
+        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root });
         return { root, commit, dirty: status.trim().length > 0 };
     } catch {
         return null;
@@ -137,7 +143,7 @@ function gitState(cwd: string): { root: string; commit: string; dirty: boolean }
 /** Measured BEFORE the run: a receipt certifies a commit only when the tree equals it. */
 export function captureReceiptPrecondition(cwd: string): Precondition {
     if (typeof cwd !== 'string' || cwd.length === 0) return { eligible: false, reason: 'cwd must be a non-empty string' };
-    const state = gitState(cwd);
+    const state = gitState(cwd, true);
     if (!state) return { eligible: false, reason: 'not inside a git repository with a commit' };
     if (state.dirty) return { eligible: false, reason: 'working tree has uncommitted changes (commit them first)' };
     if (!SHA_RE.test(state.commit)) return { eligible: false, reason: 'HEAD is not a 40-hex commit' };
@@ -149,8 +155,8 @@ export function finalizeReceipt(pre: Precondition, output: Pick<RunOutput, 'over
     try {
         if (pre === null || typeof pre !== 'object') return 'no sensor receipt written: precondition was not captured\n';
         if (!pre.eligible) return `no sensor receipt written: ${esc(pre.reason)}\n`;
-        const after = gitState(pre.root);
-        if (!after || after.commit !== pre.commit || after.dirty) return 'no sensor receipt written: HEAD or working tree changed during the run\n';
+        const after = gitState(pre.root, false);
+        if (!after || after.commit !== pre.commit || after.dirty) return 'no sensor receipt written: HEAD or tracked files changed during the run\n';
         writeReceipt(pre.root, buildReceipt({ commit: pre.commit, ranAt: (deps.now ?? (() => new Date()))().toISOString(), cliVersion: (deps.version ?? cliVersion)(), output }));
         return '';
     } catch (error) {
