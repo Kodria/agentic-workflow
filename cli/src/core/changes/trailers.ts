@@ -2,11 +2,21 @@ import { LOG_SAFETY_ARGS, isSafeRevision, runGit } from './git';
 
 export const OPT_OUT_TRAILER = 'Change-Record';
 
-// NUL separates the values: a commit message cannot contain it, so a value cannot fake a boundary. A folded value
-// ("Change-Record: x\n none") keeps its line break, so it is never equal to "none".
-const FORMAT = `--format=%(trailers:key=${OPT_OUT_TRAILER},valueonly,separator=%x00)%x00`;
+// Raw messages (%B), NUL-terminated by -z: a message cannot contain NUL, so one commit is exactly one record. Git's own
+// %(trailers) is not used: it honours trailer.separators and trailer.<token>.key from the user's config, so what counts as
+// an opt-out would differ per machine.
+const FORMAT = '--format=%B';
+const OPT_OUT_LINE = new RegExp(`^${OPT_OUT_TRAILER}:[ \\t]*none[ \\t]*$`, 'i');
+const BLANK_LINE = /\r?\n[ \t]*\r?\n/;
 const COUNT_RE = /^-\d{1,4}$/;
 const MAX_ARGS = 16;
+
+/** DD-6: a line of the final paragraph (never the subject's) that is exactly `Change-Record: none`. No folding, no other separator. */
+function optsOut(message: string): boolean {
+    const paragraphs = message.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '').split(BLANK_LINE);
+    if (paragraphs.length < 2) return false;
+    return paragraphs[paragraphs.length - 1].split(/\r?\n/).some((line) => OPT_OUT_LINE.test(line));
+}
 
 /**
  * True when any commit selected by `revArgs` (e.g. ['a..b'] or ['-1', sha]) carries `Change-Record: none`.
@@ -17,6 +27,6 @@ export function hasOptOut(root: string, revArgs: string[]): boolean {
     const counts = revArgs.filter((a) => typeof a === 'string' && COUNT_RE.test(a));
     const revs = revArgs.filter((a) => !counts.includes(a));
     if (counts.length > 1 || revs.length === 0 || !revs.every(isSafeRevision)) return false;
-    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, FORMAT, ...counts, '--end-of-options', ...revs, '--']);
-    return out !== null && out.split('\0').some((value) => value.trim().toLowerCase() === 'none');
+    const out = runGit(root, ['log', ...LOG_SAFETY_ARGS, '-z', FORMAT, ...counts, '--end-of-options', ...revs, '--']);
+    return out !== null && out.split('\0').some(optsOut);
 }

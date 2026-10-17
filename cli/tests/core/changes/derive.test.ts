@@ -530,6 +530,61 @@ describe('user git configuration does not change what is parsed', () => {
     });
 });
 
+/** Sets variables on process.env (the environment runGit hands to git) for the duration of `fn`. */
+function withEnv<T>(vars: Record<string, string>, fn: () => T): T {
+    const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, vars);
+    try { return fn(); } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+}
+
+describe('the environment does not change what is parsed', () => {
+    const PATHSPEC_VARS = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+    test.each(PATHSPEC_VARS)('R3.3 %s=1 does not change the derived range, modules, opt-out or file list', (name) => {
+        const base = branch();
+        repo.commit({ 'cli/src/a.ts': '1' }, 'feat(c): a\n\nChange-Record: none');
+        withEnv({ [name]: '1' }, () => {
+            expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'c', semver: 'minor', breaking: false, modules: ['cli/src'] } });
+            expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+            expect(changedFiles(repo.root, base)).toEqual(['cli/src/a.ts']);
+        });
+    });
+    test('R3.5 a commit that only touches a differently cased Docs/Changes is not a record commit, with or without GIT_ICASE_PATHSPECS', () => {
+        const base = branch();
+        repo.commit({ 'Docs/Changes/up.md': '1' }, 'feat(c): up');
+        const expected = { ok: true, fields: { type: 'feat', scope: 'c', semver: 'minor', breaking: false, modules: ['Docs/Changes'] } };
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual(expected);
+        withEnv({ GIT_ICASE_PATHSPECS: '1' }, () => expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual(expected));
+    });
+    test('R3.5 a commit that only touches docs/changes stays excluded when the environment asks for literal pathspecs', () => {
+        const base = branch();
+        repo.commit({ 'docs/changes/r.md': '1' }, 'docs(c): record');
+        withEnv({ GIT_LITERAL_PATHSPECS: '1' }, () => expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'no-commits' }) }));
+    });
+    test('dirtiness with extra exclusions is not changed by GIT_LITERAL_PATHSPECS', () => {
+        fs.mkdirSync(path.join(repo.root, 'docs/changes'), { recursive: true });
+        fs.writeFileSync(path.join(repo.root, 'docs/changes/r.md'), 'r');
+        withEnv({ GIT_LITERAL_PATHSPECS: '1' }, () => {
+            expect(isDirtyOutside(repo.root, ['docs/changes'])).toBe(false);
+            expect(isDirtyOutside(repo.root, [])).toBe(true);
+        });
+    });
+});
+
+describe('R3.4 submodule changes are not hidden by configuration', () => {
+    test('a bumped gitlink stays in modules with diff.ignoreSubmodules=all and ignore=all in .gitmodules', () => {
+        const first = repo.git('rev-parse', 'HEAD');
+        const second = repo.commit({ 'x.txt': '1', '.gitmodules': '[submodule "vendor/sm"]\n\tpath = vendor/sm\n\turl = ./nowhere\n\tignore = all\n' }, 'chore: gitmodules');
+        repo.git('config', 'diff.ignoreSubmodules', 'all');
+        repo.git('update-index', '--add', '--cacheinfo', `160000,${first},vendor/sm`);
+        repo.git('commit', '-q', '-m', 'chore: add submodule');
+        const base = branch();
+        repo.git('update-index', '--cacheinfo', `160000,${second},vendor/sm`);
+        repo.git('commit', '-q', '-m', 'feat(v): bump submodule');
+        expect(changedFiles(repo.root, base)).toEqual(['vendor/sm']);
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'v', semver: 'minor', breaking: false, modules: ['vendor'] } });
+    });
+});
+
 describe('safety predicates', () => {
     test('isSafeRef accepts plain ref names only', () => {
         for (const ok of ['main', 'refs/remotes/origin/HEAD', 'feat/x-1.2', 'a'.repeat(40), '.hidden']) expect(isSafeRef(ok)).toBe(true);
@@ -572,6 +627,30 @@ describe('trailers', () => {
         repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: pending\nChange-Record: none');
         repo.commit({ 'c.ts': '1' }, 'docs: c');
         expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+    });
+    test('trailer.* configuration cannot turn another separator or token into an opt-out', () => {
+        const base = branch();
+        repo.git('config', 'trailer.separators', ':=#');
+        repo.git('config', 'trailer.cr.key', 'Change-Record');
+        repo.commit({ 'a.ts': '1' }, 'docs: a\n\nChange-Record= none');
+        repo.commit({ 'b.ts': '1' }, 'docs: b\n\nCR: none');
+        repo.commit({ 'c.ts': '1' }, 'docs: c\n\nChange-Record# none');
+        expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(false);
+        repo.commit({ 'd.ts': '1' }, 'docs: d\n\nChange-Record: none');
+        expect(hasOptOut(repo.root, [`${base}..HEAD`])).toBe(true);
+    });
+    test('the value must be exactly none after optional blanks, in the final paragraph', () => {
+        branch();
+        repo.commit({ 'a.ts': '1' }, 'docs: a\n\nChange-Record:none');
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
+        repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record:\t none \t');
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
+        repo.commit({ 'c.ts': '1' }, 'docs: c\n\nSigned-off-by: t\nChange-Record: none');
+        expect(hasOptOut(repo.root, ['-1', 'HEAD'])).toBe(true);
+        for (const message of ['docs: d\n\nChange-Record: nonesuch', 'docs: e\n\nChange-Record: none of it', 'docs: f\n\nChange-Record:', 'docs: g\n\nChange-Record:\n none', 'docs: h\n\n Change-Record: none', 'docs: i\n\nChange-Record: none\u00a0', 'docs: j\n\nChange-Record: none\u2028', 'docs: k\n\nChange-Record: none\u000b']) {
+            repo.commit({ [`${message[6]}.ts`]: '1' }, message);
+            expect([message, hasOptOut(repo.root, ['-1', 'HEAD'])]).toEqual([message, false]);
+        }
     });
     test('text that is not in the trailer block does not count', () => {
         const base = branch();

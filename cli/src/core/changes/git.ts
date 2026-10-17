@@ -23,12 +23,25 @@ const MAX_IDENTITY = 300;
  */
 export const LOG_SAFETY_ARGS: readonly string[] = ['--no-show-signature', '--encoding=UTF-8'];
 
+/**
+ * Variables that change how pathspecs are read (`:/`, `:(exclude)` ...) and so the meaning of every range/count we ask for:
+ * literal/glob/noglob/icase would turn a plain exclusion into a literal name, a glob or a case-insensitive match. They are
+ * removed from the child's environment; everything else (GIT_CONFIG_*, GIT_AUTHOR_*, HOME ...) is passed through untouched.
+ */
+const PATHSPEC_ENV = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+
+function childEnv(): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    for (const name of PATHSPEC_ENV) delete env[name];
+    return env;
+}
+
 /** Runs git without a shell and returns its stdout, or null when it fails, times out, overflows or the input is invalid. */
 export function runGit(cwd: string, args: string[]): string | null {
     if (typeof cwd !== 'string' || cwd.length === 0 || cwd.includes('\0')) return null;
     if (!Array.isArray(args) || !args.every((a) => typeof a === 'string' && !a.includes('\0'))) return null;
     try {
-        return execFileSync('git', args, { ...OPTS, cwd });
+        return execFileSync('git', args, { ...OPTS, cwd, env: childEnv() });
     } catch {
         return null;
     }
@@ -80,8 +93,9 @@ export function isAncestor(root: string, ancestor: string, descendant: string): 
 export function changedFiles(root: string, from: string, to = 'HEAD'): string[] | null {
     if (!isSafeRef(from) || !isSafeRef(to)) return null;
     // --no-renames: diff.renames would report a rename as one path. --no-relative: diff.relative would make paths relative to
-    // the cwd and drop those outside it. -z: core.quotePath never applies. diff.noprefix and colour do not affect --name-only.
-    const out = runGit(root, ['diff', '--no-renames', '--no-relative', '--name-only', '-z', '--end-of-options', from, to, '--']);
+    // the cwd and drop those outside it. --ignore-submodules=none: diff.ignoreSubmodules / .gitmodules `ignore` would hide a
+    // submodule bump. -z: core.quotePath never applies. diff.noprefix and colour do not affect --name-only.
+    const out = runGit(root, ['diff', '--no-renames', '--no-relative', '--ignore-submodules=none', '--name-only', '-z', '--end-of-options', from, to, '--']);
     return out === null ? null : out.split('\0').filter(Boolean);
 }
 
