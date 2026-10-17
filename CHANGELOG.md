@@ -1,3 +1,8 @@
+## v9.20.0 - 2026-10-17
+
+### Features
+- **changes:** Change Record per PR, queryable by voice/chat (#217) (#219)
+
 ## v9.19.0 - 2026-10-16
 
 ### Features
