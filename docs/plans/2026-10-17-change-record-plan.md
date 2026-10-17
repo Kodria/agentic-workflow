@@ -2147,3 +2147,17 @@ S2 is complete and approved at `703ed46`. Lessons that bind S3–S6:
 - **Repo identity.** `repoIdentity` lowercases the host in both the scp-style and URL branches.
 - **Tests.** `derive.test.ts` is split into `git.test.ts`, `derive.test.ts` and `trailers.test.ts`; pure-function tests do not create a repo. `helpers.ts` also sets `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` on `process.env` (restored after) so code under test never reads the developer's git config, and drops its unused `date` parameter. A test that sets `LC_ALL` at runtime to prove locale independence is removed (ICU is fixed at process start); the code-unit assertions stay.
 
+### A8 — Real S1–S3 API for S4–S6 (2026-10-17)
+
+S1, S2 and S3 are complete and approved (last candidate `6cd253c`). The plan code of S4–S6 was written against an API that threw; the real one does not. Where slice code conflicts with this section, this section wins. All modules are in `cli/src/core/changes/`.
+
+- **Failure model.** Nothing in these modules throws on bad input. `repoRoot(cwd)`, `headSha(root)`, `mergeBase(root, base)`, `resolveBase(root, explicit?)`, `changedFiles(root, from, to?)`, `runGit(cwd, args)` return `null` on failure; `isAncestor` and `isDirtyOutside` return a boolean (`isDirtyOutside` is fail-closed: `true` when the state is unreadable or an exclude is unsafe); `deriveFromCommits` returns `null` for an unusable list; `deriveFields(root, mergeBaseSha | null)` returns `{ ok: true, fields } | { ok: false, diagnostic }` with codes `no-commits`, `no-conventional-commits`, `invalid-input`, `git-failed`. Commands map each `null` to a diagnostic: `not-a-git-repo`, `base-unresolved`, `git-failed`.
+- **Revisions.** An explicit `--base` is first checked with `isSafeRevision` / `isSafeRef` (git.ts); a failure yields `invalid-input` (R3.5). Only then `resolveBase`, whose `null` yields `base-unresolved` (R3.2). `mergeBase` returns a full commit id or `null`.
+- **Dirty tree for `change new` (R3.6).** `isDirtyOutside(root, ['docs/changes'])`; it already excludes the local runtime state of R2.1 and sees submodule changes.
+- **Receipts.** `readReceipt(root, commit)` → `{ ok: true, receipt } | { ok: false, code: 'receipt-missing' | 'receipt-invalid' }`; `SensorReceipt` has `commit, ranAt, cliVersion, overall, sensors, digest`.
+- **Opt-out.** `hasOptOut(root, revArgs)` accepts a single `-N` count with a safe ref, or a validated `a..b` range, and returns a boolean.
+- **Every git call goes through `runGit`** (or `gitState`). S4–S6 never call `execFileSync('git', …)` directly, and every `git log` spreads `LOG_SAFETY_ARGS`. New git invocations inherit the env scrub (`GIT_*_PATHSPECS`) and the 16 MiB / 15 s bounds.
+- **Text.** Any untrusted text in a message goes through `esc()`; any value written into a record or printed passes the `text-safety.ts` predicates. Command output is single-line safe. Commands return `CommandResult` and never throw out of the action.
+- **Tests.** Use `makeRepo`, `makeHiddenSubmodule` and `withEnv` from `helpers.ts`; one behavior per test; assert `code` and `field`; bounds for performance tests use `LINEAR_TIME_BOUND_MS`. A command test that spawns the CLI action must override HOME and AWM_HOME and prove the real checkout is untouched.
+- **Review economy.** A reviewer reports every concrete violation it can find in its FIRST pass; later rounds only verify the fixes and look at what the fixes changed.
+
