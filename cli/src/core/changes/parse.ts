@@ -1,0 +1,50 @@
+import yaml from 'js-yaml';
+import type { Diagnostic } from './types';
+
+export const RECORD_FILE_RE = /^(\d{4})-(\d{2})-(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isValidSlug(slug: unknown): slug is string {
+    return typeof slug === 'string' && slug.length > 0 && slug.length <= 64 && SLUG_RE.test(slug);
+}
+
+export function isValidRecordFileName(name: string): boolean {
+    const m = RECORD_FILE_RE.exec(name);
+    if (!m || !isValidSlug(m[4])) return false;
+    const iso = `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(`${iso}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
+export type Split = { ok: true; frontmatterText: string; body: string } | { ok: false; diagnostic: Diagnostic };
+
+/** Normalizes CRLF and splits a leading `---` frontmatter block from the body. */
+export function splitRecord(raw: string): Split {
+    const text = raw.replace(/\r\n/g, '\n');
+    if (!text.startsWith('---\n')) return { ok: false, diagnostic: { code: 'frontmatter-missing', message: 'record must start with a --- frontmatter block' } };
+    const end = text.indexOf('\n---\n', 3);
+    if (end < 0) return { ok: false, diagnostic: { code: 'frontmatter-missing', message: 'frontmatter block is not closed with ---' } };
+    return { ok: true, frontmatterText: text.slice(4, end), body: text.slice(end + 5) };
+}
+
+function hasSharedReference(value: unknown, seen = new Set<object>()): boolean {
+    if (value === null || typeof value !== 'object') return false;
+    if (seen.has(value)) return true;
+    seen.add(value);
+    const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+    return children.some((child) => hasSharedReference(child, seen));
+}
+
+export type Loaded = { ok: true; value: unknown } | { ok: false; diagnostic: Diagnostic };
+
+/** CORE_SCHEMA: no custom tags, no implicit timestamps (dates stay strings). Aliases are rejected. */
+export function loadFrontmatter(text: string): Loaded {
+    let value: unknown;
+    try {
+        value = yaml.load(text, { schema: yaml.CORE_SCHEMA, json: false });
+    } catch (error) {
+        return { ok: false, diagnostic: { code: 'yaml-invalid', message: `frontmatter is not valid YAML: ${(error as Error).message.split('\n')[0]}` } };
+    }
+    if (hasSharedReference(value)) return { ok: false, diagnostic: { code: 'yaml-alias', message: 'YAML anchors/aliases are not allowed' } };
+    return { ok: true, value };
+}
