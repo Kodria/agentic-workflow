@@ -40,6 +40,17 @@ const check = (overrides: Record<string, string>, opts?: { root?: string }) => v
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const withSensors = (sensors: string) => fm({ verification: `verification:\n  commit: ${SHA}\n  overall: pass\n  sensors:\n${sensors}\n  receipt_digest: ${DIGEST}` });
 
+describe('validateRecordShape: body headings', () => {
+    const BLANKS = BODY.split('\n').map((l) => (l.startsWith('## ') ? `${l}  \t ` : l)).join('\n');
+    test('R1.6 trailing blanks after a heading are ignored', () => {
+        expect(validateRecordShape(NAME, doc(fm(), BLANKS)).diagnostics).toEqual([]);
+    });
+    test.each([['leading blanks', (l: string) => ` ${l}`], ['extra text after the heading', (l: string) => `${l} (draft)`]])('R1.6 a heading with %s is not that section', (_n, change) => {
+        const body = BODY.split('\n').map((l) => (l === '## Qué se probó' ? change(l) : l)).join('\n');
+        expect(codes(validateRecordShape(NAME, doc(fm(), body)))).toContain('body-section-missing');
+    });
+});
+
 describe('validateRecordShape', () => {
     test('accepts a complete valid record', () => {
         const r = validateRecordShape(NAME, doc(fm()));
@@ -99,6 +110,13 @@ describe('validateRecordShape', () => {
     describe('R1.4 field rules', () => {
         test('id must equal the file name', () => {
             expectDiag(check({ id: 'id: other' }), 'field-invalid', 'id');
+        });
+        test('R1.4 summary_short and title are limited in code points, not UTF-16 units: 280 and 120 emoji pass, one more fails', () => {
+            const emoji = '\u{1F600}';
+            expect(check({ summary_short: `summary_short: "${emoji.repeat(280)}"` }).diagnostics).toEqual([]);
+            expectDiag(check({ summary_short: `summary_short: "${emoji.repeat(281)}"` }), 'field-invalid', 'summary_short');
+            expect(check({ title: `title: "${emoji.repeat(120)}"` }).diagnostics).toEqual([]);
+            expectDiag(check({ title: `title: "${emoji.repeat(121)}"` }), 'field-invalid', 'title');
         });
         test('summary_short is at most 280 characters', () => {
             expectDiag(check({ summary_short: `summary_short: "${'x'.repeat(281)}"` }), 'field-invalid', 'summary_short');

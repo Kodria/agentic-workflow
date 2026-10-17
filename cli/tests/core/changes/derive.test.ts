@@ -23,6 +23,12 @@ describe('deriveFromCommits and deriveModules (no repository)', () => {
         expect(deriveFromCommits([c('chore', null), c('docs', null)])?.type).toBe('chore');
         expect(deriveFromCommits([c('fix', null), c('feat', null), c('docs', null, true)])?.type).toBe('docs');
     });
+    test('R3.3 a scope is trimmed before it is counted, and a blank scope is no scope', () => {
+        expect(deriveFromCommits([c('feat', '  a  ')])?.scope).toBe('a');
+        expect(deriveFromCommits([c('feat', ' a'), c('feat', 'a '), c('feat', 'b')])?.scope).toBe('a');
+        expect(deriveFromCommits([c('feat', '   ')])?.scope).toBeNull();
+        expect(deriveFromCommits([c('feat', '\t')])?.scope).toBeNull();
+    });
     test('R3.3 several breaking commits: the FIRST one gives the type', () => {
         expect(deriveFromCommits([c('docs', null), c('refactor', null, true), c('chore', null, true)])?.type).toBe('refactor');
         expect(deriveFromCommits([c('chore', null, true), c('refactor', null, true)])?.type).toBe('chore');

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { gitAtLeast, makeRepo, posixOnly, spyOnGit, type TestRepo } from './helpers';
+import { gitAtLeast, importCommits, makeRepo, posixOnly, spyOnGit, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, snapshotDir, subjects } from './list-fixtures';
 import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_RECORDS_PER_RUN, MAX_SUBJECT, PAGE_SIZE, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 
@@ -65,13 +65,16 @@ describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
         repo.commit({ 'b.ts': '1' }, 'fix: new', '2026-10-16T00:00:00Z');
         expect(listed({ limit: 1 })).toMatchObject({ truncated: false, omitted: 0 });
     });
-    test('a limit above 200 is capped at 200', () => {
+    test('a limit above 200 is capped at 200: 205 window entries give 200 listed and 5 omitted', () => {
         expect(DEFAULT_LIMIT).toBe(200);
         expect(MAX_RECORDS_PER_ENTRY).toBe(50);
         expect(MAX_RECORDS_PER_RUN).toBe(500);
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T00:00:00Z');
-        expect(listed({ limit: 100_000 })).toMatchObject({ truncated: false });
+        importCommits(repo, Array.from({ length: 205 }, (_, i) => ({ message: `fix: n${i}`, files: { [`f${i}.ts`]: '1' }, date: new Date(Date.UTC(2026, 9, 16, 0, 0, 0) + i * 60_000).toISOString() })));
+        const r = listed({ limit: 100_000 });
+        expect(r.changes).toHaveLength(200);
+        expect(r).toMatchObject({ truncated: true, omitted: 5 });
+        expect(r.changes[0].subject).toBe('fix: n204');
     });
     const files = (n: number, from = 0): Record<string, string> => Object.fromEntries(Array.from({ length: n }, (_, i) => {
         const id = `2026-10-16-r${String(from + i).padStart(3, '0')}`;
@@ -154,6 +157,15 @@ describe('listChanges: subjects and tags beyond their caps are clipped, never an
         adopt();
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
         expect(subjects(listed())).toEqual(['fix: a']);
+    });
+    test('R5.5 a commit whose subject cannot be read still lists: its pr is null (the tail fallback), never a failure', () => {
+        adopt();
+        const file = path.join(repo.home, 'message.txt');
+        fs.writeFileSync(file, `fix: ${'\u0301'.repeat(9_000_000)} (#12)\n`);
+        repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '-F', file);
+        const r = listed();
+        expect(r.changes).toHaveLength(1);
+        expect(r.changes[0]).toMatchObject({ subject: '<subject unavailable>', pr: null });
     });
     test('one bad subject among many is found by halving the batch: a logarithmic number of calls, not one per commit', () => {
         adopt();

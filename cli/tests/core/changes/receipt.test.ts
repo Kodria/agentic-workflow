@@ -604,6 +604,36 @@ describe('receipt', () => {
         expect(readReceipt(undefined as never, 'a'.repeat(40))).toEqual({ ok: false, code: 'receipt-invalid' });
         expect(readReceipt(root, undefined as never)).toEqual({ ok: false, code: 'receipt-invalid' });
     });
+    posixOnly('write side: a symlink already sitting at the receipt path is refused and its target is left untouched (atomic write, never a plain writeFileSync)', () => {
+        const head = g('rev-parse', 'HEAD');
+        const target = path.join(root, 'precious.txt');
+        fs.writeFileSync(target, 'keep me');
+        fs.mkdirSync(path.dirname(runsFile(head)), { recursive: true });
+        fs.symlinkSync(target, runsFile(head));
+        const receipt = buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+        expect(() => writeReceipt(root, receipt)).toThrow(/symlink/);
+        expect(fs.readFileSync(target, 'utf8')).toBe('keep me');
+        expect(fs.lstatSync(runsFile(head)).isSymbolicLink()).toBe(true);
+    });
+    posixOnly('write side: a runs directory swapped for a symlink right after it was created is refused, and nothing is written through it', () => {
+        const head = g('rev-parse', 'HEAD');
+        const elsewhere = fs.mkdtempSync(path.join(home, 'elsewhere-'));
+        const real = fs.mkdirSync;
+        const spy = jest.spyOn(fs, 'mkdirSync').mockImplementation(((target: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+            const made = real(target, options as never);
+            if (String(target).endsWith(path.join('sensors', 'runs'))) {
+                // The race: between the mkdir and the write, the directory is replaced by a link to somewhere else.
+                fs.rmdirSync(target);
+                fs.symlinkSync(elsewhere, target);
+            }
+            return made;
+        }) as never);
+        try {
+            const receipt = buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+            expect(() => writeReceipt(root, receipt)).toThrow(/symlink/);
+            expect(fs.readdirSync(elsewhere)).toEqual([]);
+        } finally { spy.mockRestore(); }
+    });
     posixOnly('refuses a symlinked runs directory', () => {
         const head = g('rev-parse', 'HEAD');
         fs.mkdirSync(path.join(root, '.awm', 'sensors'), { recursive: true });

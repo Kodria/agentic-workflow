@@ -229,6 +229,29 @@ describe('listChanges: classification (R5.3)', () => {
         expect(JSON.stringify(r)).not.toContain('SECRET');
         expect(JSON.stringify(r)).toContain('links.issue');
     });
+    test('R5.3 a record committed with the executable bit (mode 100755) is read like any other', () => {
+        adopt();
+        const rel = recordPath(FIRST);
+        fs.mkdirSync(path.dirname(path.join(repo.root, rel)), { recursive: true });
+        fs.writeFileSync(path.join(repo.root, rel), record(FIRST));
+        repo.git('add', '--', rel);
+        repo.git('update-index', '--chmod=+x', '--', rel);
+        expect(repo.git('ls-files', '-s', '--', rel)).toMatch(/^100755 /);
+        repo.gitAt('2026-10-16T20:00:00Z', 'commit', '-q', '-m', 'feat: executable record');
+        expect(listed().changes[0]).toMatchObject({ classification: 'recorded', records: [expect.objectContaining({ path: rel, id: FIRST })] });
+    });
+    posixOnly('R5.3 a record that is a symlink in the commit (mode 120000) is invalid-record, never read through', () => {
+        adopt();
+        const rel = recordPath(FIRST);
+        fs.mkdirSync(path.dirname(path.join(repo.root, rel)), { recursive: true });
+        fs.writeFileSync(path.join(repo.root, 'real.md'), record(FIRST));
+        fs.symlinkSync('../../real.md', path.join(repo.root, rel));
+        repo.git('add', '-A');
+        repo.gitAt('2026-10-16T20:00:00Z', 'commit', '-q', '-m', 'feat: linked record');
+        const entry = listed().changes[0];
+        expect(entry.classification).toBe('invalid-record');
+        expect((entry.records[0] as { diagnostics: Array<{ message: string }> }).diagnostics[0].message).toMatch(/not a regular file/);
+    });
     test('exempt and missing entries have no records', () => {
         history();
         const r = listed();
