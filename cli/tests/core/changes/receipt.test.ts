@@ -3,7 +3,7 @@ jest.mock('../../../src/commands/sensors/run', () => ({ runSensors: jest.fn(), f
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { RUNTIME_STATE_EXCLUDES, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, writeReceipt } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
@@ -33,6 +33,7 @@ afterEach(() => {
 
 const output = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }, { name: 'a-typecheck', status: 'pass' as const, errors: [] }] };
 const runsFile = (head: string) => path.join(root, '.awm', 'sensors', 'runs', `${head}.json`);
+const listTree = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.name === '.git' ? [] : e.isDirectory() ? [e.name + '/', ...listTree(path.join(dir, e.name)).map((c) => `${e.name}/${c}`)] : [e.name]));
 const writeValid = () => {
     const head = g('rev-parse', 'HEAD');
     writeReceipt(root, buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', output: output as never }));
@@ -160,6 +161,129 @@ describe('receipt', () => {
         g('add', '.'); g('commit', '-q', '-m', 'chore: journal');
         fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), '{"edited":true}');
         expect(captureReceiptPrecondition(root).eligible).toBe(true);
+    });
+    test('R2.1 the pre-run check sees untracked files even when status.showUntrackedFiles is no', () => {
+        g('config', 'status.showUntrackedFiles', 'no');
+        fs.writeFileSync(path.join(root, 'new.ts'), 'export {};');
+        expect(g('status', '--porcelain')).toBe('');
+        const pre = captureReceiptPrecondition(root);
+        expect(pre.eligible).toBe(false);
+        expect(pre.eligible === false && pre.reason).toMatch(/uncommitted/);
+    });
+    test('R2.1 with status.showUntrackedFiles no, an untracked runtime-state file stays eligible', () => {
+        g('config', 'status.showUntrackedFiles', 'no');
+        fs.mkdirSync(path.join(root, '.awm', 'journal'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'journal', 'j.json'), 'x');
+        expect(captureReceiptPrecondition(root).eligible).toBe(true);
+    });
+    test.each([
+        ['a path traversal', '../../../x'], ['a slash', 'a/b'], ['39 hex', 'a'.repeat(39)], ['41 hex', 'a'.repeat(41)],
+        ['uppercase hex', 'A'.repeat(40)], ['a non-string', 5 as unknown as string], ['undefined', undefined as unknown as string],
+    ])('R2.5 writeReceipt rejects %s as commit and writes nothing', (_n, commit) => {
+        const valid = buildReceipt({ commit: g('rev-parse', 'HEAD'), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+        const before = listTree(root);
+        const attempt = () => writeReceipt(root, { ...valid, commit });
+        expect(attempt).toThrow(/invalid receipt/);
+        expect(attempt).not.toThrow(TypeError);
+        expect(listTree(root)).toEqual(before);
+        expect(fs.existsSync(path.join(root, '.awm'))).toBe(false);
+    });
+    test.each([['null', null], ['a string', 'x'], ['an array', []]])('R2.5 writeReceipt rejects %s as receipt without a raw TypeError', (_n, receipt) => {
+        const attempt = () => writeReceipt(root, receipt as never);
+        expect(attempt).toThrow(/invalid receipt/);
+        expect(attempt).not.toThrow(TypeError);
+        expect(fs.existsSync(path.join(root, '.awm'))).toBe(false);
+    });
+    test.each([['undefined', undefined], ['empty', ''], ['a number', 5]])('R2.5 writeReceipt rejects %s as root', (_n, bad) => {
+        const valid = buildReceipt({ commit: g('rev-parse', 'HEAD'), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+        const attempt = () => writeReceipt(bad as never, valid);
+        expect(attempt).toThrow(/root must be a non-empty string/);
+        expect(attempt).not.toThrow(TypeError);
+    });
+    test('R2.5 writeReceipt rejects a receipt whose digest does not match', () => {
+        const valid = buildReceipt({ commit: g('rev-parse', 'HEAD'), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+        expect(() => writeReceipt(root, { ...valid, overall: 'fail' })).toThrow(/invalid receipt: digest/);
+        expect(fs.existsSync(path.join(root, '.awm'))).toBe(false);
+    });
+    test('R2.3 a valid receipt round-trips write then read', () => {
+        const head = writeValid();
+        const read = readReceipt(root, head);
+        expect(read.ok && read.receipt.commit).toBe(head);
+        expect(read.ok && read.receipt.digest).toMatch(/^sha256:/);
+    });
+    test.each([
+        ['a multi-line sensor name', { overall: 'pass', sensors: [{ name: 'a\nb', status: 'pass', errors: [] }] }, undefined],
+        ['an empty sensor name', { overall: 'pass', sensors: [{ name: '', status: 'pass', errors: [] }] }, undefined],
+        ['a 129 code point sensor name', { overall: 'pass', sensors: [{ name: '\u{1F600}'.repeat(129), status: 'pass', errors: [] }] }, undefined],
+        ['an unknown overall', { overall: 'great', sensors: [] }, undefined],
+        ['an unknown sensor status', { overall: 'pass', sensors: [{ name: 'lint', status: 'ok', errors: [] }] }, undefined],
+        ['non-array sensors', { overall: 'pass', sensors: 'x' }, undefined],
+        ['a multi-line cliVersion', output, '1\n2'],
+    ])('R2.5 finalizeReceipt fails closed on %s: one escaped stderr line and nothing written', (_n, out, version) => {
+        const pre = captureReceiptPrecondition(root);
+        const note = finalizeReceipt(pre, out as never, { version: () => version ?? '1.0.0' });
+        expect(note).toMatch(/^no sensor receipt written: invalid receipt: [^\n]+\n$/);
+        expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
+    });
+    test('R2.5 a sensor name of exactly 128 code points is accepted and round-trips', () => {
+        const name = '\u{1F600}'.repeat(128);
+        const pre = captureReceiptPrecondition(root);
+        expect(finalizeReceipt(pre, { overall: 'pass', sensors: [{ name, status: 'pass', errors: [] }] } as never)).toBe('');
+        const read = readReceipt(root, g('rev-parse', 'HEAD'));
+        expect(read.ok && Object.keys(read.receipt.sensors)).toEqual([name]);
+    });
+    test('R2.5 a receipt larger than readReceipt accepts is refused on write', () => {
+        const sensors = Array.from({ length: 12000 }, (_v, i) => ({ name: `${String(i).padStart(5, '0')}-${'x'.repeat(100)}`, status: 'pass', errors: [] }));
+        const pre = captureReceiptPrecondition(root);
+        expect(finalizeReceipt(pre, { overall: 'pass', sensors } as never)).toMatch(/^no sensor receipt written: invalid receipt: larger than/);
+        expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
+    });
+    test('R2.5 buildReceipt rejects a null input without a raw TypeError', () => {
+        expect(() => buildReceipt(null as never)).toThrow(/invalid receipt/);
+        expect(() => buildReceipt(null as never)).not.toThrow(TypeError);
+    });
+    test('R2.2 a real directory outside git still reports not a git repository', () => {
+        const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plain-'));
+        try {
+            const pre = captureReceiptPrecondition(plain);
+            expect(pre.eligible === false && pre.reason).toBe('not inside a git repository with a commit');
+        } finally { fs.rmSync(plain, { recursive: true, force: true }); }
+    });
+    describe('git failures', () => {
+        let spy: jest.SpyInstance; let statusOpts: Record<string, unknown> | undefined;
+        const failStatusWith = (code: string) => {
+            const real = childProcess.execFileSync;
+            statusOpts = undefined;
+            spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: Record<string, unknown>) => {
+                if (cmd === 'git' && args[0] === 'status') { statusOpts = opts; throw Object.assign(new Error(`spawnSync git ${code}`), { code }); }
+                return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+            }) as never);
+        };
+        afterEach(() => spy?.mockRestore());
+        test.each([['ENOBUFS'], ['ETIMEDOUT']])('R2.2 a %s from git status is reported as a git failure, not a missing repository', (code) => {
+            failStatusWith(code);
+            const pre = captureReceiptPrecondition(root);
+            expect(pre).toEqual({ eligible: false, reason: 'git command failed or timed out' });
+        });
+        test('R2.2 git status gets a large maxBuffer', () => {
+            failStatusWith('ENOBUFS');
+            captureReceiptPrecondition(root);
+            expect(statusOpts?.maxBuffer).toBeGreaterThanOrEqual(64 * 1024 * 1024);
+        });
+        test('R2.2 a git failure during the post-run recheck withholds the receipt with the failure reason', () => {
+            const pre = captureReceiptPrecondition(root);
+            failStatusWith('ETIMEDOUT');
+            expect(finalizeReceipt(pre, output as never)).toBe('no sensor receipt written: git command failed or timed out\n');
+            expect(fs.existsSync(path.join(root, '.awm', 'sensors', 'runs'))).toBe(false);
+        });
+        test('R2.2 git missing from PATH is a git failure', () => {
+            const real = childProcess.execFileSync;
+            spy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((cmd: string, args: string[], opts: Record<string, unknown>) => {
+                if (cmd === 'git' && args[0] === 'rev-parse') throw Object.assign(new Error('spawnSync git ENOENT'), { code: 'ENOENT' });
+                return (real as (...a: unknown[]) => unknown)(cmd, args, opts);
+            }) as never);
+            expect(captureReceiptPrecondition(root)).toEqual({ eligible: false, reason: 'git command failed or timed out' });
+        });
     });
     test('R2.1 the precondition resolves the repository root from a subdirectory', () => {
         fs.mkdirSync(path.join(root, 'sub'));
@@ -360,6 +484,19 @@ describe('receipt', () => {
         expect(fs.readdirSync(elsewhere)).toEqual([]);
         fs.rmSync(elsewhere, { recursive: true, force: true });
     });
+    test('a symlink refusal escapes control characters in the path it names', () => {
+        if (process.platform === 'win32') return;
+        const weirdRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-weird\n-'));
+        const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else-'));
+        try {
+            fs.symlinkSync(elsewhere, path.join(weirdRoot, '.awm'));
+            const r = buildReceipt({ commit: g('rev-parse', 'HEAD'), ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '1.0.0', output: output as never });
+            let message = '';
+            try { writeReceipt(weirdRoot, r); } catch (e) { message = (e as Error).message; }
+            expect(message).toMatch(/^refusing to use symlinked path /);
+            expect(message).not.toMatch(/[\n\r]/);
+        } finally { fs.rmSync(weirdRoot, { recursive: true, force: true }); fs.rmSync(elsewhere, { recursive: true, force: true }); }
+    });
     test('refuses a symlinked .awm directory on write', () => {
         if (process.platform === 'win32') return;
         const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-else-'));
@@ -418,6 +555,15 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         expect(written(stderr)).toMatch(/^no sensor receipt written: .*uncommitted.*\n$/);
         expect(written(stdout)).toContain('"overall": "fail"');
         expect(process.exitCode).toBe(1);
+        expect(fs.existsSync(receiptsDir())).toBe(false);
+    });
+    test('R2.5 a sensor name the receipt cannot hold withholds the receipt but leaves stdout and the exit code unchanged', async () => {
+        const bad = { overall: 'pass', sensors: [{ name: 'a\nb', status: 'pass', errors: [] }] };
+        (runSensors as jest.Mock).mockResolvedValue(bad);
+        await runCli();
+        expect(written(stdout)).toBe(JSON.stringify(bad, null, 2) + '\n');
+        expect(process.exitCode).toBe(0);
+        expect(written(stderr)).toMatch(/^no sensor receipt written: invalid receipt: [^\n]+\n$/);
         expect(fs.existsSync(receiptsDir())).toBe(false);
     });
     test('R2.2 untracked sensor output during the run still gets a receipt with no stderr', async () => {

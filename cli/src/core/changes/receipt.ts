@@ -23,6 +23,8 @@ const OVERALL = ['pass', 'fail', 'skipped', 'not_certified'];
 const STATUS = ['pass', 'fail', 'inconclusive', 'skipped'];
 const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
 const MAX_RECEIPT_BYTES = 1024 * 1024;
+const MAX_SENSOR_NAME = 128;
+const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 /** Local runtime state that never counts as a working-tree change. Everything else under `.awm/` (e.g. `.awm/sensors.json`) does. */
 export const RUNTIME_STATE_EXCLUDES: readonly string[] = ['.awm/sensors/runs', '.awm/journal', '.awm/ledger', '.awm/evidence', '.awm/track.json'];
 const GIT_OPTS = { encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: 15000 };
@@ -50,11 +52,52 @@ export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): strin
     return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
+function isCanonicalIso(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const time = new Date(value).getTime();
+    return !Number.isNaN(time) && new Date(time).toISOString() === value;
+}
+
+const isSensorName = (name: string): boolean => isSingleLine(name) && [...name].length >= 1 && [...name].length <= MAX_SENSOR_NAME;
+
+/**
+ * The ONE receipt shape check, shared by build, write and read so that nothing is written that cannot be read back.
+ * Returns a static description of the first problem (never echoes the offending value), or null when the receipt is pristine.
+ */
+function receiptProblem(x: unknown): string | null {
+    if (x === null || typeof x !== 'object' || Array.isArray(x)) return 'receipt must be an object';
+    const r = x as Record<string, unknown>;
+    const keys = Object.keys(r);
+    if (keys.length !== RECEIPT_KEYS.length || !RECEIPT_KEYS.every((k) => k in r)) return 'receipt must have exactly the schema keys';
+    if (r.schema !== 1) return 'schema must be 1';
+    if (typeof r.commit !== 'string' || !SHA_RE.test(r.commit)) return 'commit must be 40 lowercase hex characters';
+    if (!isCanonicalIso(r.ranAt)) return 'ranAt must be a canonical ISO timestamp';
+    if (!isSingleLine(r.cliVersion)) return 'cliVersion must be a single line';
+    if (typeof r.overall !== 'string' || !OVERALL.includes(r.overall)) return 'overall is not a known verdict';
+    const sensors = r.sensors;
+    if (sensors === null || typeof sensors !== 'object' || Array.isArray(sensors)) return 'sensors must be an object';
+    for (const [name, status] of Object.entries(sensors)) {
+        if (!isSensorName(name)) return `sensor names must be a single line of 1 to ${MAX_SENSOR_NAME} characters`;
+        if (typeof status !== 'string' || !STATUS.includes(status)) return 'a sensor status is not a known status';
+    }
+    if (typeof r.digest !== 'string') return 'digest must be a string';
+    const { digest, ...body } = r as unknown as SensorReceipt;
+    if (computeReceiptDigest(body) !== digest) return 'digest does not match the content';
+    return null;
+}
+
+/** Builds a receipt and fails closed: throws an Error naming the problem when the result is not one `readReceipt` would accept. */
 export function buildReceipt(input: { commit: string; ranAt: string; cliVersion: string; output: Pick<RunOutput, 'overall' | 'sensors'> }): SensorReceipt {
-    if (typeof input.commit !== 'string' || !SHA_RE.test(input.commit)) throw new Error('receipt commit must be 40 lowercase hex characters');
-    const sensors = sortedSensors(Object.fromEntries(input.output.sensors.map((s) => [s.name, s.status])) as Record<string, SensorStatus>);
-    const body = { schema: 1 as const, commit: input.commit, ranAt: input.ranAt, cliVersion: input.cliVersion, overall: input.output.overall as Overall, sensors };
-    return { ...body, digest: computeReceiptDigest(body) };
+    const out = input === null || typeof input !== 'object' ? undefined : input.output;
+    if (out === null || typeof out !== 'object' || !Array.isArray(out.sensors) || out.sensors.some((s) => s === null || typeof s !== 'object')) {
+        throw new Error('invalid receipt: run output must carry a sensors array');
+    }
+    const sensors = sortedSensors(Object.fromEntries(out.sensors.map((s) => [s.name, s.status])) as Record<string, SensorStatus>);
+    const body = { schema: 1 as const, commit: input.commit, ranAt: input.ranAt, cliVersion: input.cliVersion, overall: out.overall as Overall, sensors };
+    const receipt = { ...body, digest: computeReceiptDigest(body) };
+    const problem = receiptProblem(receipt);
+    if (problem !== null) throw new Error(`invalid receipt: ${problem}`);
+    return receipt;
 }
 
 function runsDir(root: string): string {
@@ -66,7 +109,7 @@ function assertNoSymlinkChain(root: string): void {
     for (const segment of ['.awm', 'sensors', 'runs']) {
         current = path.join(current, segment);
         try {
-            if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`refusing to use symlinked path ${current}`);
+            if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`refusing to use symlinked path ${esc(current)}`);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
             throw error;
@@ -74,12 +117,18 @@ function assertNoSymlinkChain(root: string): void {
     }
 }
 
+/** Writes a receipt. Validates with the same check `readReceipt` applies BEFORE touching the filesystem; throws an Error (never a raw TypeError). */
 export function writeReceipt(root: string, receipt: SensorReceipt): string {
+    if (typeof root !== 'string' || root.length === 0) throw new Error('receipt root must be a non-empty string');
+    const problem = receiptProblem(receipt);
+    if (problem !== null) throw new Error(`invalid receipt: ${problem}`);
+    const content = JSON.stringify(receipt, null, 2) + '\n';
+    if (Buffer.byteLength(content) > MAX_RECEIPT_BYTES) throw new Error('invalid receipt: larger than the size readReceipt accepts');
     assertNoSymlinkChain(root);
     fs.mkdirSync(runsDir(root), { recursive: true, mode: 0o700 });
     assertNoSymlinkChain(root);
     const file = path.join(runsDir(root), `${receipt.commit}.json`);
-    writeFileAtomic(file, JSON.stringify(receipt, null, 2) + '\n', 0o600);
+    writeFileAtomic(file, content, 0o600);
     // writeFileAtomic keeps the mode of a file it replaces; a receipt is always owner-only.
     fs.chmodSync(file, 0o600);
     return file;
@@ -88,12 +137,6 @@ export function writeReceipt(root: string, receipt: SensorReceipt): string {
 export type ReadReceipt = { ok: true; receipt: SensorReceipt } | { ok: false; code: 'receipt-missing' | 'receipt-invalid' };
 
 const INVALID: ReadReceipt = { ok: false, code: 'receipt-invalid' };
-
-function isCanonicalIso(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
-    const time = new Date(value).getTime();
-    return !Number.isNaN(time) && new Date(time).toISOString() === value;
-}
 
 /** Reads and verifies a receipt. Anything that is not a pristine, digest-matching receipt for `commit` reads as invalid (or missing). */
 export function readReceipt(root: string, commit: string): ReadReceipt {
@@ -111,32 +154,41 @@ export function readReceipt(root: string, commit: string): ReadReceipt {
     }
     let x: Record<string, unknown>;
     try { x = JSON.parse(raw); } catch { return INVALID; }
-    if (x === null || typeof x !== 'object' || Array.isArray(x) || Object.keys(x).length !== RECEIPT_KEYS.length || !RECEIPT_KEYS.every((k) => k in x)) return INVALID;
-    const sensors = x.sensors as Record<string, unknown>;
-    const shapeOk = x.schema === 1 && x.commit === commit && isCanonicalIso(x.ranAt)
-        && isSingleLine(x.cliVersion) && OVERALL.includes(x.overall as string)
-        && sensors !== null && typeof sensors === 'object' && !Array.isArray(sensors)
-        && Object.entries(sensors).every(([name, status]) => isSingleLine(name) && STATUS.includes(status as string))
-        && typeof x.digest === 'string';
-    if (!shapeOk) return INVALID;
+    if (receiptProblem(x) !== null || x.commit !== commit) return INVALID;
     const receipt = x as unknown as SensorReceipt;
-    const { digest, ...body } = receipt;
-    if (computeReceiptDigest(body) !== digest) return INVALID;
     return { ok: true, receipt };
 }
 
 export type Precondition = { eligible: true; root: string; commit: string } | { eligible: false; reason: string };
 
-/** `dirty` counts untracked files only when `untracked` is true (the pre-run measure); the post-run recheck ignores them. */
-function gitState(cwd: string, untracked: boolean): { root: string; commit: string; dirty: boolean } | null {
+type GitState = { kind: 'ok'; root: string; commit: string; dirty: boolean } | { kind: 'not-repo' } | { kind: 'failed' };
+
+const REASON_NOT_REPO = 'not inside a git repository with a commit';
+const REASON_GIT_FAILED = 'git command failed or timed out';
+
+/** A git that ran and exited non-zero (no repo, no commit) is `not-repo`; one that could not run, timed out or overflowed is `failed`. */
+function gitFailure(error: unknown): GitState {
+    return typeof (error as { status?: unknown }).status === 'number' ? { kind: 'not-repo' } : { kind: 'failed' };
+}
+
+/**
+ * `untracked` selects the pre-run measure (untracked files count, forced past any `status.showUntrackedFiles` config)
+ * or the post-run recheck (tracked changes only).
+ */
+function gitState(cwd: string, untracked: boolean): GitState {
+    let root: string; let commit: string;
     try {
-        const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd }).trim();
-        const commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root }).trim();
-        const args = ['status', '--porcelain', ...(untracked ? [] : ['--untracked-files=no']), '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`)];
-        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root });
-        return { root, commit, dirty: status.trim().length > 0 };
+        root = execFileSync('git', ['rev-parse', '--show-toplevel'], { ...GIT_OPTS, cwd }).trim();
+        commit = execFileSync('git', ['rev-parse', 'HEAD'], { ...GIT_OPTS, cwd: root }).trim();
+    } catch (error) {
+        return gitFailure(error);
+    }
+    try {
+        const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`)];
+        const status = execFileSync('git', args, { ...GIT_OPTS, cwd: root, maxBuffer: MAX_GIT_OUTPUT });
+        return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
     } catch {
-        return null;
+        return { kind: 'failed' };
     }
 }
 
@@ -144,7 +196,8 @@ function gitState(cwd: string, untracked: boolean): { root: string; commit: stri
 export function captureReceiptPrecondition(cwd: string): Precondition {
     if (typeof cwd !== 'string' || cwd.length === 0) return { eligible: false, reason: 'cwd must be a non-empty string' };
     const state = gitState(cwd, true);
-    if (!state) return { eligible: false, reason: 'not inside a git repository with a commit' };
+    if (state.kind === 'not-repo') return { eligible: false, reason: REASON_NOT_REPO };
+    if (state.kind === 'failed') return { eligible: false, reason: REASON_GIT_FAILED };
     if (state.dirty) return { eligible: false, reason: 'working tree has uncommitted changes (commit them first)' };
     if (!SHA_RE.test(state.commit)) return { eligible: false, reason: 'HEAD is not a 40-hex commit' };
     return { eligible: true, root: state.root, commit: state.commit };
@@ -156,7 +209,9 @@ export function finalizeReceipt(pre: Precondition, output: Pick<RunOutput, 'over
         if (pre === null || typeof pre !== 'object') return 'no sensor receipt written: precondition was not captured\n';
         if (!pre.eligible) return `no sensor receipt written: ${esc(pre.reason)}\n`;
         const after = gitState(pre.root, false);
-        if (!after || after.commit !== pre.commit || after.dirty) return 'no sensor receipt written: HEAD or tracked files changed during the run\n';
+        if (after.kind === 'failed') return `no sensor receipt written: ${REASON_GIT_FAILED}\n`;
+        if (after.kind === 'not-repo') return `no sensor receipt written: ${REASON_NOT_REPO}\n`;
+        if (after.commit !== pre.commit || after.dirty) return 'no sensor receipt written: HEAD or tracked files changed during the run\n';
         writeReceipt(pre.root, buildReceipt({ commit: pre.commit, ranAt: (deps.now ?? (() => new Date()))().toISOString(), cliVersion: (deps.version ?? cliVersion)(), output }));
         return '';
     } catch (error) {
