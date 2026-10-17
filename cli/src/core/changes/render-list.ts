@@ -56,7 +56,7 @@ export function renderText(result: ListResult, fallbackName: string): string {
         if (!usable(result)) return INVALID_TEXT;
         const name = repoName(result, fallbackName);
         const base = cleanLine(result.base, 255);
-        if (result.adopted === false) return `${clipMessage(`${name} has not adopted Change Records (no file under docs/changes/ on ${base}).`)}\n`;
+        if (result.adopted === false) return `${clipMessage(`${name} has not adopted Change Records (no record under docs/changes/ on ${base}).`)}\n`;
         if (result.changes.length === 0) return `${clipMessage(`No changes on ${base} since ${cleanLine(result.since, 40)}.`)}\n`;
         const lines = [clipMessage(header), ...result.changes.map(textRow)];
         if (result.truncated) lines.push(`... ${count(result.omitted)} older change(s) not shown; narrow --since to see them.`);

@@ -73,10 +73,10 @@ describe('renderJson (R5.6)', () => {
 
 describe('renderText (R5.6)', () => {
     test('a repository without records says so in one line, naming the repo and the base', () => {
-        expect(renderText(result({ adopted: false }), 'fallback')).toBe('belanz has not adopted Change Records (no file under docs/changes/ on main).\n');
+        expect(renderText(result({ adopted: false }), 'fallback')).toBe('belanz has not adopted Change Records (no record under docs/changes/ on main).\n');
     });
     test('without a remote the fallback name is used', () => {
-        expect(renderText(result({ adopted: false, repo: null }), 'my-dir')).toBe('my-dir has not adopted Change Records (no file under docs/changes/ on main).\n');
+        expect(renderText(result({ adopted: false, repo: null }), 'my-dir')).toBe('my-dir has not adopted Change Records (no record under docs/changes/ on main).\n');
     });
     test('an empty window says so', () => {
         expect(renderText(result(), 'f')).toBe('No changes on main since 2026-10-15T12:00:00.000Z.\n');

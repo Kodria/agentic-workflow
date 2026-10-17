@@ -165,6 +165,15 @@ describe('validateRecordShape', () => {
                 expectDiag(issue(v), 'field-invalid', 'links.issue');
             }
         });
+        test('R1.4 decision: the query and the fragment of an issue URL are legitimate and are not inspected; only the userinfo is refused', () => {
+            const issue = (v: string) => check({ links: `links:\n  issue: "${v}"` });
+            expect(issue('https://example.com/issues/1?foo=bar&label=x').diagnostics).toEqual([]);
+            expect(issue('https://example.com/issues/1#issuecomment-123').diagnostics).toEqual([]);
+            expect(issue('https://example.com/issues/1?token=abc#frag').diagnostics).toEqual([]);
+            expect(issue('https://example.com/issues/1?next=https://u:p@other.example/').diagnostics).toEqual([]);
+            expectDiag(issue('https://user:pw@example.com/issues/1?foo=bar'), 'field-invalid', 'links.issue');
+            expectDiag(issue('https://user@example.com/issues/1#frag'), 'field-invalid', 'links.issue');
+        });
         test.each(['"https://user@example.com/1"', '"https://user:SECRET@example.com/1"', '"https://:SECRET@example.com/1"'])('R1.4 links.issue %s carries credentials and is field-invalid (a record never holds a secret)', (v) => {
             const result = check({ links: `links:\n  issue: ${v}` });
             expectDiag(result, 'field-invalid', 'links.issue');

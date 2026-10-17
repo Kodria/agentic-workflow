@@ -156,6 +156,13 @@ describe('awm changes list: adoption (R5.4)', () => {
         expect(r.code).toBe(0);
         expect(JSON.parse(r.stdout)).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0, base: 'main' });
     });
+    test('R5.4 a docs/changes/ that holds only a README prints the one-line notice saying that no record exists (not that the directory is empty)', () => {
+        repo.commit({ 'docs/changes/README.md': 'how we record changes' }, 'docs: readme');
+        const r = run();
+        expect(r.code).toBe(0);
+        expect(r.stdout).toBe(`${path.basename(repo.root)} has not adopted Change Records (no record under docs/changes/ on main).\n`);
+        expect(JSON.parse(run({ format: 'json' }).stdout)).toMatchObject({ adopted: false, changes: [] });
+    });
     test('a repo without records is named after its directory when it has no remote', () => {
         expect(run().stdout.startsWith(`${path.basename(repo.root)} has not adopted`)).toBe(true);
     });
