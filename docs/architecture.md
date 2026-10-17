@@ -51,6 +51,7 @@ They ship on different clocks, and that's the point: your team's skills change w
 | `sensors.baseline.json` | Snapshot of pre-existing findings (legacy ratchet) | **Yes** |
 | `ledger/<branch>.jsonl` | Per-branch findings, for the retro | No (gitignored) |
 | `journal/<branch>/` | Durable job state for `awm watch` | No |
+| `sensors/runs/<commit>.json` | Sensor receipt of a clean full `awm sensors run` (mode `0600`; the directory carries its own `.gitignore` of `*`) | No |
 
 `profile.json` is the interesting one: it's **agent-agnostic**. It records *what* the project needs, not *where* it goes. Each developer's `awm init -a <their agent>` resolves that to their own paths — which is how one committed file serves a team using six different agents.
 
@@ -144,9 +145,25 @@ Uncertain evidence stays `unverifiable` or `compatible-unverified`.
 
 Detection is a convenience; `awm sensors init --pack <name>` is the contract. If no pack exists for the detected stack, the manifest is **honestly empty** — AWM does not invent defaults (that behaviour, `FALLBACK_DEFAULTS`, was deliberately removed).
 
-`awm sensors run` is **read-only**: it runs the manifest as committed and never rewrites `.awm/sensors.json` or copies pack config files into the tree. When the manifest's pack no longer matches the tree it reports the drift (`packDrift`) and names `awm sensors init`, the verb that adopts a pack. A measuring command that edits what it measures was a real bug, not a hypothetical.
+`awm sensors run` never edits what it measures: it runs the manifest as committed and never rewrites `.awm/sensors.json` or copies pack config files into the tree. When the manifest's pack no longer matches the tree it reports the drift (`packDrift`) and names `awm sensors init`, the verb that adopts a pack. A measuring command that edits what it measures was a real bug, not a hypothetical. Its one write is the sensor receipt (`.awm/sensors/runs/<commit>.json`), made after the verdict is printed, only for a complete run on a clean committed tree, and never changing stdout or the exit code (conditions in the [CLI reference](cli-reference.md#sensor-receipt)). The read-only run behind `--verify-sensors` calls `runSensors` directly and writes no receipt.
 
 Execution is `execFileSync` with an **argument array — never a shell string**. Filenames reaching a sensor can come from `git diff` on an untrusted checkout, and on Windows a shell round-trip re-opens the batch-argument-injection class (CVE-2024-27980). No shell, no injection surface.
+
+### Change Records
+
+`cli/src/core/changes/` holds the Change Record logic as small units with no command wiring; the commands are thin adapters over them.
+
+| Unit | Role |
+|---|---|
+| `parse.ts`, `validate-shape.ts`, `types.ts`, `text-safety.ts` | The record format `awm.change-record/v1`: size-bounded frontmatter split, safe YAML (no anchors, aliases or custom tags), and the single hand-written validator that is the source of truth (no published JSON Schema; `awm changes list --format json` is the machine contract). Every diagnostic is single-line and escaped. |
+| `derive.ts`, `range.ts` | Derived fields over `merge-base..HEAD`, reusing the release parser (`release/core.ts`) so `semver` here and the published bump agree. |
+| `git.ts`, `git-env.ts`, `worktree.ts` | `execFileSync` wrappers with no shell and bounded timeouts; every child runs with `GIT_NO_LAZY_FETCH=1`. |
+| `receipt.ts` | Receipt build, digest, atomic `0600` write and tamper-checked read. Used by `awm sensors run` (write) and by `change new` / `change validate --strict` (read). |
+| `record-io.ts`, `fs-safe.ts`, `render.ts` | Symlink-refusing, size-bounded record reads and exclusive creates; the skeleton and the byte-preserving `--refresh`. |
+| `trailers.ts` | The `Change-Record: none` opt-out, parsed from the commit message body, independent of git's `trailer.*` configuration. |
+| `list.ts`, `list-parse.ts`, `render-list.ts` | `awm changes list`: classification, tag lookup per entry, paging over first-parent history, and the three renderings. |
+
+`cli/src/commands/change/` registers `awm change new|validate` and `cli/src/commands/changes/` registers `awm changes list`; `cli/src/commands/sensors/index.ts` calls the receipt writer after `runSensors`. `list` and `validate` write nothing; `new` writes only under `docs/changes/`.
 
 ---
 
@@ -167,6 +184,8 @@ The rules the design rests on. Violating any one of these produces a bug of a cl
 ## 9 · Release
 
 Pushing to `main` triggers `.github/workflows/release.yml`: build → full test suite → version bump from the conventional-commit prefix (`feat` → minor, `fix` → patch, `!`/`BREAKING` → major) → `npm publish` via OIDC trusted publisher.
+
+The version-bump commit (`chore(release): vX.Y.Z [skip ci]`) carries the trailer `Change-Record: none` in its body, so `awm changes list` reports it as `exempt` rather than `missing`; its subject is unchanged.
 
 Never run `npm publish` by hand, and never add a parallel publish workflow. CI gates the release on the tests passing — that gate is the point.
 

@@ -186,6 +186,30 @@ review outputs are evidence. A legacy baseline can accept existing debt while
 blocking new findings, so adoption does not require pretending the repository
 was already clean.
 
+### Change Records
+
+A Change Record is a short, structured account of one change, kept in the
+repository as `docs/changes/YYYY-MM-DD-<slug>.md`: what was done, what was
+verified, what still needs manual validation, and the risks and rollback. The
+CLI derives the checkable fields (`type`, `scope`, `semver`, `breaking`,
+`modules`, and the sensor verdict bound to a commit) from git and from the
+receipt that a full `awm sensors run` leaves, and the author writes the
+narrative. `awm change validate` recomputes the derived fields, so a record
+cannot claim a verification the evidence does not support. A record is
+immutable once merged: whether and when it merged, and in which release, are
+derived at query time by `awm changes list`, and no index file exists to
+conflict between parallel branches. Commands and output: [CLI reference](cli-reference.md#change-records-what-each-change-did-verified).
+
+A change that needs no record opts out with a `Change-Record: none` trailer in
+the final paragraph of any of its commit messages. The release bump commit
+carries it. A host that squash-merges concatenates the branch's commit messages,
+so a trailer that ended one commit is no longer in the final paragraph of the
+merged message; put it in the final paragraph of the squash message (the pull
+request description or the edited merge message). Changes that skip both are
+reported as `missing`, not blocked: the gate is local. The skills that generate
+and validate the record as part of finishing a branch arrive in a follow-up
+release; until then the commands are run by hand.
+
 ### Transactions, backups, and recovery
 
 AWM plans filesystem changes and protects user-owned content with backups. A
@@ -201,6 +225,7 @@ not a partially explained state.
 | Planning | File-level implementation plan | Connects the change to proof. |
 | Execution | Source, tests, and focused findings | Records the work actually performed. |
 | Quality | Sensor output, reviews, verification | Separates evidence from assertion. |
+| Delivery | Change Record (`docs/changes/`) | Summarizes one change, what verified it, and what remains to validate. |
 | Learning | Ledger entries and retrospective | Improves the next cycle. |
 
 ## Adoption cases
