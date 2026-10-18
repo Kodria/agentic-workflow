@@ -154,6 +154,8 @@ S1 gains tests for (1) and (2) and an indented `  # comentario` line after a val
 
 S1 tests: the four plain shapes above are rejected with the new message; `"Use when: tracing"` (quoted) is accepted; the A1/A2 line-number assertions use the new wording.
 
+**Amendment A6 (S2 reviews, 2026-10-18):** the S2 amendment text also names the trailing-`:` quoting rule (`termina en \`:\``), and says the 1024 limit counts characters as Unicode code points (`de a lo sumo 1024 caracteres (code points)`). The structural test collapses whitespace in the section before matching, as `cloud-admission-docs-contract.test.ts` does, so rewrapping the prose does not break it. It also pins `termina en`.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
@@ -340,7 +342,7 @@ Run CMD-DOCS → fails.
 ```markdown
 #### Enmienda 2026-10-18 — `description` opcional
 
-`description` es el único campo opcional del contrato. Existe porque el modelo *es* el `SKILL.md` del skill, y hay runtimes (Codex) que no cargan un `SKILL.md` sin `description`: sin el campo, el proceso queda instalado pero invisible en esas sesiones (Kodria/awm-personal-registry#3). Reglas: una sola línea, escalar plano o entre comillas (no se admiten block scalars `>`/`|`), no vacío y de a lo sumo 1024 caracteres. Un modelo sin `description` sigue siendo válido; cualquier otro campo fuera de la lista se sigue rechazando. El CLI rechaza las formas inválidas comunes (bloques, valores de varias líneas, comillas sin cerrar, un valor que es solo un comentario, y un valor sin comillas que contiene `: ` o empieza con un indicador YAML: esos van entre comillas), pero no reemplaza a un parser YAML: texto suelto después de una comilla cerrada no se detecta. Requiere `agentic-workflow-manager` posterior a 9.20.0: un CLI anterior rechaza el modelo con `unknown field "description"`.
+`description` es el único campo opcional del contrato. Existe porque el modelo *es* el `SKILL.md` del skill, y hay runtimes (Codex) que no cargan un `SKILL.md` sin `description`: sin el campo, el proceso queda instalado pero invisible en esas sesiones (Kodria/awm-personal-registry#3). Reglas: una sola línea, escalar plano o entre comillas (no se admiten block scalars `>`/`|`), no vacío y de a lo sumo 1024 caracteres (code points). Un modelo sin `description` sigue siendo válido; cualquier otro campo fuera de la lista se sigue rechazando. El CLI rechaza las formas inválidas comunes (bloques, valores de varias líneas, comillas sin cerrar, un valor que es solo un comentario, y un valor sin comillas que contiene `: `, termina en `:` o empieza con un indicador YAML: esos van entre comillas), pero no reemplaza a un parser YAML: texto suelto después de una comilla cerrada no se detecta. Requiere `agentic-workflow-manager` posterior a 9.20.0: un CLI anterior rechaza el modelo con `unknown field "description"`.
 ```
 
 - [ ] **Step 3 — GREEN.** Run CMD-DOCS → passes. Commit `docs(process): document the optional description field`.
