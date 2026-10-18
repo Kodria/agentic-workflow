@@ -1248,7 +1248,7 @@ Además: 1 cambio(s) sin record y 1 con record inválido.
 
 A shallow clone fails with `shallow-history` (remedy `git fetch --unshallow`), because its oldest commits cannot be told from root commits. In a partial clone the command never fetches missing objects (it sets `GIT_NO_LAZY_FETCH=1`), so an affected change fails closed; that guarantee needs **git 2.43 or newer**, and older versions may fetch lazily. The scan reads history in pages and assumes commit dates do not decrease along the first-parent chain, so a commit dated inside the window beyond a page with none inside it (clock skew) is not listed.
 
-The skills that run this flow for you (declaring the slug in the plan, generating and validating the record before merge, building the PR body from it) are not part of this release; today you run the commands yourself.
+The baseline registry's `dev` bundle runs this flow for you from version 4.11.0 (registry tag `v4.10.0`): `writing-plans` 2.3.0 declares the planned slug and acceptance criteria in the plan header, and `finishing-a-development-branch` 2.2.0 commits, runs `awm sensors run`, `awm change new` and `awm change validate --strict` before a merge or pull request, and builds the pull request body from the record. Both need this CLI at 9.20.0 or newer; with an older CLI, or a project whose sensors are declared `opt-out` or `native-gate`, they state the limitation and continue without a record. With an older bundle, run the commands yourself.
 
 ---
 

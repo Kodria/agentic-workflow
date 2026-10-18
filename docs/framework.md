@@ -206,9 +206,11 @@ carries it. A host that squash-merges concatenates the branch's commit messages,
 so a trailer that ended one commit is no longer in the final paragraph of the
 merged message; put it in the final paragraph of the squash message (the pull
 request description or the edited merge message). Changes that skip both are
-reported as `missing`, not blocked: the gate is local. The skills that generate
-and validate the record as part of finishing a branch arrive in a follow-up
-release; until then the commands are run by hand.
+reported as `missing`, not blocked: the gate is local. From the baseline
+registry's `dev` bundle 4.11.0 (tag `v4.10.0`), `writing-plans` declares the
+planned record in the plan header and `finishing-a-development-branch`
+generates and validates it before integrating a branch; with an older bundle
+the commands are run by hand.
 
 ### Transactions, backups, and recovery
 
