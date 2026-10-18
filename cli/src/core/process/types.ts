@@ -11,6 +11,8 @@ export interface ProcessModelFrontmatter {
     terminatesTo: string;
     created: string;
     updated: string;
+    /** Optional. Single-line scalar, resolved (quotes removed). Absent → no key. */
+    description?: string;
 }
 
 export interface ProcessRoutingRow {

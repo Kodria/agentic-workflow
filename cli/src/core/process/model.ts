@@ -3,14 +3,19 @@
 // Disciplina heredada literal de core/orchestrators.ts: NUNCA lanza. Un modelo
 // malformado se rechaza con diagnóstico y no invalida al registry que lo
 // contiene ni a los demás (R7.1).
-import { matchFrontmatterBlock } from '../frontmatter';
+import { findFrontmatterDescription, isBlockScalarHeader, matchFrontmatterBlock } from '../frontmatter';
 import { KNOWN_PROCESS_SCHEMA, type ProcessModelFrontmatter, type ProcessParseResult, type ProcessStatus } from './types';
 
 /** El discriminador es literal: ningún documento se reconoce como modelo por su
  *  cuerpo, sus headings ni su nombre de archivo (R1.2). */
 const DISCRIMINATOR = 'process-model';
 
-const ALLOWED_FIELDS = ['awm', 'schema', 'name', 'status', 'entry_point', 'terminates_to', 'created', 'updated'] as const;
+/** `description` es el único campo opcional: runtimes como Codex se niegan a
+ *  cargar un `SKILL.md` sin él, y el modelo *es* el `SKILL.md` del skill. */
+const ALLOWED_FIELDS = ['awm', 'schema', 'name', 'status', 'entry_point', 'terminates_to', 'created', 'updated', 'description'] as const;
+
+/** Límite de Agent Skills que imponen los runtimes que consumen el skill. */
+const DESCRIPTION_MAX = 1024;
 const STATUSES: readonly string[] = ['draft', 'active'];
 
 /** El slug es lo único del modelo que puede viajar dentro de un id del Dashboard
@@ -89,6 +94,23 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         if (value !== '' && !DATE.test(value)) problems.push(`"${field}" must be YYYY-MM-DD`);
     }
 
+    // Un block scalar ya deja sus líneas de continuación rechazadas por
+    // readPairs; el mensaje explícito le dice al autor por qué. Al resolver se
+    // pasa SOLO la línea `description:`, para que continuaciones de otros
+    // campos no se plieguen dentro del valor. El valor nunca va al diagnóstico.
+    let description: string | undefined;
+    const rawDescription = pairs.get('description');
+    if (rawDescription !== undefined) {
+        if (/^[>|]/.test(rawDescription) || isBlockScalarHeader(rawDescription)) {
+            problems.push('"description" must be a single-line string (block scalars are not supported in a process model)');
+        } else {
+            const resolved = findFrontmatterDescription(`description: ${rawDescription}`).value.trim();
+            if (resolved === '') problems.push('"description" must not be empty');
+            else if (resolved.length > DESCRIPTION_MAX) problems.push(`"description" must be at most ${DESCRIPTION_MAX} characters`);
+            else description = resolved;
+        }
+    }
+
     if (problems.length > 0) {
         return { diagnostics: [`${file}: invalid process model — ${problems.join('; ')}`] };
     }
@@ -97,6 +119,7 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         model: {
             schema, name, status: status as ProcessStatus, entryPoint: entryPointRaw === 'true',
             terminatesTo, created: pairs.get('created')!, updated: pairs.get('updated')!,
+            ...(description !== undefined ? { description } : {}),
         },
         diagnostics: [],
     };

@@ -92,4 +92,63 @@ describe('parseProcessFrontmatter', () => {
         expect(r.model).toBeUndefined();
         expect(r.diagnostics.join(' ')).toMatch(new RegExp(`"${field}" is required`));
     });
+
+    describe('description (optional)', () => {
+        const withDescription = (line: string): string => valid.replace('created:', `${line}\ncreated:`);
+
+        it('is optional: a model without it parses unchanged and has no description key', () => {
+            const r = parseProcessFrontmatter(valid, 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model).toBeDefined();
+            expect(Object.prototype.hasOwnProperty.call(r.model, 'description')).toBe(false);
+        });
+
+        it.each([
+            ['plain', 'description: Use when tracing a work session', 'Use when tracing a work session'],
+            ['double-quoted', 'description: "Use when: tracing \\"sessions\\""', 'Use when: tracing "sessions"'],
+            ['single-quoted', "description: 'It''s the entry point'", "It's the entry point"],
+        ])('accepts a %s single-line value and exposes it resolved', (_kind, line, expected) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe(expected);
+        });
+
+        it('accepts exactly 1024 characters and rejects 1025', () => {
+            expect(parseProcessFrontmatter(withDescription(`description: ${'a'.repeat(1024)}`), 'p').model?.description).toHaveLength(1024);
+            const r = parseProcessFrontmatter(withDescription(`description: ${'a'.repeat(1025)}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
+        });
+
+        it.each(['description:', 'description: ""', "description: ''", 'description: "   "'])('rejects an empty value: %s', (line) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must not be empty/);
+        });
+
+        it.each(['description: >', 'description: >-', 'description: |', 'description: |2+', 'description: >-basura'])('rejects a block scalar header: %s', (line) => {
+            const r = parseProcessFrontmatter(withDescription(`${line}\n  folded text`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must be a single-line string \(block scalars are not supported in a process model\)/);
+        });
+
+        it('still rejects every other unknown field next to a valid description', () => {
+            const r = parseProcessFrontmatter(withDescription('description: ok\nsummary: nope'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/unknown field "summary"/);
+            expect(r.diagnostics.join(' ')).not.toMatch(/unknown field "description"/);
+        });
+
+        it('rejects a duplicated description', () => {
+            const r = parseProcessFrontmatter(withDescription('description: a\ndescription: b'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/duplicate field "description"/);
+        });
+
+        it('never throws on hostile description values', () => {
+            for (const line of ['description: "unclosed', "description: '''", 'description: \x00', `description: ${'"'.repeat(5000)}`]) {
+                expect(() => parseProcessFrontmatter(withDescription(line), 'p')).not.toThrow();
+            }
+        });
+    });
 });
