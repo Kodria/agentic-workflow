@@ -145,6 +145,19 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics.join(' ')).toMatch(/duplicate field "description"/);
         });
 
+        it.each([
+            ['a block scalar', 'description: >-\n  SECRETVALUE here'],
+            ['a plain multi-line value', 'description: first\n  SECRETVALUE second'],
+            ['a quote closed on a later line', 'description: "hola\n  SECRETVALUE mundo"'],
+        ])('reports %s by line position and never echoes its content', (_kind, lines) => {
+            // Bloque del fixture: awm(1) … terminates_to(6); la línea description
+            // queda en 7 y su continuación en 8.
+            const r = parseProcessFrontmatter(withDescription(lines), 'p');
+            expect(r.model).toBeUndefined();
+            for (const d of r.diagnostics) expect(d).not.toContain('SECRETVALUE');
+            expect(r.diagnostics.join(' ')).toContain('line 8 is not a "key: value" pair (multi-line values are not supported)');
+        });
+
         it('never throws on hostile description values', () => {
             for (const line of ['description: "unclosed', "description: '''", 'description: \x00', `description: ${'"'.repeat(5000)}`]) {
                 expect(() => parseProcessFrontmatter(withDescription(line), 'p')).not.toThrow();

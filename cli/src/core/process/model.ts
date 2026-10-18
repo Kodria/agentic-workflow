@@ -31,11 +31,15 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 function readPairs(block: string): { pairs: Map<string, string>; problems: string[] } {
     const pairs = new Map<string, string>();
     const problems: string[] = [];
-    for (const raw of block.split(/\r?\n/)) {
+    const lines = block.split(/\r?\n/);
+    for (const [index, raw] of lines.entries()) {
         const line = raw.trim();
         if (line === '' || line.startsWith('#')) continue;
         const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
-        if (!m) { problems.push(`line is not a "key: value" pair: ${JSON.stringify(line.slice(0, 80))}`); continue; }
+        // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
+        // contenido: una línea suelta suele ser la continuación de un valor
+        // multilínea, y los diagnósticos no transportan valores de campos.
+        if (!m) { problems.push(`line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
         if (pairs.has(m[1])) { problems.push(`duplicate field ${JSON.stringify(m[1])}`); continue; }
         pairs.set(m[1], m[2].trim());
     }
