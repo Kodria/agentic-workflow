@@ -3,7 +3,7 @@
 // Disciplina heredada literal de core/orchestrators.ts: NUNCA lanza. Un modelo
 // malformado se rechaza con diagnóstico y no invalida al registry que lo
 // contiene ni a los demás (R7.1).
-import { findFrontmatterDescription, isBlockScalarHeader, matchFrontmatterBlock, opensUnclosedQuote } from '../frontmatter';
+import { findFrontmatterDescription, matchFrontmatterBlock, opensUnclosedQuote } from '../frontmatter';
 import { KNOWN_PROCESS_SCHEMA, type ProcessModelFrontmatter, type ProcessParseResult, type ProcessStatus } from './types';
 
 /** El discriminador es literal: ningún documento se reconoce como modelo por su
@@ -17,6 +17,9 @@ const ALLOWED_FIELDS = ['awm', 'schema', 'name', 'status', 'entry_point', 'termi
 /** Límite de Agent Skills que imponen los runtimes que consumen el skill.
  *  Se cuenta en code points, no en unidades UTF-16. */
 const DESCRIPTION_MAX = 1024;
+
+/** Indicadores YAML que no pueden abrir un escalar plano sin cambiar su lectura. */
+const PLAIN_INDICATOR = /^[[\]{},&*!%@`]/;
 const STATUSES: readonly string[] = ['draft', 'active'];
 
 /** El slug es lo único del modelo que puede viajar dentro de un id del Dashboard
@@ -44,7 +47,7 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
-        if (!m) { problems.push(`line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
+        if (!m) { problems.push(`frontmatter line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
         if (pairs.has(m[1])) { problems.push(`duplicate field ${JSON.stringify(m[1])}`); continue; }
         pairs.set(m[1], m[2].trim());
     }
@@ -110,7 +113,9 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     let description: string | undefined;
     const rawDescription = pairs.get('description');
     if (rawDescription !== undefined) {
-        if (/^[>|]/.test(rawDescription) || isBlockScalarHeader(rawDescription)) {
+        // El prefijo alcanza: todo header que isBlockScalarHeader acepta empieza
+        // con `>` o `|`, y los mal formados (`>-basura`) también caen acá.
+        if (/^[>|]/.test(rawDescription)) {
             problems.push('"description" must be a single-line string (block scalars are not supported in a process model)');
         } else {
             // Un valor que empieza con `#` es un comentario YAML: el campo vale
@@ -122,6 +127,13 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
             // como comentario). Precede a las reglas de vacío y longitud.
             if (opensUnclosedQuote(rawDescription)) problems.push('"description" must close its quote on the same line');
             else if (resolved === '') problems.push('"description" must not be empty');
+            // Un escalar plano que YAML no leería como el mismo string: `: `
+            // dentro o `:` al final lo vuelven un mapa, y un indicador inicial
+            // (flow, ancla, tag, reservado) cambia su tipo. Sobre `resolved`
+            // porque, para un plano, el helper solo quita el ` # comentario`.
+            else if (!/^['"]/.test(rawDescription) && (PLAIN_INDICATOR.test(rawDescription) || resolved.includes(': ') || resolved.endsWith(':'))) {
+                problems.push('"description" must be quoted when it contains ": " or starts with a YAML indicator');
+            }
             else if ([...resolved].length > DESCRIPTION_MAX) problems.push(`"description" must be at most ${DESCRIPTION_MAX} characters`);
             else description = resolved;
         }

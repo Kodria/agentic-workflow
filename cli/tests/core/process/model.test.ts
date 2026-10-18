@@ -155,7 +155,7 @@ describe('parseProcessFrontmatter', () => {
             const r = parseProcessFrontmatter(withDescription(lines), 'p');
             expect(r.model).toBeUndefined();
             for (const d of r.diagnostics) expect(d).not.toContain('SECRETVALUE');
-            expect(r.diagnostics.join(' ')).toContain('line 8 is not a "key: value" pair (multi-line values are not supported)');
+            expect(r.diagnostics.join(' ')).toContain('frontmatter line 8 is not a "key: value" pair (multi-line values are not supported)');
         });
 
         it.each([
@@ -165,7 +165,7 @@ describe('parseProcessFrontmatter', () => {
             const r = parseProcessFrontmatter(withDescription(lines), 'p');
             expect(r.model).toBeUndefined();
             for (const d of r.diagnostics) expect(d).not.toContain('SECRETKEY');
-            expect(r.diagnostics.join(' ')).toContain('line 8 is not a "key: value" pair (multi-line values are not supported)');
+            expect(r.diagnostics.join(' ')).toContain('frontmatter line 8 is not a "key: value" pair (multi-line values are not supported)');
             if (isBlock) {
                 expect(r.diagnostics.join(' ')).toMatch(/"description" must be a single-line string \(block scalars are not supported in a process model\)/);
             }
@@ -209,6 +209,30 @@ describe('parseProcessFrontmatter', () => {
             const r = parseProcessFrontmatter(withDescription('description: ok\n  # comentario'), 'p');
             expect(r.diagnostics).toEqual([]);
             expect(r.model?.description).toBe('ok');
+        });
+
+        it.each([
+            'description: Use when: tracing',
+            'description: ends with colon:',
+            'description: @x',
+            'description: [a, b]',
+            'description: &a hi',
+        ])('rejects a plain value YAML would misread: %s', (line) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must be quoted when it contains ": " or starts with a YAML indicator/);
+        });
+
+        it('accepts the same text when quoted', () => {
+            const r = parseProcessFrontmatter(withDescription('description: "Use when: tracing"'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('Use when: tracing');
+        });
+
+        it('accepts a plain value followed by a comment, without the comment', () => {
+            const r = parseProcessFrontmatter(withDescription('description: plain text # note'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('plain text');
         });
 
         it('accepts escaped quotes inside a closed double-quoted value', () => {
