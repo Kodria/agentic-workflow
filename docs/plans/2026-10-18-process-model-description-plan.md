@@ -127,6 +127,12 @@
 
 **Amendment A1 (S1 spec review, 2026-10-18):** a block-scalar or multi-line `description` leaked its text through `readPairs`, which quotes every non-pair line (`line is not a "key: value" pair: "<first 80 chars>"`), so the S1 edge case "the value is never echoed into a diagnostic" did not hold. `readPairs` now reports a non-pair line by its 1-based position in the frontmatter block and never by its content: `line <n> is not a "key: value" pair (multi-line values are not supported)`. This covers block scalars, plain multi-line values and quotes closed on a later line, for every field. A test in S1 asserts that the continuation text of each of those three shapes is absent from the diagnostics and that the line number is present.
 
+**Amendment A2 (S1 spec re-review, 2026-10-18):** A1 left two gaps.
+1. `readPairs` trims each line before matching, so an indented continuation shaped `  KEY: x` was taken as a field and echoed as `unknown field "KEY"`. The contract is a flat map, so any line that starts with whitespace is a continuation line. It is reported with the A1 message (`line <n> is not a "key: value" pair (multi-line values are not supported)`), whatever it contains, and never becomes a pair.
+2. A `description` that opens a quote (`"` or `'`) and does not close it on the same line resolves to itself with the opening quote included. That is invalid YAML for every runtime that loads the skill, so it is rejected with `"description" must close its quote on the same line`. The test is: the raw value starts with a quote and `findFrontmatterDescription` returns it unchanged.
+
+S1 gains tests for both: an indented `  SECRETKEY: x` after a plain `description` and after a `>-` header is reported by line number with no `SECRETKEY` in any diagnostic; `description: "hola` and `description: 'hola` are rejected with the quote message; `description: "a \"b\""` is still accepted as `a "b"`.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
