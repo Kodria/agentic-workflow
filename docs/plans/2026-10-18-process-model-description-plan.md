@@ -171,7 +171,7 @@ Interface: `parseProcessFrontmatter(source, file): ProcessParseResult<ProcessMod
 
 #### Implementation
 
-- [ ] **Step 1 — RED.** Append to the `describe('parseProcessFrontmatter')` block of `cli/tests/core/process/model.test.ts`:
+- [x] **Step 1 — RED.** Append to the `describe('parseProcessFrontmatter')` block of `cli/tests/core/process/model.test.ts`:
 
 ```ts
     describe('description (optional)', () => {
@@ -236,7 +236,7 @@ Interface: `parseProcessFrontmatter(source, file): ProcessParseResult<ProcessMod
 
 Run CMD-PROCESS → the plain/quoted/1024 tests fail with `unknown field "description"`, the empty/block tests fail on the message.
 
-- [ ] **Step 2 — Implementation.** In `cli/src/core/process/types.ts`, add to `ProcessModelFrontmatter`, after `updated: string;`:
+- [x] **Step 2 — Implementation.** In `cli/src/core/process/types.ts`, add to `ProcessModelFrontmatter`, after `updated: string;`:
 
 ```ts
     /** Optional. Single-line scalar, resolved (quotes removed). Absent → no key. */
@@ -269,7 +269,7 @@ A block scalar's continuation lines are already rejected by `readPairs` as non-p
 
 5. In the returned model, spread it conditionally so PD-3 holds: `...(description !== undefined ? { description } : {}),` after `updated: pairs.get('updated')!,`.
 
-- [ ] **Step 3 — GREEN.** Run CMD-PROCESS, CMD-TYPECHECK and CMD-LINT → all pass. Commit `fix(process): admit an optional description in process models`.
+- [x] **Step 3 — GREEN.** Run CMD-PROCESS, CMD-TYPECHECK and CMD-LINT → all pass. Commit `fix(process): admit an optional description in process models`.
 
 #### Edge cases
 
