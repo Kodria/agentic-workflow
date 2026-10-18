@@ -125,6 +125,8 @@
 - **PD-3** — The parsed model carries `description` (the resolved string) when the field is present and has no `description` key when it is absent; `awm process show --json` therefore shows it with no change to the command.
 - **PD-4** — The contract in `docs/plans/2026-08-23-process-lifecycle-design.md` (`### El artefacto`) lists `description` as optional with its rules and a dated amendment explaining why (Codex requires it), and a structural test pins it.
 
+**Amendment A1 (S1 spec review, 2026-10-18):** a block-scalar or multi-line `description` leaked its text through `readPairs`, which quotes every non-pair line (`line is not a "key: value" pair: "<first 80 chars>"`), so the S1 edge case "the value is never echoed into a diagnostic" did not hold. `readPairs` now reports a non-pair line by its 1-based position in the frontmatter block and never by its content: `line <n> is not a "key: value" pair (multi-line values are not supported)`. This covers block scalars, plain multi-line values and quotes closed on a later line, for every field. A test in S1 asserts that the continuation text of each of those three shapes is absent from the diagnostics and that the line number is present.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
