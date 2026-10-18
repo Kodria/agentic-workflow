@@ -35,7 +35,11 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
     for (const [index, raw] of lines.entries()) {
         const line = raw.trim();
         if (line === '' || line.startsWith('#')) continue;
-        const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
+        // El contrato es un mapa PLANO: una línea que empieza con espacio o tab
+        // es continuación de un valor multilínea, diga lo que diga. Si se
+        // recortara antes de mirar, `  KEY: x` pasaría por campo (y su nombre
+        // terminaría en un diagnóstico).
+        const m = /^[ \t]/.test(raw) ? null : /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
         // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
@@ -108,8 +112,13 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         if (/^[>|]/.test(rawDescription) || isBlockScalarHeader(rawDescription)) {
             problems.push('"description" must be a single-line string (block scalars are not supported in a process model)');
         } else {
-            const resolved = findFrontmatterDescription(`description: ${rawDescription}`).value.trim();
-            if (resolved === '') problems.push('"description" must not be empty');
+            const helperValue = findFrontmatterDescription(`description: ${rawDescription}`).value;
+            const resolved = helperValue.trim();
+            // Una comilla abierta y no cerrada en la línea vuelve SIN resolver,
+            // con la comilla incluida: YAML inválido para todo runtime que
+            // cargue el skill. Precede a las reglas de vacío y longitud.
+            if (/^['"]/.test(rawDescription) && helperValue === rawDescription) problems.push('"description" must close its quote on the same line');
+            else if (resolved === '') problems.push('"description" must not be empty');
             else if (resolved.length > DESCRIPTION_MAX) problems.push(`"description" must be at most ${DESCRIPTION_MAX} characters`);
             else description = resolved;
         }

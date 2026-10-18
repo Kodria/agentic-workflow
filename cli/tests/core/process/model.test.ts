@@ -158,6 +158,31 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics.join(' ')).toContain('line 8 is not a "key: value" pair (multi-line values are not supported)');
         });
 
+        it.each([
+            ['a plain value', 'description: Use for\n  SECRETKEY: when X', false],
+            ['a block scalar', 'description: >-\n  SECRETKEY: x', true],
+        ])('treats an indented "KEY: x" after %s as a continuation, never as a field', (_kind, lines, isBlock) => {
+            const r = parseProcessFrontmatter(withDescription(lines), 'p');
+            expect(r.model).toBeUndefined();
+            for (const d of r.diagnostics) expect(d).not.toContain('SECRETKEY');
+            expect(r.diagnostics.join(' ')).toContain('line 8 is not a "key: value" pair (multi-line values are not supported)');
+            if (isBlock) {
+                expect(r.diagnostics.join(' ')).toMatch(/"description" must be a single-line string \(block scalars are not supported in a process model\)/);
+            }
+        });
+
+        it.each(['description: "hola', "description: 'hola"])('rejects a quote not closed on the same line: %s', (line) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must close its quote on the same line/);
+        });
+
+        it('accepts escaped quotes inside a closed double-quoted value', () => {
+            const r = parseProcessFrontmatter(withDescription('description: "a \\"b\\""'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('a "b"');
+        });
+
         it('never throws on hostile description values', () => {
             for (const line of ['description: "unclosed', "description: '''", 'description: \x00', `description: ${'"'.repeat(5000)}`]) {
                 expect(() => parseProcessFrontmatter(withDescription(line), 'p')).not.toThrow();
