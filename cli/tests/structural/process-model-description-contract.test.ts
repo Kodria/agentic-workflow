@@ -18,11 +18,14 @@ describe('process-model contract documents the optional description (PD-4)', () 
     });
 
     it('states the rules the parser enforces and why the field exists', () => {
-        const section = artifactSection();
+        /** Whitespace-normalized so re-wrapping the prose never breaks a pinned phrase. */
+        const section = artifactSection().replace(/\s+/g, ' ');
         expect(section).toContain('#### Enmienda 2026-10-18 — `description` opcional');
         expect(section).toContain('una sola línea');
         expect(section).toContain('1024 caracteres');
         expect(section).toContain('Codex');
         expect(section).toContain('único campo opcional');
+        expect(section).toContain('termina en');
+        expect(section).toContain('code points');
     });
 });
