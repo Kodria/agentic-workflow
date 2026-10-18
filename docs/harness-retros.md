@@ -1,5 +1,18 @@
 # Harness Retros
 
+## 2026-10-18 — Seguimiento de la retro de #217 (cierre)
+
+Cierra los cuatro ítems de la retro del CLI del 2026-10-17 que seguían abiertos en #217.
+
+- **Trailer del commit de bump en el contexto (aprobado por el dueño):** `docs/awm/context/agents/release.md` (CTX-AGENTS-048) y `docs/awm/context/constitution/release.md` (CTX-CONSTITUTION-012, la regla «Release del CLI») ahora dicen que el commit de bump lleva `Change-Record: none` en un párrafo propio, y que `cli/tests/release/orchestrator*.test.ts` lo fija. No se borró ni se reordenó nada: solo se agregó texto dentro de las tarjetas existentes. `awm preflight` sigue reportando Context Kernel v1 válido y `awm context-budget` sigue dentro del presupuesto.
+- **Retornos silenciosos en win32:** los tres tests pasaron a skips visibles a través de `cli/tests/helpers/platform.ts`:
+  - `tests/core/dashboard/write-html.test.ts` (modo 0600) y `tests/core/evidence/store.test.ts` (ancestro symlinkeado) usan `posixOnly`.
+  - `tests/core/ledger/store.test.ts` usa `symlinkTest`: corre donde el proceso puede crear symlinks (Windows CI incluido) y se reporta *skipped* donde no.
+  - La guarda estructural `change-record-git-and-platform-conventions.test.ts` cubre ahora todo `cli/tests`, salvo su propio archivo, que trae las muestras a propósito.
+  - Verificada con mutación: un `if (process.platform === 'win32') return;` agregado a `ledger/store.test.ts` hizo fallar la guarda nombrando el archivo; se revirtió y volvió a verde.
+- **Costo del gate de release:** medido sobre los runs 153, 155 y 156. El job ARM de la matriz pasó de 19m43s a ~36 min (el remainder ARM de 14 a ~32 min) con las suites del Change Record, y es el camino crítico del release (~37–42 min de punta a punta). D-005 registra la medición y la partición se sigue en #223.
+- **`--defect-class`:** no hace falta cambio. El CLI acepta `awm ledger add --defect-class <id>`, el catálogo del pack `js-ts` expone clases (`awm sensors coverage --json`) y las plantillas de revisión y QA del registry (`deep-review-prompt.md`, `spec-reviewer-prompt.md`, `code-quality-reviewer-prompt.md`) ya exigen la clase exacta del catálogo cuando aplica y prohíben inferirla. El hueco que vio la retro de #217 era de esa corrida; los próximos ciclos lo cubren con las plantillas vigentes.
+
 
 ## 2026-10-16 — Issue #215: admission Cloud (origin con insteadOf + exclusiones de snapshot read-only)
 

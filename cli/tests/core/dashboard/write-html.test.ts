@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { resolveHtmlTarget, writeHtmlAtomically, type HtmlWriteOperations } from '../../../src/core/dashboard/write-html';
+import { posixOnly } from '../../helpers/platform';
 
 describe('writeHtmlAtomically', () => {
     let root: string;
@@ -86,8 +87,7 @@ describe('writeHtmlAtomically', () => {
         }
     });
 
-    it('uses mode 0600 for a POSIX adjacent temporary file', () => {
-        if (process.platform === 'win32') return;
+    posixOnly('uses mode 0600 for a POSIX adjacent temporary file', () => {
         const target = path.join(root, 'posix.html');
         const open = jest.spyOn(fs, 'openSync');
         try {

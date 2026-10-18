@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
 import { writeCycleEvidence } from '../../../src/core/evidence/store';
+import { posixOnly } from '../../helpers/platform';
 
 describe('cycle evidence store', () => {
   let root: string;
@@ -18,8 +19,7 @@ describe('cycle evidence store', () => {
     expect(JSON.parse(fs.readFileSync(path.join(dir, `${evidence.cycleId}.json`), 'utf8')).qa.fixes).toBe(0);
   });
 
-  test('rejects symlinked evidence ancestors without writing outside root', () => {
-    if (process.platform === 'win32') return;
+  posixOnly('rejects symlinked evidence ancestors without writing outside root', () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-outside-'));
     fs.symlinkSync(outside, path.join(root, '.awm'));
     expect(() => writeCycleEvidence(root, cycleEvidenceFixture())).toThrow(/symlink/);

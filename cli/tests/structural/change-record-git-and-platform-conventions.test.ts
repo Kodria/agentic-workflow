@@ -7,7 +7,8 @@
 //    stdin, bounds time and output and sets GIT_NO_LAZY_FETCH. A bare `execFileSync('git', ...)`
 //    in these directories silently loses all of that, and reviewers found such leaks four times.
 // 2. A test that returns early on Windows is reported as PASSED by the 3-platform release gate.
-//    These suites use `posixOnly` (test.skip with a visible reason) instead.
+//    Every suite under cli/tests uses a visible skip instead: `posixOnly`, or `symlinkTest` when the
+//    test only needs symlinks (cli/tests/helpers/platform.ts).
 //
 // The detectors are exercised on inline samples below, so each guard demonstrably fires.
 
@@ -66,10 +67,10 @@ describe('change-record conventions (structural)', () => {
         expect(offenders).toEqual([]);
     });
 
-    test('change-record tests skip with posixOnly instead of returning early on Windows', () => {
-        const dirs = ['tests/core/changes', 'tests/commands/change', 'tests/commands/changes'].map(d => path.join(CLI_ROOT, d));
-        const offenders = dirs
-            .flatMap(tsFiles)
+    test('no test under cli/tests returns early on Windows instead of skipping visibly', () => {
+        // This file is excluded: its detector samples are offending shapes on purpose.
+        const offenders = tsFiles(path.join(CLI_ROOT, 'tests'))
+            .filter(file => file !== __filename)
             .filter(file => silentWin32Returns(fs.readFileSync(file, 'utf8')))
             .map(file => path.relative(CLI_ROOT, file));
         expect(offenders).toEqual([]);

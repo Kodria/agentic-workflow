@@ -99,8 +99,7 @@ export function gitAtLeast(major: number, minor: number): boolean {
     return v !== null && (v[0] > major || (v[0] === major && v[1] >= minor));
 }
 
-/** `test` where symlinks and POSIX modes exist; reported as skipped (not as passed) on Windows. */
-export const posixOnly: typeof test = process.platform === 'win32' ? (test.skip as typeof test) : test;
+export { posixOnly } from '../../helpers/platform';
 
 /**
  * A copy of `template` in its own directory (same throwaway home, same git isolation): a few milliseconds instead of the
