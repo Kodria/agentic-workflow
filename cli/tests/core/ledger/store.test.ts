@@ -4,6 +4,7 @@ import path from 'path';
 import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger } from '../../../src/core/ledger/store';
 import { parseLedgerEntry } from '../../../src/core/ledger/types';
 import type { LedgerEntry } from '../../../src/core/ledger/types';
+import { symlinkTest } from '../../helpers/platform';
 
 function mkTmp(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ledger-'));
@@ -217,16 +218,11 @@ describe('ledger store — archive', () => {
         expect(fs.readFileSync(archivePath, 'utf-8')).toContain('archived-evidence');
     });
 
-    test('refuses a dangling symlink archive destination and preserves the active ledger', () => {
+    symlinkTest('refuses a dangling symlink archive destination and preserves the active ledger', () => {
         addEntry(cwd, entry({ signature: 'active-evidence' }));
         const archivePath = path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl');
         fs.mkdirSync(path.dirname(archivePath), { recursive: true });
-        try {
-            fs.symlinkSync(path.join(cwd, 'missing-target.jsonl'), archivePath);
-        } catch (error) {
-            if (process.platform === 'win32') return;
-            throw error;
-        }
+        fs.symlinkSync(path.join(cwd, 'missing-target.jsonl'), archivePath);
 
         expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/archive.*already exists/i);
         expect(fs.lstatSync(archivePath).isSymbolicLink()).toBe(true);
