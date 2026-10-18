@@ -177,6 +177,18 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics.join(' ')).toMatch(/"description" must close its quote on the same line/);
         });
 
+        it.each(["description: 'hola # x", 'description: "hola # x'])('rejects an unclosed quote followed by a comment: %s', (line) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must close its quote on the same line/);
+        });
+
+        it('accepts a closed quote followed by a comment', () => {
+            const r = parseProcessFrontmatter(withDescription('description: "a" # note'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('a');
+        });
+
         it('accepts escaped quotes inside a closed double-quoted value', () => {
             const r = parseProcessFrontmatter(withDescription('description: "a \\"b\\""'), 'p');
             expect(r.diagnostics).toEqual([]);

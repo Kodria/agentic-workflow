@@ -3,7 +3,7 @@
 // Disciplina heredada literal de core/orchestrators.ts: NUNCA lanza. Un modelo
 // malformado se rechaza con diagnóstico y no invalida al registry que lo
 // contiene ni a los demás (R7.1).
-import { findFrontmatterDescription, isBlockScalarHeader, matchFrontmatterBlock } from '../frontmatter';
+import { findFrontmatterDescription, isBlockScalarHeader, matchFrontmatterBlock, opensUnclosedQuote } from '../frontmatter';
 import { KNOWN_PROCESS_SCHEMA, type ProcessModelFrontmatter, type ProcessParseResult, type ProcessStatus } from './types';
 
 /** El discriminador es literal: ningún documento se reconoce como modelo por su
@@ -112,12 +112,12 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         if (/^[>|]/.test(rawDescription) || isBlockScalarHeader(rawDescription)) {
             problems.push('"description" must be a single-line string (block scalars are not supported in a process model)');
         } else {
-            const helperValue = findFrontmatterDescription(`description: ${rawDescription}`).value;
-            const resolved = helperValue.trim();
-            // Una comilla abierta y no cerrada en la línea vuelve SIN resolver,
-            // con la comilla incluida: YAML inválido para todo runtime que
-            // cargue el skill. Precede a las reglas de vacío y longitud.
-            if (/^['"]/.test(rawDescription) && helperValue === rawDescription) problems.push('"description" must close its quote on the same line');
+            const resolved = findFrontmatterDescription(`description: ${rawDescription}`).value.trim();
+            // Una comilla abierta y no cerrada en la línea es YAML inválido para
+            // todo runtime que cargue el skill. Se detecta con el mismo escaneo
+            // del helper (no comparando valores: un `# x` posterior se tomaría
+            // como comentario). Precede a las reglas de vacío y longitud.
+            if (opensUnclosedQuote(rawDescription)) problems.push('"description" must close its quote on the same line');
             else if (resolved === '') problems.push('"description" must not be empty');
             else if (resolved.length > DESCRIPTION_MAX) problems.push(`"description" must be at most ${DESCRIPTION_MAX} characters`);
             else description = resolved;

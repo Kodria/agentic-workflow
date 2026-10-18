@@ -69,6 +69,15 @@ function findClosingQuote(value: string, quote: string): number {
     return -1;
 }
 
+/** ¿El valor abre una comilla (`"` o `'`) que NO cierra en la misma linea?
+ *  Reusa el mismo escaneo que la resolucion (respeta `\"` y `''`), asi que un
+ *  `# ...` despues de una comilla abierta cuenta como contenido, no como
+ *  comentario: `'hola # x` sigue abierto. */
+export function opensUnclosedQuote(value: string): boolean {
+    const trimmed = value.trim();
+    return /^['"]/.test(trimmed) && findClosingQuote(trimmed, trimmed[0]) === -1;
+}
+
 function foldBlock(stripped: string[], isLiteral: boolean): string {
     if (isLiteral) return stripped.join('\n').trim();
     // Folded (`>`): las lineas al nivel base del bloque se pliegan entre si con
@@ -160,8 +169,7 @@ export function findFrontmatterDescription(frontmatter: string): DescriptionFiel
     // huerfanas en la salida exportada.
     let endLine = startLine;
     let value = raw;
-    const opensUnclosedQuote = /^['"]/.test(raw) && findClosingQuote(raw, raw[0]) === -1;
-    if (raw !== '' && (!/^['"]/.test(raw) || opensUnclosedQuote)) {
+    if (raw !== '' && (!/^['"]/.test(raw) || opensUnclosedQuote(raw))) {
         const cont: string[] = [];
         for (let i = startLine + 1; i < lines.length; i++) {
             if (lines[i].trim() === '') break;
