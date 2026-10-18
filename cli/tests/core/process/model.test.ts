@@ -189,6 +189,28 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model?.description).toBe('a');
         });
 
+        it('rejects a comment-only value as empty and never echoes it', () => {
+            const r = parseProcessFrontmatter(withDescription('description: # x'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must not be empty/);
+            for (const d of r.diagnostics) expect(d).not.toContain('# x');
+        });
+
+        it('counts the 1024 limit in code points, not UTF-16 units', () => {
+            const ok = parseProcessFrontmatter(withDescription(`description: ${'😀'.repeat(600)}`), 'p');
+            expect(ok.diagnostics).toEqual([]);
+            expect([...(ok.model?.description ?? '')]).toHaveLength(600);
+            const tooLong = parseProcessFrontmatter(withDescription(`description: ${'😀'.repeat(1025)}`), 'p');
+            expect(tooLong.model).toBeUndefined();
+            expect(tooLong.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
+        });
+
+        it('keeps skipping an indented comment line after a valid description', () => {
+            const r = parseProcessFrontmatter(withDescription('description: ok\n  # comentario'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('ok');
+        });
+
         it('accepts escaped quotes inside a closed double-quoted value', () => {
             const r = parseProcessFrontmatter(withDescription('description: "a \\"b\\""'), 'p');
             expect(r.diagnostics).toEqual([]);
