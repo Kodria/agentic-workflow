@@ -135,6 +135,14 @@ S1 gains tests for both: an indented `  SECRETKEY: x` after a plain `description
 
 **Amendment A3 (S1 implementer, 2026-10-18):** A2's detection rule ("the helper returns the raw value unchanged") misses an unclosed quote followed by a comment (`description: 'hola # x` resolved to `'hola`). Detection now asks the frontmatter module directly. `cli/src/core/frontmatter.ts` joins S1's surfaces and exports `opensUnclosedQuote(value: string): boolean`: true when the trimmed value starts with `"` or `'` and the existing private `findClosingQuote` finds no closing quote. That keeps one quote scanner in the CLI. `parseProcessFrontmatter` uses it in place of the A2 comparison; the message is unchanged. Tests add `description: 'hola # x` and `description: "hola # x` (rejected), `description: "a" # note` (accepted as `a`), and direct unit cases for the predicate.
 
+**Amendment A4 (S1 spec re-review, 2026-10-18):**
+1. A raw `description` value that starts with `#` is a YAML comment, so YAML reads the field as null. It is rejected with `"description" must not be empty`, never accepted as `# …`.
+2. The 1024 limit counts Unicode code points (`[...resolved].length`), not UTF-16 units, so 600 emoji (1200 UTF-16 units) pass.
+3. A2(1) excludes comment lines. A line whose trimmed text starts with `#`, indented or not, keeps being skipped, as before the change and as in YAML.
+4. Accepted limitation, no code: the parser is not a YAML validator. Content after a closing quote that is not a comment (`description: "a" junk`) is not detected. The contract doc (S2) says the CLI rejects the common invalid shapes and that it does not replace a YAML parser.
+
+S1 gains tests for (1) and (2) and an indented `  # comentario` line after a valid description that keeps the model valid.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
@@ -321,7 +329,7 @@ Run CMD-DOCS → fails.
 ```markdown
 #### Enmienda 2026-10-18 — `description` opcional
 
-`description` es el único campo opcional del contrato. Existe porque el modelo *es* el `SKILL.md` del skill, y hay runtimes (Codex) que no cargan un `SKILL.md` sin `description`: sin el campo, el proceso queda instalado pero invisible en esas sesiones (Kodria/awm-personal-registry#3). Reglas: una sola línea, escalar plano o entre comillas (no se admiten block scalars `>`/`|`), no vacío y de a lo sumo 1024 caracteres. Un modelo sin `description` sigue siendo válido; cualquier otro campo fuera de la lista se sigue rechazando. Requiere `agentic-workflow-manager` posterior a 9.20.0: un CLI anterior rechaza el modelo con `unknown field "description"`.
+`description` es el único campo opcional del contrato. Existe porque el modelo *es* el `SKILL.md` del skill, y hay runtimes (Codex) que no cargan un `SKILL.md` sin `description`: sin el campo, el proceso queda instalado pero invisible en esas sesiones (Kodria/awm-personal-registry#3). Reglas: una sola línea, escalar plano o entre comillas (no se admiten block scalars `>`/`|`), no vacío y de a lo sumo 1024 caracteres. Un modelo sin `description` sigue siendo válido; cualquier otro campo fuera de la lista se sigue rechazando. El CLI rechaza las formas inválidas comunes (bloques, valores de varias líneas, comillas sin cerrar, un valor que es solo un comentario), pero no reemplaza a un parser YAML: texto suelto después de una comilla cerrada no se detecta. Requiere `agentic-workflow-manager` posterior a 9.20.0: un CLI anterior rechaza el modelo con `unknown field "description"`.
 ```
 
 - [ ] **Step 3 — GREEN.** Run CMD-DOCS → passes. Commit `docs(process): document the optional description field`.
