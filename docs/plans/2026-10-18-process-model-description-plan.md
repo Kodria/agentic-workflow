@@ -133,6 +133,8 @@
 
 S1 gains tests for both: an indented `  SECRETKEY: x` after a plain `description` and after a `>-` header is reported by line number with no `SECRETKEY` in any diagnostic; `description: "hola` and `description: 'hola` are rejected with the quote message; `description: "a \"b\""` is still accepted as `a "b"`.
 
+**Amendment A3 (S1 implementer, 2026-10-18):** A2's detection rule ("the helper returns the raw value unchanged") misses an unclosed quote followed by a comment (`description: 'hola # x` resolved to `'hola`). Detection now asks the frontmatter module directly. `cli/src/core/frontmatter.ts` joins S1's surfaces and exports `opensUnclosedQuote(value: string): boolean`: true when the trimmed value starts with `"` or `'` and the existing private `findClosingQuote` finds no closing quote. That keeps one quote scanner in the CLI. `parseProcessFrontmatter` uses it in place of the A2 comparison; the message is unchanged. Tests add `description: 'hola # x` and `description: "hola # x` (rejected), `description: "a" # note` (accepted as `a`), and direct unit cases for the predicate.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
