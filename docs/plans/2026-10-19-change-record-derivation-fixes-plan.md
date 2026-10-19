@@ -123,7 +123,9 @@
 - **CRD-2** — `deriveFields` derives `type` and `scope` from the usable commits of the range that touch at least one path outside both `docs/changes/` and `docs/plans/`. When there is none, it uses every usable commit, as before. `semver` and `breaking` are computed over every usable commit (unchanged), and `no-commits` / `no-conventional-commits` are decided over every commit (unchanged). `deriveFromCommits(all, focus?)` takes the focus list as an optional second argument. When it is omitted, not an array, or has no usable commit, `all` is used, so existing callers and tests keep their behaviour.
 - **CRD-3** — `docs/cli-reference.md` (the `awm change new` derived-fields list) states that commits touching only `docs/plans/` do not choose `type` or `scope` but still count for `semver` and `breaking`.
 
-**Shared constraints:** touch only `cli/src/core/changes/git.ts`, `cli/src/core/changes/range.ts`, `cli/src/core/changes/derive.ts`, `cli/src/commands/change/**`, `cli/src/commands/changes/**` (help text only), `cli/tests/core/changes/**`, `cli/tests/commands/change/**`, `cli/tests/commands/changes/**`, `docs/cli-reference.md`. Never read or write `~/.awm`. Tests use the existing helpers in `cli/tests/core/changes/helpers.ts` (isolated tmp repos). Commit subjects: `fix(changes): …` for code and tests, `docs(changes): …` for documentation only, each ending with the session attribution lines.
+**Amendment A1 (S1 specification review, 2026-10-19):** CRD-1's doc comments also include the `ListOptions.base` comment in `cli/src/core/changes/list.ts` (line ~65, "omitted, R3.1 picks origin/HEAD, main or master"), which the S1 surfaces had missed. S1 owns that one comment line; nothing else in `list.ts` changes.
+
+**Shared constraints:** touch only `cli/src/core/changes/git.ts`, `cli/src/core/changes/range.ts`, `cli/src/core/changes/list.ts` (one comment, A1), `cli/src/core/changes/derive.ts`, `cli/src/commands/change/**`, `cli/src/commands/changes/**` (help text only), `cli/tests/core/changes/**`, `cli/tests/commands/change/**`, `cli/tests/commands/changes/**`, `docs/cli-reference.md`. Never read or write `~/.awm`. Tests use the existing helpers in `cli/tests/core/changes/helpers.ts` (isolated tmp repos). Commit subjects: `fix(changes): …` for code and tests, `docs(changes): …` for documentation only, each ending with the session attribution lines.
 
 <a id="slice-s1"></a>
 ### Slice S1: Base resolution prefers the remote default branch
@@ -133,7 +135,7 @@
 Owns CRD-1. One resolver decides the base for all three commands, so the order changes in one place.
 
 - Modify `cli/src/core/changes/git.ts` (`resolveBaseCommit` and its doc comment).
-- Modify the doc comments in `cli/src/core/changes/range.ts`.
+- Modify the doc comments in `cli/src/core/changes/range.ts` and the `ListOptions.base` comment in `cli/src/core/changes/list.ts` (A1).
 - Modify the `--base` option descriptions in `cli/src/commands/change/` and `cli/src/commands/changes/` that list the default order.
 - Modify `cli/tests/core/changes/git.test.ts`.
 - Modify the `--base` row(s) and the stale-`origin/HEAD` sentence in `docs/cli-reference.md`.
