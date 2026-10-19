@@ -123,6 +123,19 @@ First, A2 items 2 and 3 checked only specific places and spellings. The regular 
 
 Second, the self-test built its `needs` mutations by replacing the literal `[test, windows-arm-hot, windows-arm-changes]`, so a legitimate reorder turned it red. The mutations are now built from the list `RELEASE_NEEDS` actually matched, and a reordered `needs` keeps the whole file green.
 
+**Amendment A4 (QA verification of A3, 2026-10-19).** The gate checks were still regexes over YAML text. A quoted `"if": always()` on `release` and quoted `'if'` keys on shard steps passed, which is the same class of finding as CTX-AGENTS-031 (validate a format with its real parser). A4 makes the gate semantics structural.
+
+The pinned test loads both workflows with js-yaml (already a CLI dependency) and asserts on the parsed object:
+- `jobs.release` (release.yml) has no `if` and no `continue-on-error`, and its `needs`, as a set, is exactly `{test, windows-arm-hot, windows-arm-changes}`.
+- In `jobs.test`, `jobs['windows-arm-hot']` and `jobs['windows-arm-changes']`, neither the job nor any step has `continue-on-error`.
+- The shard jobs and their steps have no `if`.
+- In `jobs.test`, the only steps with `if` are the two test steps, and their values are exactly `matrix.target != 'win32-arm64'` and `matrix.target == 'win32-arm64'`.
+- The shard `run` strings and the remainder ignore pattern are read from the parsed steps.
+
+Text checks remain only where the exact text is the contract: the run lines (also compared structurally), the A1 comment, and CRLF handling.
+
+The reorder self-test picks a permutation of the matched `needs` that differs from the current one. Mutation cases are added for quoted `"if"`, single-quoted `'if'` and an escaped `"continue-on-error"` on release, test and shard jobs and steps.
+
 **Shared constraints:** touch only `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `cli/tests/structural/native-release-artifacts.test.ts`, `docs/decisions.md`. Never read or write `~/.awm`. Commit subjects: `ci(release): …` for the workflows and the pinned test, `docs(decisions): …` for D-005, each ending with the session attribution lines.
 
 <a id="slice-s1"></a>
