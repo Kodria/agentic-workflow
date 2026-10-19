@@ -25,7 +25,8 @@ describe('process-model contract documents the optional description (PD-4)', () 
         expect(section).toContain('1024 caracteres');
         expect(section).toContain('Codex');
         expect(section).toContain('único campo opcional');
-        expect(section).toContain('termina en');
+        expect(section).toContain('parser YAML');
+        expect(section).not.toContain('no reemplaza a un parser YAML');
         expect(section).toContain('code points');
     });
 });
