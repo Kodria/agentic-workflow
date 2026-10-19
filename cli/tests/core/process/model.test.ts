@@ -63,6 +63,91 @@ describe('parseProcessFrontmatter', () => {
         expect(r.model).toBeUndefined();
     });
 
+    describe('YAML string slugs (FH-4)', () => {
+        const YAML_STRING = /YAML string scalar|quote values YAML reads as null, boolean, or number/i;
+
+        it.each(['null', 'true', '0x1f', '1e5', '01'])('rejects bare YAML non-string name: %s', (raw) => {
+            const r = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', `name: ${raw}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(YAML_STRING);
+            expect(r.diagnostics.join(' ')).toMatch(/"name"/);
+        });
+
+        it.each([
+            ['"null"', 'null'],
+            ['"demo-ok"', 'demo-ok'],
+        ])('accepts quoted YAML string name %s', (raw, expected) => {
+            const r = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', `name: ${raw}`), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.name).toBe(expected);
+        });
+
+        it('rejects terminates_to loaded as a non-string', () => {
+            const r = parseProcessFrontmatter(valid.replace('terminates_to: none', 'terminates_to: 0x1f'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(YAML_STRING);
+            expect(r.diagnostics.join(' ')).toMatch(/"terminates_to"/);
+        });
+
+        it.each(['none', '"none"'])('accepts terminates_to %s as none', (raw) => {
+            const r = parseProcessFrontmatter(valid.replace('terminates_to: none', `terminates_to: ${raw}`), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.terminatesTo).toBe('none');
+        });
+    });
+
+    describe('bounded frontmatter diagnostics (FH-5, FH-6)', () => {
+        const FRONTMATTER_MAX = 65536;
+        const blockOf = (source: string): string => source.slice(4, source.indexOf('\n---', 4));
+        const withBlockLength = (source: string, target: number): string => {
+            const pad = target - blockOf(source).length - 3;
+            const next = source.replace('\ncreated:', `\n# ${'x'.repeat(pad)}\ncreated:`);
+            expect(blockOf(next)).toHaveLength(target);
+            return next;
+        };
+
+        it('rejects an oversized process-model block with a size diagnostic and no model', () => {
+            const source = withBlockLength(valid, FRONTMATTER_MAX + 1);
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const r = parseProcessFrontmatter(source, 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(/65536|exceeds|too (?:large|long)|size/i);
+                expect(load).not.toHaveBeenCalled();
+            } finally {
+                load.mockRestore();
+            }
+        });
+
+        it('stays silent for an oversized block without the process-model discriminator', () => {
+            const source = withBlockLength(valid.replace('awm: process-model\n', ''), FRONTMATTER_MAX + 1);
+            const r = parseProcessFrontmatter(source, 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics).toEqual([]);
+        });
+
+        it('caps process-model problems at 20 and reports the remainder count', () => {
+            const extras = Array.from({ length: 25 }, (_, i) => `unknown_${i}: x`).join('\n');
+            const r = parseProcessFrontmatter(valid.replace('created:', `${extras}\ncreated:`), 'p');
+            expect(r.model).toBeUndefined();
+            const joined = r.diagnostics.join(' ');
+            const unknownMentions = joined.match(/unknown field/g) ?? [];
+            expect(unknownMentions.length).toBeLessThanOrEqual(20);
+            expect(joined).toMatch(/\d+ more problems/);
+        });
+
+        it('truncates unknown field keys longer than 64 characters with an ellipsis', () => {
+            const longKey = `k${'a'.repeat(199)}`;
+            expect(longKey).toHaveLength(200);
+            const r = parseProcessFrontmatter(valid.replace('created:', `${longKey}: x\ncreated:`), 'p');
+            expect(r.model).toBeUndefined();
+            const joined = r.diagnostics.join(' ');
+            expect(joined).toMatch(/unknown field/);
+            expect(joined).toContain(`${'a'.repeat(63)}…`);
+            expect(joined).not.toContain(longKey);
+        });
+    });
+
     it('nunca lanza ante entrada basura', () => {                               // verifies R1.4
         for (const junk of ['', '---\n', '---\n\x00\n---\n', 'no frontmatter']) {
             expect(() => parseProcessFrontmatter(junk, 'p')).not.toThrow();
@@ -235,13 +320,15 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model?.description).toBe('ok');
         });
 
-        it('rejects a frontmatter block over 65536 characters with the 1024 message without parsing it', () => {
+        it('rejects a frontmatter block over 65536 characters at the size gate without parsing it', () => {
+            // FH-5: process-model discriminator + oversized block → size diagnostic
+            // before readPairs / description YAML load (no longer the 1024 path).
             const source = withBlockLength(65537);
             const load = jest.spyOn(yaml, 'load');
             try {
                 const r = parseProcessFrontmatter(source, 'p');
                 expect(r.model).toBeUndefined();
-                expect(r.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
+                expect(r.diagnostics.join(' ')).toMatch(/frontmatter exceeds 65536 characters/);
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();
@@ -460,13 +547,14 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics.join(' ')).not.toMatch(/must not be indented/);
         });
 
-        it('reports an indented discriminator in a block over 65536 characters without loading it', () => {
+        it('stays silent for an indented discriminator in a block over 65536 characters without loading it', () => {
+            // FH-5: oversized blocks without a top-level (non-indented) discriminator
+            // return empty diagnostics before readPairs; indented awm never reaches
+            // the indentation diagnostic path.
             const source = indentAll(valid.replace('\ncreated:', `\n# ${'x'.repeat(65536)}\ncreated:`));
             const load = jest.spyOn(yaml, 'load');
             try {
-                expect(parseProcessFrontmatter(source, 'p')).toEqual({
-                    diagnostics: ['p: invalid process model — frontmatter keys must not be indented (frontmatter line 1)'],
-                });
+                expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();

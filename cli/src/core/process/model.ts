@@ -21,8 +21,16 @@ const DESCRIPTION_MAX = 1024;
 
 /** Tope del bloque de frontmatter antes de entregarlo al parser YAML: acota el
  *  costo de parsear contenido no confiable de un registry. Por encima no se
- *  parsea (para `description`, se rechaza con el mensaje del límite de 1024). */
+ *  parsea (para `description`, se rechaza con el mensaje del límite de 1024).
+ *  Para un bloque con discriminador `awm: process-model`, también corta
+ *  `readPairs` (FH-5). */
 const FRONTMATTER_MAX = 65536;
+
+/** Tope de problemas acumulados en un solo diagnóstico de proceso (FH-6). */
+const MAX_PROCESS_PROBLEMS = 20;
+
+/** Tope de caracteres de una clave desconocida embebida en el diagnóstico (FH-6). */
+const UNKNOWN_FIELD_KEY_MAX = 64;
 
 /** Lo que un runtime mostraría mal o usaría para engañar: controles C0 (salvo
  *  tab), DEL, C1, separadores U+2028/U+2029, marcas LRM/RLM/ALM, overrides e
@@ -33,7 +41,32 @@ const FORBIDDEN_CHAR = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u061C\u200E\u20
 /** Discriminador indentado: un modelo cuyas claves quedaron con sangría se
  *  perdería en silencio como "no es un modelo". */
 const INDENTED_DISCRIMINATOR = /^awm[ \t]*:[ \t]*process-model$/;
+/** Discriminador a nivel de línea (sin sangría) para el gate de tamaño FH-5. */
+const PROCESS_MODEL_DISCRIMINATOR_LINE = /^awm[ \t]*:[ \t]*process-model[ \t]*$/m;
 const STATUSES: readonly string[] = ['draft', 'active'];
+
+/** Sentinel cuando `loadYamlScalar` no obtiene un mapeo plano con clave `v`. */
+const YAML_SCALAR_MISS: unique symbol = Symbol('yaml-scalar-miss');
+
+/** Carga un valor suelto de `readPairs` como escalar YAML (`v: <raw>`). NUNCA lanza. */
+function loadYamlScalar(raw: string): unknown {
+    try {
+        const doc = yaml.load(`v: ${raw}`);
+        if (isPlainObject(doc) && Object.prototype.hasOwnProperty.call(doc, 'v')) return doc.v;
+    } catch { /* invalid YAML → miss */ }
+    return YAML_SCALAR_MISS;
+}
+
+/** Si `raw` es un escalar string YAML, lo devuelve; si no (null/bool/number/…), `null`. */
+function yamlStringSlug(raw: string): string | null {
+    const value = loadYamlScalar(raw);
+    return typeof value === 'string' ? value : null;
+}
+
+function formatUnknownFieldKey(key: string): string {
+    const shown = key.length > UNKNOWN_FIELD_KEY_MAX ? `${key.slice(0, UNKNOWN_FIELD_KEY_MAX)}…` : key;
+    return JSON.stringify(shown);
+}
 
 /** El slug es lo único del modelo que puede viajar dentro de un id del Dashboard
  *  (ver sanitize.ts). Por eso se valida acá y no en la frontera de render: si
@@ -152,6 +185,15 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     try { block = matchFrontmatterBlock(source); } catch { return { diagnostics: [] }; }
     if (block === null) return { diagnostics: [] };
 
+    // FH-5: acotar el costo de readPairs sobre bloques hostiles. Con discriminador
+    // → diagnóstico de tamaño; sin él → silencio (no es un modelo).
+    if (block.length > FRONTMATTER_MAX) {
+        if (PROCESS_MODEL_DISCRIMINATOR_LINE.test(block)) {
+            return { diagnostics: [`${file}: invalid process model — frontmatter exceeds ${FRONTMATTER_MAX} characters`] };
+        }
+        return { diagnostics: [] };
+    }
+
     const { pairs, problems, continuations } = readPairs(block);
 
     // Un modelo con las claves indentadas no tiene `awm` de nivel superior y se
@@ -177,7 +219,7 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 
     for (const key of pairs.keys()) {
         if (!(ALLOWED_FIELDS as readonly string[]).includes(key)) {
-            problems.push(`unknown field ${JSON.stringify(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
+            problems.push(`unknown field ${formatUnknownFieldKey(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
         }
     }
 
@@ -196,8 +238,16 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         if (value === undefined || value === '') problems.push(`"${field}" is required`);
     }
 
-    const name = pairs.get('name') ?? '';
-    if (name !== '' && !PROCESS_NAME.test(name)) problems.push('"name" must be a lowercase slug (a-z, 0-9, hyphen)');
+    const YAML_STRING_DIAG = 'must be a YAML string scalar (quote values YAML reads as null, boolean, or number)';
+
+    let name = '';
+    const rawName = pairs.get('name') ?? '';
+    if (rawName !== '') {
+        const resolvedName = yamlStringSlug(rawName);
+        if (resolvedName === null) problems.push(`"name" ${YAML_STRING_DIAG}`);
+        else if (!PROCESS_NAME.test(resolvedName)) problems.push('"name" must be a lowercase slug (a-z, 0-9, hyphen)');
+        else name = resolvedName;
+    }
 
     const status = pairs.get('status') ?? '';
     if (status !== '' && !STATUSES.includes(status)) problems.push(`"status" must be one of ${STATUSES.join(', ')}`);
@@ -205,9 +255,16 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     const entryPointRaw = pairs.get('entry_point') ?? '';
     if (entryPointRaw !== '' && entryPointRaw !== 'true' && entryPointRaw !== 'false') problems.push('"entry_point" must be true or false');
 
-    const terminatesTo = pairs.get('terminates_to') ?? '';
-    if (terminatesTo !== '' && terminatesTo !== 'none' && !PROCESS_NAME.test(terminatesTo)) {
-        problems.push('"terminates_to" must be a lowercase slug or "none"');
+    let terminatesTo = '';
+    const rawTerminatesTo = pairs.get('terminates_to') ?? '';
+    if (rawTerminatesTo !== '') {
+        const resolvedTerminatesTo = yamlStringSlug(rawTerminatesTo);
+        if (resolvedTerminatesTo === null) problems.push(`"terminates_to" ${YAML_STRING_DIAG}`);
+        else if (resolvedTerminatesTo !== 'none' && !PROCESS_NAME.test(resolvedTerminatesTo)) {
+            problems.push('"terminates_to" must be a lowercase slug or "none"');
+        } else {
+            terminatesTo = resolvedTerminatesTo;
+        }
     }
 
     for (const field of ['created', 'updated'] as const) {
@@ -224,7 +281,10 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     }
 
     if (problems.length > 0) {
-        return { diagnostics: [`${file}: invalid process model — ${problems.join('; ')}`] };
+        const capped = problems.length > MAX_PROCESS_PROBLEMS
+            ? problems.slice(0, MAX_PROCESS_PROBLEMS).concat([`${problems.length - MAX_PROCESS_PROBLEMS} more problems`])
+            : problems;
+        return { diagnostics: [`${file}: invalid process model — ${capped.join('; ')}`] };
     }
 
     return {
