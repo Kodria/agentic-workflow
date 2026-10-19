@@ -33,7 +33,7 @@ describe('listChanges: input and base (R5.1, R3.1, R3.2, R3.5)', () => {
         spy.restore();
         const asked = (ref: string): number => spy.calls.filter((a) => a.includes(`${ref}^{commit}`)).length;
         expect(asked('refs/remotes/origin/HEAD')).toBe(1);
-        expect(asked('main')).toBe(1);
+        expect(asked('refs/heads/main')).toBe(1); // the local default resolves as the full ref (Q10)
     });
     test('an explicit base is used and reported', () => {
         adopt();

@@ -57,17 +57,34 @@ export function isSafeRevision(rev: unknown): rev is string {
     return parts.length <= 2 && parts.every(isSafeRef);
 }
 
-/** R3.1 (amended 2026-10-19): the default base candidates, remote first so a stale local branch is the last resort. */
-const DEFAULT_BASES: readonly string[] = ['refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/master', 'main', 'master'];
+/** A base candidate: the ref git resolves, and the name a command reports for it. */
+export interface BaseCandidate { readonly ref: string; readonly name: string }
+
+/**
+ * R3.1 (amended 2026-10-19): the default base candidates, remote first so a stale local branch is the last resort. The local
+ * branches resolve as full refs (git would otherwise prefer a tag `main` over the branch) but are reported by their short name.
+ */
+export const DEFAULT_BASES: readonly BaseCandidate[] = [
+    { ref: 'refs/remotes/origin/HEAD', name: 'refs/remotes/origin/HEAD' },
+    { ref: 'refs/remotes/origin/main', name: 'refs/remotes/origin/main' },
+    { ref: 'refs/remotes/origin/master', name: 'refs/remotes/origin/master' },
+    { ref: 'refs/heads/main', name: 'main' },
+    { ref: 'refs/heads/master', name: 'master' },
+];
+
+/** R3.1: the candidates for a base, in order: an explicit base is the only one (no fallback), else DEFAULT_BASES. */
+export function baseCandidates(explicit?: string): readonly BaseCandidate[] {
+    return explicit !== undefined ? [{ ref: explicit, name: explicit }] : DEFAULT_BASES;
+}
 
 /**
  * R3.1: --base, then origin/HEAD, origin/main, origin/master, main, master: the first that names a commit, with that commit's id.
  * An explicit base is the only candidate (no fallback). Null when none does (or the explicit base is unsafe). One `rev-parse` per candidate.
  */
 export function resolveBaseCommit(root: string, explicit?: string): { base: string; sha: string } | null {
-    for (const candidate of explicit !== undefined ? [explicit] : DEFAULT_BASES) {
-        const sha = commitSha(root, candidate);
-        if (sha !== null) return { base: candidate, sha };
+    for (const { ref, name } of baseCandidates(explicit)) {
+        const sha = commitSha(root, ref);
+        if (sha !== null) return { base: name, sha };
     }
     return null;
 }

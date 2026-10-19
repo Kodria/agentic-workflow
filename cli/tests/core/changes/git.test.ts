@@ -118,6 +118,14 @@ describe('git functions in a repository', () => {
         repo.git('branch', '-m', 'main', 'trunk');
         expect(baseOf(repo.root)).toBe('master');
     });
+    test.each(['main', 'master'])('R3.1 (Q10) a tag named %s does not redirect the local default, and the base keeps its short name', (name) => {
+        branch();
+        if (name === 'master') repo.git('branch', '-m', 'main', 'master');
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', name, tagged);
+        expect(repo.git('rev-parse', name)).toBe(tagged); // git alone prefers the tag
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: name, sha: repo.git('rev-parse', `refs/heads/${name}`) });
+    });
     test('R3.1 origin/HEAD that points nowhere is skipped', () => {
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');
         expect(baseOf(repo.root)).toBe('main');

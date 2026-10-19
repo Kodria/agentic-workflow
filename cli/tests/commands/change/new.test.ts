@@ -1060,6 +1060,10 @@ describe('registerChangeCommand', () => {
         const change = program().commands.find((c) => c.name() === 'change');
         const sub = change?.commands.find((c) => c.name() === 'new');
         expect(sub?.options.map((o) => o.long).sort()).toEqual(['--base', '--issue', '--model', '--plan', '--refresh', '--session']);
+        for (const name of ['new', 'validate']) {
+            const base = change?.commands.find((c) => c.name() === name)?.options.find((o) => o.long === '--base');
+            expect(base?.description).toBe('base branch (default: origin/HEAD, origin/main, origin/master, main, master)');
+        }
     });
     test('the change command describes both of its subcommands', () => {
         expect(program().commands.find((c) => c.name() === 'change')?.description()).toBe('create and validate the Change Record of the current branch');

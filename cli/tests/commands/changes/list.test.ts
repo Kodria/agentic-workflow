@@ -348,6 +348,7 @@ describe('registerChangesCommand', () => {
     test('registers changes list with its documented flags', () => {
         expect(sub()?.options.map((o) => o.long).sort()).toEqual(['--base', '--format', '--since']);
         expect(sub()?.registeredArguments).toEqual([]);
+        expect(sub()?.options.find((o) => o.long === '--base')?.description).toBe('base branch (default: origin/HEAD, origin/main, origin/master, main, master)');
     });
     test('a run prints the result and leaves the exit code alone', async () => {
         history();
