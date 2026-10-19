@@ -335,6 +335,40 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model?.description).toBe('\u00A0>');
         });
 
+        it.each([['NEL', '\u0085'], ['LS', '\u2028'], ['PS', '\u2029']])('rejects a %s inside a comment line by position', (_kind, ch) => {
+            const r = parseProcessFrontmatter(withDescription(`# SECRET${ch}name: smuggled`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toContain('frontmatter line 7 contains a YAML 1.1 line break (NEL, LS or PS)');
+            for (const d of r.diagnostics) expect(d).not.toContain('SECRET');
+        });
+
+        it.each([['NEL', '\u0085'], ['LS', '\u2028'], ['PS', '\u2029']])('rejects a %s inside a value line of any field by position', (_kind, ch) => {
+            const inDescription = parseProcessFrontmatter(withDescription(`description: a${ch}b`), 'p');
+            expect(inDescription.model).toBeUndefined();
+            expect(inDescription.diagnostics.join(' ')).toContain('frontmatter line 7 contains a YAML 1.1 line break (NEL, LS or PS)');
+            const inName = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', `name: ejemplo${ch}proceso`), 'p');
+            expect(inName.model).toBeUndefined();
+            expect(inName.diagnostics.join(' ')).toContain('frontmatter line 3 contains a YAML 1.1 line break (NEL, LS or PS)');
+        });
+
+        it.each(['description: "foo\n# bar"', "description: 'foo\n# bar'"])('rejects a quoted value that YAML folds across a following comment line: %j', (lines) => {
+            const r = parseProcessFrontmatter(withDescription(lines), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must be a single-line string \(block scalars are not supported in a process model\)/);
+            for (const d of r.diagnostics) expect(d).not.toContain('bar');
+        });
+
+        it.each([
+            ['description: "Use when: tracing a work session"', 'Use when: tracing a work session'],
+            ['description: Use when tracing a work session # nota', 'Use when tracing a work session'],
+            ["description: 'It''s the entry point' # nota", "It's the entry point"],
+            ['description: "Traza la sesión \\u2014 sin perder pasos"\n# comentario aparte', 'Traza la sesión \u2014 sin perder pasos'],
+        ])('keeps accepting a realistic description: %j', (lines, expected) => {
+            const r = parseProcessFrontmatter(withDescription(lines), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe(expected);
+        });
+
         it('lists description in the unknown-field message', () => {
             const r = parseProcessFrontmatter(withDescription('summary: nope'), 'p');
             expect(r.diagnostics.join(' ')).toMatch(/the contract admits only [^;]*\bdescription\b/);

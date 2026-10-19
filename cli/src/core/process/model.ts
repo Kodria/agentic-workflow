@@ -64,6 +64,10 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
     const lines = block.split(/\r\n|\r|\n/);
     for (const [index, raw] of lines.entries()) {
         const line = raw.replace(/^[ \t]+|[ \t]+$/g, '');
+        // NEL/LS/PS son saltos de línea para YAML 1.1 (PyYAML) y no para js-yaml:
+        // un comentario podría esconder una clave que solo un runtime ve. Se
+        // reporta en CUALQUIER línea, comentarios incluidos, y solo por posición.
+        if (/[\u0085\u2028\u2029]/.test(raw)) problems.push(`frontmatter line ${index + 1} contains a YAML 1.1 line break (NEL, LS or PS)`);
         if (line === '' || line.startsWith('#')) continue;
         // El contrato es un mapa PLANO: una línea que empieza con espacio o tab
         // es continuación de un valor multilínea, diga lo que diga. Si se
@@ -102,10 +106,20 @@ function isPlainObject(doc: unknown): doc is Record<string, unknown> {
  *  de la salida de readPairs (ya recortada y partida en `:`, que difiere de lo
  *  que lee un runtime). Ni el valor ni el texto del error de js-yaml (que puede
  *  citar contenido) llegan al problema. */
+/** ¿El valor crudo de la línea, cargado SOLO, da el mismo string que el bloque
+ *  entero? Si no, YAML lo plegó con líneas siguientes (p. ej. una comilla que
+ *  sigue abierta a través de una línea `# …`). NUNCA lanza. */
+function readsSameAlone(raw: string, value: string): boolean {
+    let alone: unknown;
+    try { alone = yaml.load(`description: ${raw}`); } catch { return false; }
+    return isPlainObject(alone) && alone.description === value;
+}
+
 function checkDescription(raw: string, block: string, keys: ReadonlySet<string>): { value: string } | { problem: string } {
+    const singleLine = { problem: '"description" must be a single-line string (block scalars are not supported in a process model)' };
     // El prefijo alcanza: todo header de block scalar (bien o mal formado)
     // empieza con `>` o `|`.
-    if (/^[>|]/.test(raw)) return { problem: '"description" must be a single-line string (block scalars are not supported in a process model)' };
+    if (/^[>|]/.test(raw)) return singleLine;
     const tooLong = { problem: `"description" must be at most ${DESCRIPTION_MAX} characters` };
     const loaded = loadBlock(block);
     if (loaded.kind === 'too-long') return tooLong;
@@ -128,6 +142,7 @@ function checkDescription(raw: string, block: string, keys: ReadonlySet<string>)
     if (value.replace(ZERO_WIDTH, '').trim() === '') return empty;
     if ([...value].length > DESCRIPTION_MAX) return tooLong;
     if (FORBIDDEN_CHAR.test(value)) return { problem: '"description" must not contain control, line-break or bidirectional-override characters' };
+    if (!readsSameAlone(raw, value)) return singleLine;
     // Se guarda tal cual lo devuelve YAML: sin trim, con NBSP/BOM intactos.
     return { value };
 }
