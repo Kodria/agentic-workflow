@@ -28,6 +28,7 @@
      - un CR suelto que hacía leer una clave extra;
      - LS/PS/NEL en comentarios.
      Convergió solo al cargar el bloque completo con js-yaml **y** exigir que el lector propio (`readPairs`) vea las mismas claves de nivel superior que YAML.
+  5. **Tests estructurales que fijan YAML con regex** — `native-release-artifacts.test.ts` fijaba el release gate de `release.yml` con regex sobre el texto. Una verificación tras otra encontró un bypass nuevo: `continue-on-error` después de `run:`, una clave entre comillas (`"if": always()`) o un `needs` reordenado que dejaba el test en rojo. Convergió al afirmar sobre el workflow cargado con js-yaml (#223, el mismo día que la ocurrencia 4).
 
 <!-- awm-context:CTX-AGENTS-032 -->
   La contramedida no es "revisar mejor a mano" — ya se intentó las cuatro veces. Es preferir una implementación ya verificada contra la especificación, y cuando no existe, validar forma o cobertura en runtime. Un tipo TS sobre `JSON.parse()`, o un comentario que afirma "X ya escapa Y", son una nota para el autor, no una garantía. **Si el CLI valida un formato que van a parsear otras herramientas, se valida con el parser real desde el primer commit, no después de que QA lo exija.** Si además se conserva un lector propio, por ejemplo para dar diagnósticos por línea, hay que afirmar en runtime que ese lector y el parser real leen la misma estructura (las mismas claves de nivel superior). Cerrar caso por caso cada divergencia no converge.

@@ -1,5 +1,24 @@
 # Harness Retros
 
+## 2026-10-19 — #223: shard ARM del Change Record
+
+Plan: `docs/plans/2026-10-19-ci-arm-change-record-shard-plan.md`, con enmiendas A1–A4.
+
+- **Class:** seguridad (bypass del release gate) + logic, en la misma clase que la entrada anterior.
+- **Occurrences:** la QA y tres verificaciones encontraron otra vez bypasses que el test estructural, hecho con regex sobre el YAML de los workflows, no veía:
+  - `if: always()` en `release`;
+  - `continue-on-error` después de `run:` o con la clave entre comillas;
+  - un `needs` reordenado que dejaba el test en rojo.
+
+  Convergió en A4, al afirmar sobre el YAML parseado. La última verificación aplicó 175 mutaciones y todas fallaron como debían.
+- **Rule:** CTX-AGENTS-031, ocurrencia 5. Refuerza la regla aprobada en la entrada anterior y no agrega otra. Es una edición aditiva y los IDs no cambian.
+- **Sensor:** `agents-md`, como lección. El test estructural ahora es semántico.
+- **Descartes (QA):**
+  - el commit `c21b206f` con subject `docs(ci)` en vez de `ci(release)`: ninguno de los dos produce release;
+  - quitar `win32-arm64` de la matriz de `ci.yml` deja el test en verde: es anterior a este cambio y `release.yml` sigue exigiéndolo;
+  - un `needs` con entradas entre comillas hace fallar el test: falla cerrado.
+- **Medición pendiente:** el criterio de aceptación (job ARM más lento por debajo de 25 min) se valida en el primer `release.yml` después del merge.
+
 ## 2026-10-19 — Kodria/awm-personal-registry#3: `description` opcional en modelos de proceso
 
 Este es el primer ciclo con Change Record real del CLI. Plan: `docs/plans/2026-10-18-process-model-description-plan.md`, con 10 enmiendas (A1–A10).
