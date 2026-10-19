@@ -1,3 +1,4 @@
+import yaml from 'js-yaml';
 import { parseProcessFrontmatter } from '../../../src/core/process/model';
 
 const valid = `---
@@ -171,16 +172,63 @@ describe('parseProcessFrontmatter', () => {
             }
         });
 
-        it.each(['description: "hola', "description: 'hola"])('rejects a quote not closed on the same line: %s', (line) => {
-            const r = parseProcessFrontmatter(withDescription(line), 'p');
+        const PARSE_ERROR = /"description" must be a valid single-line YAML string \(quote it\)/;
+        const NOT_A_STRING = /"description" must be a string \(quote values YAML reads as a boolean, a number, a date or a collection\)/;
+
+        it.each([
+            '- foo', '? foo', 'a:\tb', 'Use when: tracing', '"hola', "'hola", "'hola # x", '"hola # x', '"a" junk',
+            'ends with colon:', '@x', '\x1b',
+        ])('rejects a value YAML cannot parse as a single-line string: %j', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
             expect(r.model).toBeUndefined();
-            expect(r.diagnostics.join(' ')).toMatch(/"description" must close its quote on the same line/);
+            expect(r.diagnostics.join(' ')).toMatch(PARSE_ERROR);
         });
 
-        it.each(["description: 'hola # x", 'description: "hola # x'])('rejects an unclosed quote followed by a comment: %s', (line) => {
-            const r = parseProcessFrontmatter(withDescription(line), 'p');
+        it.each(['true', '123', '2026-01-01', '[a, b]'])('rejects a value YAML reads as a non-string: %s', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
             expect(r.model).toBeUndefined();
-            expect(r.diagnostics.join(' ')).toMatch(/"description" must close its quote on the same line/);
+            expect(r.diagnostics.join(' ')).toMatch(NOT_A_STRING);
+        });
+
+        it.each(['null', '~', '# x'])('rejects a value YAML reads as null as empty: %s', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must not be empty/);
+        });
+
+        it('never echoes the value or the YAML error text into a diagnostic', () => {
+            const r = parseProcessFrontmatter(withDescription('description: SECRETVALUE: x'), 'p');
+            expect(r.diagnostics.join(' ')).toMatch(PARSE_ERROR);
+            for (const d of r.diagnostics) expect(d).not.toContain('SECRETVALUE');
+        });
+
+        it('resolves YAML double-quoted escapes', () => {
+            expect(parseProcessFrontmatter(withDescription('description: "\\x41"'), 'p').model?.description).toBe('A');
+        });
+
+        it('stores the YAML string untrimmed', () => {
+            expect(parseProcessFrontmatter(withDescription('description: "  padded  "'), 'p').model?.description).toBe('  padded  ');
+        });
+
+        it.each([
+            ['description: "Use when: tracing"', 'Use when: tracing'],
+            ["description: 'It''s'", "It's"],
+        ])('accepts the quoted form %s', (line, expected) => {
+            const r = parseProcessFrontmatter(withDescription(line), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe(expected);
+        });
+
+        it('rejects a raw value over 16384 characters with the 1024 message without parsing it', () => {
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const r = parseProcessFrontmatter(withDescription(`description: ${'a'.repeat(16385)}`), 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
+                expect(load).not.toHaveBeenCalled();
+            } finally {
+                load.mockRestore();
+            }
         });
 
         it('accepts a closed quote followed by a comment', () => {
@@ -211,24 +259,6 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model?.description).toBe('ok');
         });
 
-        it.each([
-            'description: Use when: tracing',
-            'description: ends with colon:',
-            'description: @x',
-            'description: [a, b]',
-            'description: &a hi',
-        ])('rejects a plain value YAML would misread: %s', (line) => {
-            const r = parseProcessFrontmatter(withDescription(line), 'p');
-            expect(r.model).toBeUndefined();
-            expect(r.diagnostics.join(' ')).toMatch(/"description" must be quoted when it contains ": " or starts with a YAML indicator/);
-        });
-
-        it('accepts the same text when quoted', () => {
-            const r = parseProcessFrontmatter(withDescription('description: "Use when: tracing"'), 'p');
-            expect(r.diagnostics).toEqual([]);
-            expect(r.model?.description).toBe('Use when: tracing');
-        });
-
         it('accepts a plain value followed by a comment, without the comment', () => {
             const r = parseProcessFrontmatter(withDescription('description: plain text # note'), 'p');
             expect(r.diagnostics).toEqual([]);
@@ -245,6 +275,23 @@ describe('parseProcessFrontmatter', () => {
             for (const line of ['description: "unclosed', "description: '''", 'description: \x00', `description: ${'"'.repeat(5000)}`]) {
                 expect(() => parseProcessFrontmatter(withDescription(line), 'p')).not.toThrow();
             }
+        });
+    });
+
+    describe('indented frontmatter keys', () => {
+        it('reports a model whose awm discriminator is indented instead of ignoring it', () => {
+            const r = parseProcessFrontmatter(valid.replace('awm: process-model', '  awm: process-model'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics).toEqual(['p: invalid process model — frontmatter keys must not be indented (frontmatter line 1)']);
+        });
+
+        it('allows whitespace around the colon and counts comment lines', () => {
+            const r = parseProcessFrontmatter('---\n# nota\n\tawm :  process-model\nname: x\n---\n', 'p');
+            expect(r.diagnostics).toEqual(['p: invalid process model — frontmatter keys must not be indented (frontmatter line 2)']);
+        });
+
+        it('stays silent for a document whose indented lines are not the discriminator', () => {
+            expect(parseProcessFrontmatter('---\nname: x\nmetadata:\n  awm: other\n---\n', 'p')).toEqual({ diagnostics: [] });
         });
     });
 });

@@ -3,7 +3,8 @@
 // Disciplina heredada literal de core/orchestrators.ts: NUNCA lanza. Un modelo
 // malformado se rechaza con diagnóstico y no invalida al registry que lo
 // contiene ni a los demás (R7.1).
-import { findFrontmatterDescription, matchFrontmatterBlock, opensUnclosedQuote } from '../frontmatter';
+import yaml from 'js-yaml';
+import { matchFrontmatterBlock } from '../frontmatter';
 import { KNOWN_PROCESS_SCHEMA, type ProcessModelFrontmatter, type ProcessParseResult, type ProcessStatus } from './types';
 
 /** El discriminador es literal: ningún documento se reconoce como modelo por su
@@ -18,8 +19,14 @@ const ALLOWED_FIELDS = ['awm', 'schema', 'name', 'status', 'entry_point', 'termi
  *  Se cuenta en code points, no en unidades UTF-16. */
 const DESCRIPTION_MAX = 1024;
 
-/** Indicadores YAML que no pueden abrir un escalar plano sin cambiar su lectura. */
-const PLAIN_INDICATOR = /^[[\]{},&*!%@`]/;
+/** Tope del valor CRUDO antes de entregarlo al parser YAML: acota el costo de
+ *  parsear contenido no confiable de un registry. Por encima se rechaza con el
+ *  mensaje del límite de 1024, sin parsear. */
+const DESCRIPTION_RAW_MAX = 16384;
+
+/** Discriminador indentado: un modelo cuyas claves quedaron con sangría se
+ *  perdería en silencio como "no es un modelo". */
+const INDENTED_DISCRIMINATOR = /^awm\s*:\s*process-model$/;
 const STATUSES: readonly string[] = ['draft', 'active'];
 
 /** El slug es lo único del modelo que puede viajar dentro de un id del Dashboard
@@ -29,12 +36,18 @@ export const PROCESS_NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Línea de continuación (indentada): su texto se guarda SOLO para detectar un
+ *  discriminador indentado; nunca viaja a un diagnóstico. */
+interface ContinuationLine { line: number; text: string }
+
 /** Lector de pares `clave: valor` de un frontmatter plano. El contrato no admite
- *  anidamiento ni block scalars, así que no se arrastra un parser YAML: cualquier
- *  línea que no sea `clave: valor` es un rechazo, no una interpretación. */
-function readPairs(block: string): { pairs: Map<string, string>; problems: string[] } {
+ *  anidamiento ni block scalars: cualquier línea que no sea `clave: valor` es un
+ *  rechazo, no una interpretación. (El VALOR de `description` sí pasa por el
+ *  parser YAML, más abajo.) */
+function readPairs(block: string): { pairs: Map<string, string>; problems: string[]; continuations: ContinuationLine[] } {
     const pairs = new Map<string, string>();
     const problems: string[] = [];
+    const continuations: ContinuationLine[] = [];
     const lines = block.split(/\r?\n/);
     for (const [index, raw] of lines.entries()) {
         const line = raw.trim();
@@ -43,7 +56,9 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         // es continuación de un valor multilínea, diga lo que diga. Si se
         // recortara antes de mirar, `  KEY: x` pasaría por campo (y su nombre
         // terminaría en un diagnóstico).
-        const m = /^[ \t]/.test(raw) ? null : /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
+        const indented = /^[ \t]/.test(raw);
+        if (indented) continuations.push({ line: index + 1, text: line });
+        const m = indented ? null : /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/.exec(line);
         // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
@@ -51,7 +66,34 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         if (pairs.has(m[1])) { problems.push(`duplicate field ${JSON.stringify(m[1])}`); continue; }
         pairs.set(m[1], m[2].trim());
     }
-    return { pairs, problems };
+    return { pairs, problems, continuations };
+}
+
+/** Valida `description` con el parser YAML real (js-yaml, schema por defecto)
+ *  en vez de reglas de escalar escritas a mano. NUNCA lanza, y ni el valor ni
+ *  el texto del error de js-yaml (que puede citar contenido) llegan al problema. */
+function checkDescription(raw: string): { value: string } | { problem: string } {
+    // El prefijo alcanza: todo header de block scalar (bien o mal formado)
+    // empieza con `>` o `|`.
+    if (/^[>|]/.test(raw)) return { problem: '"description" must be a single-line string (block scalars are not supported in a process model)' };
+    const tooLong = { problem: `"description" must be at most ${DESCRIPTION_MAX} characters` };
+    if (raw.length > DESCRIPTION_RAW_MAX) return tooLong;
+
+    let doc: unknown;
+    try { doc = yaml.load(`description: ${raw}`); } catch { doc = undefined; }
+    const parsed = doc !== null && typeof doc === 'object' && !Array.isArray(doc)
+        && Object.keys(doc).length === 1 && Object.prototype.hasOwnProperty.call(doc, 'description');
+    if (!parsed) return { problem: '"description" must be a valid single-line YAML string (quote it)' };
+
+    const value = (doc as { description: unknown }).description;
+    const empty = { problem: '"description" must not be empty' };
+    if (value === null || value === undefined) return empty;
+    if (typeof value !== 'string') {
+        return { problem: '"description" must be a string (quote values YAML reads as a boolean, a number, a date or a collection)' };
+    }
+    if (value.trim() === '') return empty;
+    if ([...value].length > DESCRIPTION_MAX) return tooLong;
+    return { value };
 }
 
 export function parseProcessFrontmatter(source: string, file: string): ProcessParseResult<ProcessModelFrontmatter> {
@@ -59,7 +101,16 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     try { block = matchFrontmatterBlock(source); } catch { return { diagnostics: [] }; }
     if (block === null) return { diagnostics: [] };
 
-    const { pairs, problems } = readPairs(block);
+    const { pairs, problems, continuations } = readPairs(block);
+
+    // Un modelo con las claves indentadas no tiene `awm` de nivel superior y se
+    // perdería en silencio como "otro documento". Se nombra solo la línea.
+    if (!pairs.has('awm')) {
+        const indentedAwm = continuations.find((c) => INDENTED_DISCRIMINATOR.test(c.text));
+        if (indentedAwm) {
+            return { diagnostics: [`${file}: invalid process model — frontmatter keys must not be indented (frontmatter line ${indentedAwm.line})`] };
+        }
+    }
 
     // Sin discriminador NO es un modelo de proceso: no es un error, es otro
     // documento. Devolver diagnóstico acá inundaría de ruido a todo registry
@@ -106,37 +157,12 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
         if (value !== '' && !DATE.test(value)) problems.push(`"${field}" must be YYYY-MM-DD`);
     }
 
-    // Un block scalar ya deja sus líneas de continuación rechazadas por
-    // readPairs; el mensaje explícito le dice al autor por qué. Al resolver se
-    // pasa SOLO la línea `description:`, para que continuaciones de otros
-    // campos no se plieguen dentro del valor. El valor nunca va al diagnóstico.
     let description: string | undefined;
     const rawDescription = pairs.get('description');
     if (rawDescription !== undefined) {
-        // El prefijo alcanza: todo header que isBlockScalarHeader acepta empieza
-        // con `>` o `|`, y los mal formados (`>-basura`) también caen acá.
-        if (/^[>|]/.test(rawDescription)) {
-            problems.push('"description" must be a single-line string (block scalars are not supported in a process model)');
-        } else {
-            // Un valor que empieza con `#` es un comentario YAML: el campo vale
-            // null, así que cuenta como vacío (nunca como el texto `# …`).
-            const resolved = rawDescription.startsWith('#') ? '' : findFrontmatterDescription(`description: ${rawDescription}`).value.trim();
-            // Una comilla abierta y no cerrada en la línea es YAML inválido para
-            // todo runtime que cargue el skill. Se detecta con el mismo escaneo
-            // del helper (no comparando valores: un `# x` posterior se tomaría
-            // como comentario). Precede a las reglas de vacío y longitud.
-            if (opensUnclosedQuote(rawDescription)) problems.push('"description" must close its quote on the same line');
-            else if (resolved === '') problems.push('"description" must not be empty');
-            // Un escalar plano que YAML no leería como el mismo string: `: `
-            // dentro o `:` al final lo vuelven un mapa, y un indicador inicial
-            // (flow, ancla, tag, reservado) cambia su tipo. Sobre `resolved`
-            // porque, para un plano, el helper solo quita el ` # comentario`.
-            else if (!/^['"]/.test(rawDescription) && (PLAIN_INDICATOR.test(rawDescription) || resolved.includes(': ') || resolved.endsWith(':'))) {
-                problems.push('"description" must be quoted when it contains ": " or starts with a YAML indicator');
-            }
-            else if ([...resolved].length > DESCRIPTION_MAX) problems.push(`"description" must be at most ${DESCRIPTION_MAX} characters`);
-            else description = resolved;
-        }
+        const checked = checkDescription(rawDescription);
+        if ('problem' in checked) problems.push(checked.problem);
+        else description = checked.value;
     }
 
     if (problems.length > 0) {

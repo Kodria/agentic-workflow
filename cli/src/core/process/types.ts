@@ -11,7 +11,7 @@ export interface ProcessModelFrontmatter {
     terminatesTo: string;
     created: string;
     updated: string;
-    /** Optional. Single-line scalar, resolved (quotes removed). Absent → no key. */
+    /** Optional. Single-line YAML string exactly as the YAML parser returns it (not trimmed). Absent → no key. */
     description?: string;
 }
 

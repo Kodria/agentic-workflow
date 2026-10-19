@@ -47,6 +47,11 @@ describe('awm process show --json', () => {
         expect(parsed.body.routing).toEqual([{ when: 'Al empezar', requiredState: '', goesTo: 'OP-1.1', endsAt: 'SG-1' }]);
     });
 
+    it('emite description cuando el modelo la trae', () => {                    // verifies PD-3
+        const parsed = JSON.parse(runProcessShow({ models: [model({ description: 'Use when tracing' })], diagnostics: [] }, 'mi-proceso', true).stdout);
+        expect(parsed.description).toBe('Use when tracing');
+    });
+
     it('el JSON no filtra el path del filesystem del registry', () => {         // verifies R5.1
         const parsed = JSON.parse(runProcessShow({ models: [model()], diagnostics: [] }, 'mi-proceso', true).stdout);
         expect(JSON.stringify(parsed)).not.toContain('/r/skills');
