@@ -730,7 +730,7 @@ describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', (
         receiptForHead();
         expectFailure(run('ok', { base: 'nope' }), 'base-unresolved', 'pass --base <ref>');
     });
-    test('no main, master or origin/HEAD is base-unresolved', () => {
+    test('no default base resolves: base-unresolved', () => {
         repo.git('branch', '-m', 'main', 'trunk');
         receiptForHead();
         expectFailure(run('ok'), 'base-unresolved', 'pass --base <ref>');

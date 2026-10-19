@@ -304,7 +304,7 @@ describe('base resolution (R3.1, R3.2, R3.5)', () => {
         expectFailure(r, 'base-unresolved');
         expect(r.stderr).toContain('remedy: pass --base <ref>');
     });
-    test('no main, master or origin/HEAD is base-unresolved', () => {
+    test('no default base resolves: base-unresolved', () => {
         repo.git('branch', '-m', 'main', 'trunk');
         expectFailure(runChangeValidate(repo.root, undefined, {}), 'base-unresolved');
     });

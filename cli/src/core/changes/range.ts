@@ -11,6 +11,8 @@ import { RECORD_DIR } from './types';
 export interface Failure { code: string; message: string; remedy?: string }
 
 const REMEDY_BASE = 'pass --base <ref>';
+/** R3.1: the `--base` help text of `change new`, `change validate` and `changes list`; names `DEFAULT_BASES` (git.ts) in order. */
+export const BASE_OPTION_HELP = 'base branch (default: origin/HEAD, origin/main, origin/master, main, master)';
 export const HEAD_MOVED: Failure = { code: 'head-moved', message: 'HEAD moved during derivation' };
 
 const KINDS: readonly string[] = ['ok', 'absent', 'unsafe', 'error'];

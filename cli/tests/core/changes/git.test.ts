@@ -89,6 +89,10 @@ describe('git functions in a repository', () => {
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
         expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
     });
+    test('R3.1 a local branch named origin/main is not taken for the remote candidate', () => {
+        repo.git('branch', 'origin/main');
+        expect(baseOf(repo.root)).toBe('main');
+    });
     test('R3.1 an explicit base never falls back to origin/main', () => {
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
         expect(baseOf(repo.root, 'nope')).toBeNull();

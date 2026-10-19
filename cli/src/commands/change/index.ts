@@ -7,7 +7,7 @@ import { readJournal } from '../../core/journal/store';
 import { detectBranch } from '../../core/ledger/store';
 import { isRecordPath, isValidRecordFileName, isValidSlug } from '../../core/changes/parse';
 import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOutside, repoRoot } from '../../core/changes/git';
-import { headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
+import { BASE_OPTION_HELP, headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
 import { hasOptOut } from '../../core/changes/trailers';
 import { readReceipt, sensorPairs } from '../../core/changes/receipt';
@@ -440,7 +440,7 @@ export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): 
     change
         .command('new <slug>')
         .description('create docs/changes/YYYY-MM-DD-<slug>.md with derived fields and pending narrative')
-        .option('--base <ref>', 'base branch (default: origin/HEAD, origin/main, origin/master, main, master)')
+        .option('--base <ref>', BASE_OPTION_HELP)
         .option('--plan <path>', 'repo-relative plan file to link')
         .option('--issue <url>', 'https issue URL to link')
         .option('--model <model>', 'provenance: model identifier')
@@ -450,7 +450,7 @@ export function registerChangeCommand(program: Command, deps: ChangeDeps = {}): 
     change
         .command('validate [path]')
         .description('validate the Change Record(s) added by this branch, or one record (--strict also checks the sensor receipt)')
-        .option('--base <ref>', 'base branch (default: origin/HEAD, origin/main, origin/master, main, master)')
+        .option('--base <ref>', BASE_OPTION_HELP)
         .option('--strict', 'require a matching, passing sensor receipt for verification.commit')
         .option('--json', 'print a single JSON line')
         .action((target: string | undefined, opts: ValidateOpts) => inCwd((cwd) => runChangeValidate(cwd, target, opts), wantsJson(opts)));
