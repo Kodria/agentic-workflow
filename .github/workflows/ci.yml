@@ -128,14 +128,13 @@ jobs:
           AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
         run: npx jest --runInBand --bail
 
-      # The ARM runner's two slow watch suites run in a separate job. Keep
-      # runInBand within each job; no test file may run twice or be dropped.
+      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.
       - name: Test (Windows ARM remainder)
         if: matrix.target == 'win32-arm64'
         working-directory: cli
         env:
           AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
-        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$'
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$|[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
 
       # This is intentionally a second consumer boundary: the regular suite
       # executes this checkout, while this gate invokes the npm tarball that a
@@ -192,3 +191,28 @@ jobs:
       - name: Test hot Windows ARM suites
         working-directory: cli
         run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail
+
+  windows-arm-changes:
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: cli
+        run: npm ci
+
+      - name: Build
+        working-directory: cli
+        run: npm run native:build && npm run build
+
+      - name: Build test-only native addon
+        working-directory: cli
+        run: npm run native:test-build
+
+      - name: Test Change Record Windows ARM suites
+        working-directory: cli
+        run: npx jest --runInBand --bail --testPathPatterns='[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
