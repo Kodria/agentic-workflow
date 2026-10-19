@@ -156,6 +156,35 @@ S1 tests: the four plain shapes above are rejected with the new message; `"Use w
 
 **Amendment A6 (S2 reviews, 2026-10-18):** the S2 amendment text also names the trailing-`:` quoting rule (`termina en \`:\``), and says the 1024 limit counts characters as Unicode code points (`de a lo sumo 1024 caracteres (code points)`). The structural test collapses whitespace in the section before matching, as `cloud-admission-docs-contract.test.ts` does, so rewrapping the prose does not break it. It also pins `termina en`.
 
+**Amendment A7 (post-implementation QA, 2026-10-19; owner chose "validate with js-yaml + fix everything").** All four QA reviewers converged on one root cause: the parser re-implemented YAML scalar rules by hand, and each review found another shape it misses (`- x`/`? x`, `a:<TAB>b`, values YAML types as null/bool/number/date, YAML-only escapes, control characters, NBSP). A7 replaces that with the real parser the CLI already ships (`js-yaml` is a runtime dependency used by `core/changes`). A7 supersedes PD-2's resolution by `findFrontmatterDescription`, A2(2), A3, A4(1), A4(2), A4(4) and A5(1); A1, A2(1), A4(3), A5(2) and A5(3) stay.
+
+1. `description` checks, in this order, each one stopping on failure:
+   1. A raw value starting with `>` or `|` gets the existing block-scalar message (A5(3)).
+   2. A raw value longer than 16384 characters is rejected with the 1024 message without parsing. 16384 bounds the cost of parsing untrusted registry content.
+   3. Parse the single line `description: <raw>` with `yaml.load` (js-yaml default schema), inside try/catch:
+      - A parse error is rejected with `"description" must be a valid single-line YAML string (quote it)`.
+      - `null` or `undefined`, including an empty value and a comment-only value, is rejected with `"description" must not be empty`.
+      - Any other non-string (boolean, number, Date, sequence, mapping) is rejected with `"description" must be a string (quote values YAML reads as a boolean, a number, a date or a collection)`.
+      - A string whose `trim()` is empty is rejected with `"description" must not be empty`.
+      - A string longer than 1024 Unicode code points is rejected with the 1024 message.
+   4. The model stores the string exactly as YAML returns it, with no trim, so a padded quoted value keeps its padding.
+2. `cli/src/core/frontmatter.ts` returns to its `origin/main` content (the `opensUnclosedQuote` export is no longer needed), and `cli/tests/core/frontmatter-opens-unclosed-quote.test.ts` is deleted.
+3. Indented frontmatter (Track A A1, important). The parser now catches a model that is lost because its keys are indented. When the block has no top-level `awm` pair but one of its continuation lines, trimmed, is `awm: process-model`, it returns `<file>: invalid process model — frontmatter keys must not be indented (frontmatter line <n>)` instead of silently treating the file as "not a model".
+4. Tests:
+   - Each QA shape is rejected with its A7 message:
+     - parse error: `- foo`, `? foo`, `a:<TAB>b`, `Use when: tracing`, `"hola`, `"a" junk`, raw ESC;
+     - non-string: `true`, `123`, `2026-01-01`, `[a, b]`;
+     - empty: `null`, `~`, `# x`.
+   - `"\x41"` resolves to `A`.
+   - `"  padded  "` keeps its padding.
+   - `"Use when: tracing"` and `'It''s'` are accepted.
+   - 1024 vs 1025 code points (emoji), and a raw value over 16384 characters rejected quickly.
+   - The indented-`awm` diagnostic.
+   - A `cli/tests/commands/process.test.ts` case shows that `runProcessShow` with `--json` emits `"description"` for a model carrying one (PD-3, Track A A4).
+   - Existing A1/A2(1)/A4(3) tests stay.
+5. S2: the contract paragraph states that the value is validated with a YAML parser. It must be a single-line YAML string (plain or quoted), not empty and at most 1024 characters (code points). Values YAML reads as null, a boolean, a number, a date or a collection are rejected (they go in quotes). The "no reemplaza a un parser YAML" limitation sentence is removed. The structural test replaces `termina en` with `parser YAML`.
+6. Out of scope, filed separately: `findFrontmatterDescription`'s comment regex (`frontmatter.ts`, `/\s+#.*$/`) is quadratic on long whitespace runs. That is pre-existing and reached by discovery for every `SKILL.md`, and after A7 it is no longer on the process-model path.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
