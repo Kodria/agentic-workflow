@@ -28,5 +28,6 @@ describe('process-model contract documents the optional description (PD-4)', () 
         expect(section).toContain('parser YAML');
         expect(section).not.toContain('no reemplaza a un parser YAML');
         expect(section).toContain('code points');
+        expect(section).toContain('caracteres de control');
     });
 });
