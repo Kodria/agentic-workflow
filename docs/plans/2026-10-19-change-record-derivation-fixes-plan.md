@@ -211,7 +211,7 @@ Owns CRD-2 and CRD-3. The derivation and its user documentation change together.
 
 #### Implementation
 
-- [ ] **Step 1 — RED.** In `derive.test.ts`:
+- [x] **Step 1 — RED.** In `derive.test.ts`:
 
   Unit tests, in `deriveFromCommits and deriveFields (no repository)`:
 
@@ -270,7 +270,7 @@ Owns CRD-2 and CRD-3. The derivation and its user documentation change together.
   ```
 
   The `branchOff` helper returns the base ref; the expected `modules` above follow R3.4 (three segments, sorted). Adjust only a `modules` literal if the helper's base already contains files. Run CMD-DERIVE. The new tests fail.
-- [ ] **Step 2 — Implementation.** In `derive.ts`:
+- [x] **Step 2 — Implementation.** In `derive.ts`:
 
   ```ts
   const EXCLUDE_PLANS = ':(top,exclude,literal)docs/plans';
@@ -300,7 +300,7 @@ Owns CRD-2 and CRD-3. The derivation and its user documentation change together.
   - `scope`: the most frequent scope, or `null`.
   - Commits that only touch `docs/plans/` (the plan, its amendments and lifecycle marks) do not choose `type` or `scope`, unless every commit is like that; they still count for `semver` and `breaking`.
   ```
-- [ ] **Step 3 — GREEN.** Run CMD-DERIVE, CMD-CHANGES, CMD-TYPECHECK → pass. Commit `fix(changes): stop plan-only commits from choosing the record type and scope`.
+- [x] **Step 3 — GREEN.** Run CMD-DERIVE, CMD-CHANGES, CMD-TYPECHECK → pass. Commit `fix(changes): stop plan-only commits from choosing the record type and scope`.
 
 #### Edge cases
 
