@@ -189,9 +189,10 @@ Owns FH-4, FH-5, FH-6 in `cli/src/core/process/model.ts` and extensions to `cli/
 2. Run CMD-MODEL → RED.
 3. **GREEN — implement in `model.ts`:**
    - Add `MAX_PROCESS_PROBLEMS = 20`, `UNKNOWN_FIELD_KEY_MAX = 64`.
-   - Add `function loadYamlScalar(raw: string): unknown` using `yaml.load('v: ' + raw)` inside try/catch (never throw); return the `v` property when the doc is a plain object, else a sentinel. **Guard (design FH-4 amendment):** if `raw.length > 128` or `raw` contains `&` or `*`, return a non-string sentinel without calling `yaml.load`.
+   - Add `function loadYamlScalar(raw: string): unknown` using `yaml.load('v: ' + raw)` inside try/catch (never throw); return the `v` property when the doc is a plain object, else a sentinel. **Guard (FH-4):** strip trailing ` #`/`\t#` comment from raw for the guard; if remaining length > 128 or `/[&*][A-Za-z0-9_-]+/` matches, return miss without `yaml.load`. Alias-class check also gates `loadBlock`/`checkDescription` before full-block `yaml.load`.
    - Add `function yamlStringSlug(raw: string): string | null` — if `loadYamlScalar` result `typeof === 'string'` return it, else null.
-   - Truncate keys in **both** `unknown field` and `duplicate field` messages (FH-6). Cap test must assert exactly 20 `unknown field` mentions and `5 more problems` for 25 unknowns.
+   - Truncate keys in **both** `unknown field` and `duplicate field` messages (FH-6). `readPairs` stops pushing after 20 problems (count remainder). Cap test: exactly 20 `unknown field` + `5 more problems`.
+   - **FH-3/FH-5 QA amend:** `matchFrontmatterBlock` stops and returns `null` if inner content would exceed 65536; process-model size diagnostic when prefix has column-0 or indented `awm: process-model`. Tests: NBSP non-closer; comment `# tag*` still accepts slug; oversized indented discriminator → size diag not silence; silent non-model asserts no `yaml.load`; size diag regex exact.
    - After reading required presence of `name` / `terminates_to`, resolve through `yamlStringSlug`; if null, push the quote/string diagnostic; else run `PROCESS_NAME` (and `none` exception) on the resolved string; store the resolved string on the model.
    - Before `readPairs`: if `block.length > FRONTMATTER_MAX`, if block matches process-model discriminator at line start (`/^awm[ \t]*:[ \t]*process-model[ \t]*$/m`), return size diagnostic; else return `{ diagnostics: [] }`.
    - When pushing `unknown field`, stringify a truncated key: if `key.length > 64`, use `key.slice(0, 64) + '…'` inside `JSON.stringify`.
