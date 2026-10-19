@@ -25,8 +25,9 @@ const failure = (code: string, message: string, remedy?: string): { ok: false; f
 const unsafeBase = (explicitBase: string): { ok: false; failure: Failure } => failure('invalid-input', `--base "${esc(explicitBase)}" is not a safe git ref`);
 
 /**
- * R3.1/R3.2/R3.5: the base ref: `explicitBase` (checked with `isSafeRef` before git sees it: `invalid-input`), else origin/HEAD,
- * origin/main, origin/master, main, master; `base-unresolved` when none resolves. The one place that decides it, for `change new`, `change validate` and `changes list`.
+ * R3.1/R3.2/R3.5, for `changes list`: the base ref: `explicitBase` (checked with `isSafeRef` before git sees it: `invalid-input`),
+ * else the first default candidate that names a commit (no merge base is needed); `base-unresolved` when none does. The order of the
+ * candidates has one source, `baseCandidates` (git.ts), shared with `resolveRange`.
  */
 export function resolveBaseRef(root: string, explicitBase: string | undefined): BaseRef {
     if (explicitBase !== undefined && !isSafeRef(explicitBase)) return unsafeBase(explicitBase);
@@ -35,9 +36,10 @@ export function resolveBaseRef(root: string, explicitBase: string | undefined): 
 }
 
 /**
- * R3.1/R3.2/R3.5: pins HEAD, then resolves the base and its merge base with HEAD. An explicit `--base` (checked with `isSafeRef`
- * before git sees it) is the only candidate. Without it (R3.1 amended, Q7), the first of origin/HEAD, origin/main, origin/master,
- * main, master that names a commit AND has a merge base with HEAD: a shallow remote ref that does not reach HEAD gives way to the next.
+ * R3.1/R3.2/R3.5, for `change new` and `change validate`: pins HEAD, then resolves the base and its merge base with HEAD, over the
+ * same `baseCandidates` (git.ts) as `resolveBaseRef` but also requiring a merge base. An explicit `--base` (checked with `isSafeRef`
+ * before git sees it) is the only candidate. Without it (R3.1 amended, Q7), the first default candidate that names a commit AND has
+ * a merge base with HEAD: a shallow remote ref that does not reach HEAD gives way to the next.
  * The merge base is computed from the commit id the candidate resolved to, never from its name read a second time (Q9).
  */
 export function resolveRange(root: string, explicitBase: string | undefined): Range {
@@ -45,7 +47,7 @@ export function resolveRange(root: string, explicitBase: string | undefined): Ra
     if (head === null) return failure('git-failed', 'git could not read HEAD');
     if (explicitBase !== undefined && !isSafeRef(explicitBase)) return unsafeBase(explicitBase);
     let named: string | null = null;
-    for (const { ref, name } of baseCandidates(explicitBase)) {
+    for (const { ref, name } of baseCandidates(root, explicitBase)) {
         const sha = commitSha(root, ref);
         if (sha === null) continue;
         named ??= name;

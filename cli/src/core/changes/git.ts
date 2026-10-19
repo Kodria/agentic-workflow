@@ -72,17 +72,33 @@ export const DEFAULT_BASES: readonly BaseCandidate[] = [
     { ref: 'refs/heads/master', name: 'master' },
 ];
 
-/** R3.1: the candidates for a base, in order: an explicit base is the only one (no fallback), else DEFAULT_BASES. */
-export function baseCandidates(explicit?: string): readonly BaseCandidate[] {
-    return explicit !== undefined ? [{ ref: explicit, name: explicit }] : DEFAULT_BASES;
+/**
+ * The DEFAULT_BASES whose exact ref exists, in order (one `for-each-ref` for all of them; a broken symref is not listed). Without
+ * this check git's rev-parse would fall through to `refs/tags/<ref>`, so a tag literally named `refs/heads/main` could stand in for
+ * an absent branch. The patterns are constants; only an exact refname match counts (a pattern also lists the refs below it).
+ * Empty when git fails: the defaults then fail closed as unresolved.
+ */
+function existingDefaultBases(root: string): BaseCandidate[] {
+    const out = runGit(root, ['for-each-ref', '--format=%(refname)', '--end-of-options', ...DEFAULT_BASES.map((c) => c.ref)]);
+    const present = new Set((out ?? '').split('\n'));
+    return DEFAULT_BASES.filter((c) => present.has(c.ref));
+}
+
+/**
+ * R3.1: the candidates for a base, in order. An explicit base is the only one (no fallback) and keeps git's own resolution;
+ * otherwise the DEFAULT_BASES whose exact ref exists. Every caller (`resolveBaseCommit`, `resolveRange`) takes its order from here.
+ */
+export function baseCandidates(root: string, explicit?: string): readonly BaseCandidate[] {
+    return explicit !== undefined ? [{ ref: explicit, name: explicit }] : existingDefaultBases(root);
 }
 
 /**
  * R3.1: --base, then origin/HEAD, origin/main, origin/master, main, master: the first that names a commit, with that commit's id.
- * An explicit base is the only candidate (no fallback). Null when none does (or the explicit base is unsafe). One `rev-parse` per candidate.
+ * An explicit base is the only candidate (no fallback). Null when none does (or the explicit base is unsafe). One `rev-parse` per
+ * candidate tried (and, for the defaults, one `for-each-ref`).
  */
 export function resolveBaseCommit(root: string, explicit?: string): { base: string; sha: string } | null {
-    for (const { ref, name } of baseCandidates(explicit)) {
+    for (const { ref, name } of baseCandidates(root, explicit)) {
         const sha = commitSha(root, ref);
         if (sha !== null) return { base: name, sha };
     }

@@ -76,6 +76,14 @@ describe('resolveRange', () => {
         repo.git('update-ref', 'refs/heads/main', up);
         expect(resolveRange(repo.root, undefined)).toEqual({ ok: false, failure: { code: 'base-unresolved', message: 'no merge base between "refs/remotes/origin/main" and HEAD', remedy: 'pass --base <ref>' } });
     });
+    test('R3.1 without --base, a tag literally named refs/heads/main is not taken for the absent branch main', () => {
+        branchOff(repo);
+        const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
+        const master = repo.git('rev-parse', 'main');
+        repo.git('branch', '-m', 'main', 'master');
+        repo.git('tag', 'refs/heads/main', head);
+        expect(resolveRange(repo.root, undefined)).toEqual({ ok: true, head, mergeBase: master });
+    });
     test('R3.1 (Q9) the merge base comes from the commit id the base resolved to, not from the base name read again', () => {
         const main = branchOff(repo);
         const head = repo.commit({ 'a.ts': '1' }, 'feat: a');

@@ -126,6 +126,33 @@ describe('git functions in a repository', () => {
         expect(repo.git('rev-parse', name)).toBe(tagged); // git alone prefers the tag
         expect(resolveBaseCommit(repo.root)).toEqual({ base: name, sha: repo.git('rev-parse', `refs/heads/${name}`) });
     });
+    test('R3.1 a tag literally named refs/heads/main is not the absent branch main: the base is master', () => {
+        branch();
+        repo.git('branch', '-m', 'main', 'master');
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/heads/main', tagged);
+        expect(repo.git('rev-parse', 'refs/heads/main')).toBe(tagged); // git alone falls through to refs/tags/refs/heads/main
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'master', sha: repo.git('rev-parse', 'refs/heads/master') });
+    });
+    test('R3.1 a tag literally named refs/remotes/origin/main is not the absent remote branch: the base is main', () => {
+        branch();
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/remotes/origin/main', tagged);
+        expect(repo.git('rev-parse', 'refs/remotes/origin/main')).toBe(tagged);
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'main', sha: repo.git('rev-parse', 'refs/heads/main') });
+    });
+    test('R3.1 when git cannot list the default refs, no default is taken (fail closed)', () => {
+        const git = spyOnGit((args) => { if (args.includes('for-each-ref')) throw new Error('boom'); });
+        try {
+            expect(resolveBaseCommit(repo.root)).toBeNull();
+        } finally { git.restore(); }
+    });
+    test('R3.1 an explicit base keeps git\'s own resolution (a tag counts)', () => {
+        branch();
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'v1', tagged);
+        expect(resolveBaseCommit(repo.root, 'v1')).toEqual({ base: 'v1', sha: tagged });
+    });
     test('R3.1 origin/HEAD that points nowhere is skipped', () => {
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');
         expect(baseOf(repo.root)).toBe('main');
