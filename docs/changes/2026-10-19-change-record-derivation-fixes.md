@@ -51,7 +51,7 @@ rollback: "Revertir el commit de merge del PR. No hay estado persistente; los re
 - Revisión de especificación y de calidad por rebanada, revisión final de la rama y QA con Track A y las lentes de robustez, lógica y tests, con dos reverificaciones independientes. Cada hallazgo de tests se cerró con un mutante que antes sobrevivía y ahora falla, probado en un worktree aparte.
 - Tests de comando: `change new` sobre una rama con la forma de #228 escribe `type: ci` y `scope: release`, y sin `origin/HEAD`, con un `main` local atrasado, deriva contra `origin/main`.
 - Con el binario construido en este clon (sin `origin/HEAD`, `main` local en v9.19.0), `changes list --format voice` lista los dos Change Records de `origin/main`; el 9.20.1 publicado responde «todavía no usa Change Records».
-- Este mismo registro se generó con el CLI de la rama: deriva `fix` / `changes` / `patch`; con las reglas anteriores el scope habría salido `plans`.
+- Este mismo registro se generó con el CLI de la rama (`fix` / `changes` / `patch`) y valida con `--strict` tanto con ese CLI como con el 9.20.1 publicado: en esta rama los commits `(changes)` (13) superan a los `docs(plans)` (8), así que las reglas viejas y las nuevas coinciden.
 
 ## Qué falta validar
 
