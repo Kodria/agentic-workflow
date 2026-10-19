@@ -172,7 +172,7 @@ describe('parseProcessFrontmatter', () => {
             }
         });
 
-        const PARSE_ERROR = /"description" must be a valid single-line YAML string \(quote it\)/;
+        const PARSE_ERROR = /"description" cannot be read: the frontmatter is not valid YAML/;
         const NOT_A_STRING = /"description" must be a string \(quote values YAML reads as a boolean, a number, a date or a collection\)/;
 
         it.each([
@@ -219,16 +219,84 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model?.description).toBe(expected);
         });
 
-        it('rejects a raw value over 16384 characters with the 1024 message without parsing it', () => {
+        const blockOf = (source: string): string => source.slice(4, source.indexOf('\n---', 4));
+        /** Modelo válido con description `ok` cuyo bloque de frontmatter mide exactamente `target`. */
+        const withBlockLength = (target: number): string => {
+            const base = withDescription('description: ok');
+            const pad = target - blockOf(base).length - 3;
+            const source = base.replace('\ncreated:', `\n# ${'x'.repeat(pad)}\ncreated:`);
+            expect(blockOf(source)).toHaveLength(target);
+            return source;
+        };
+
+        it('parses a frontmatter block of exactly 65536 characters', () => {
+            const r = parseProcessFrontmatter(withBlockLength(65536), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('ok');
+        });
+
+        it('rejects a frontmatter block over 65536 characters with the 1024 message without parsing it', () => {
+            const source = withBlockLength(65537);
             const load = jest.spyOn(yaml, 'load');
             try {
-                const r = parseProcessFrontmatter(withDescription(`description: ${'a'.repeat(16385)}`), 'p');
+                const r = parseProcessFrontmatter(source, 'p');
                 expect(r.model).toBeUndefined();
                 expect(r.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();
             }
+        });
+
+        it('accepts a short value followed by a 20000-character comment', () => {
+            const r = parseProcessFrontmatter(withDescription(`description: ok # ${'x'.repeat(20000)}`), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('ok');
+        });
+
+        it('accepts an escape-heavy value that resolves to 1024 code points', () => {
+            const r = parseProcessFrontmatter(withDescription(`description: "${'\\x41'.repeat(1024)}"`), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('A'.repeat(1024));
+        });
+
+        it('preserves NBSP, U+3000 and BOM exactly as YAML reads them', () => {
+            const r = parseProcessFrontmatter(withDescription('description: \u00A0hello\u3000world\uFEFF'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('\u00A0hello\u3000world\uFEFF');
+        });
+
+        it('rejects description:value with no space after the colon', () => {
+            const r = parseProcessFrontmatter(withDescription('description:value'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(PARSE_ERROR);
+        });
+
+        const CONTROL = /"description" must not contain control, line-break or bidirectional-override characters/;
+
+        it.each([
+            '"a\\nb"', '"a\\rb"', '"\\0"', '"\\e[31m"', '"\\x7f"', '"\\x85"', '"\\x9f"',
+            '"a\\u2028b"', '"a\\u2029b"', '"\\u202A"', '"\\u202E"', '"\\u2066"', '"\\u2069"',
+            '"\\uD800"', '"\\uDC00"', 'a\u2028b', 'a\u2029b', 'a\u202Eb', 'a\u0085b',
+        ])('rejects control, line-break, bidi or lone-surrogate content: %j', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(CONTROL);
+        });
+
+        it.each([
+            ['an escaped tab', '"a\\tb"', 'a\tb'],
+            ['a surrogate pair', '"\\uD83D\\uDE00"', '\u{1F600}'],
+            ['a zero-width-space-only value (documented policy: non-empty)', '"\\u200B"', '\u200B'],
+        ])('accepts %s', (_kind, value, expected) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe(expected);
+        });
+
+        it('lists description in the unknown-field message', () => {
+            const r = parseProcessFrontmatter(withDescription('summary: nope'), 'p');
+            expect(r.diagnostics.join(' ')).toMatch(/the contract admits only [^;]*\bdescription\b/);
         });
 
         it('accepts a closed quote followed by a comment', () => {
@@ -245,9 +313,9 @@ describe('parseProcessFrontmatter', () => {
         });
 
         it('counts the 1024 limit in code points, not UTF-16 units', () => {
-            const ok = parseProcessFrontmatter(withDescription(`description: ${'😀'.repeat(600)}`), 'p');
+            const ok = parseProcessFrontmatter(withDescription(`description: ${'😀'.repeat(1024)}`), 'p');
             expect(ok.diagnostics).toEqual([]);
-            expect([...(ok.model?.description ?? '')]).toHaveLength(600);
+            expect([...(ok.model?.description ?? '')]).toHaveLength(1024);
             const tooLong = parseProcessFrontmatter(withDescription(`description: ${'😀'.repeat(1025)}`), 'p');
             expect(tooLong.model).toBeUndefined();
             expect(tooLong.diagnostics.join(' ')).toMatch(/"description" must be at most 1024 characters/);
@@ -279,19 +347,39 @@ describe('parseProcessFrontmatter', () => {
     });
 
     describe('indented frontmatter keys', () => {
-        it('reports a model whose awm discriminator is indented instead of ignoring it', () => {
-            const r = parseProcessFrontmatter(valid.replace('awm: process-model', '  awm: process-model'), 'p');
+        const indentAll = (source: string): string =>
+            source.replace(/^---\n([\s\S]*?)\n---/, (_m, block: string) => `---\n${block.split('\n').map((l) => `  ${l}`).join('\n')}\n---`);
+
+        it('reports a model whose keys are all indented instead of ignoring it', () => {
+            const r = parseProcessFrontmatter(indentAll(valid), 'p');
             expect(r.model).toBeUndefined();
             expect(r.diagnostics).toEqual(['p: invalid process model — frontmatter keys must not be indented (frontmatter line 1)']);
         });
 
         it('allows whitespace around the colon and counts comment lines', () => {
-            const r = parseProcessFrontmatter('---\n# nota\n\tawm :  process-model\nname: x\n---\n', 'p');
+            const r = parseProcessFrontmatter('---\n# nota\n  awm :  process-model\n  name: x\n---\n', 'p');
             expect(r.diagnostics).toEqual(['p: invalid process model — frontmatter keys must not be indented (frontmatter line 2)']);
         });
 
-        it('stays silent for a document whose indented lines are not the discriminator', () => {
-            expect(parseProcessFrontmatter('---\nname: x\nmetadata:\n  awm: other\n---\n', 'p')).toEqual({ diagnostics: [] });
+        it.each([
+            ['another indented value', '---\nname: x\nmetadata:\n  awm: other\n---\n'],
+            ['a mention nested under metadata', '---\nname: x\nmetadata:\n  awm: process-model\n---\n'],
+            ['a mention inside a block-scalar description', '---\nname: x\ndescription: >\n  awm: process-model\n---\n'],
+            ['a near-miss discriminator', '---\n  awm: process-model-x\n  name: x\n---\n'],
+            ['an indentation YAML cannot load', '---\n\tawm: process-model\nname: x\n---\n'],
+        ])('stays silent for a non-model with %s', (_kind, source) => {
+            expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
+        });
+
+        it('does not load a block over 65536 characters to confirm an indented discriminator', () => {
+            const source = indentAll(valid.replace('\ncreated:', `\n# ${'x'.repeat(65536)}\ncreated:`));
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
+                expect(load).not.toHaveBeenCalled();
+            } finally {
+                load.mockRestore();
+            }
         });
     });
 });

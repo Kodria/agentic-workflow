@@ -66,6 +66,24 @@ describe('discoverProcessModels', () => {
         expect(r.diagnostics).toEqual([]);
     });
 
+    it('description sobrevive parse → discover, tal cual la lee YAML', () => {  // verifies PD-3
+        const saved = { HOME: process.env.HOME, AWM_HOME: process.env.AWM_HOME };
+        process.env.HOME = path.join(tmp, 'home');
+        process.env.AWM_HOME = path.join(tmp, 'home', '.awm');
+        try {
+            const root = registry(path.join(tmp, 'rd'), {
+                'con-desc': FIXTURE.replace('NAME', 'con-desc').replace('created:', 'description: "Use when: tracing\\u00A0"\ncreated:'),
+            });
+            const r = discoverProcessModels([root]);
+            expect(r.diagnostics).toEqual([]);
+            expect(r.models.map((m) => m.description)).toEqual(['Use when: tracing ']);
+        } finally {
+            for (const [k, v] of Object.entries(saved)) {
+                if (v === undefined) delete process.env[k]; else process.env[k] = v;
+            }
+        }
+    });
+
     it('un modelo roto no impide descubrir los sanos', () => {                  // verifies R7.1
         const root = registry(path.join(tmp, 'r2'), {
             'sano': FIXTURE.replace('NAME', 'sano'),
