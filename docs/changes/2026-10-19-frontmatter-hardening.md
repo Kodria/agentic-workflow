@@ -25,16 +25,16 @@ verification:
     typecheck: pass
   receipt_digest: sha256:595ce1683ec34e08a98bff8c5515d815d4d97752b8e9f6812183281d3517f93a
 manual_validation:
-  - step: Con la versión publicada, un SKILL.md cuyo description plano tiene 80 000 espacios sin #
-    expected: discovery lo resuelve en menos de 50 ms (no segundos)
-  - step: Un frontmatter con una línea ---x: 1 antes del cierre real ---
-    expected: matchFrontmatterBlock conserva las claves posteriores al ---x
-  - step: awm process con name: null (o 0x1f / 1e5) vs name: "demo-ok" / name: "null"
-    expected: rechaza los bare YAML non-string y acepta los strings entrecomillados válidos como slug
+  - step: "Con la versión publicada, un SKILL.md cuyo description plano tiene 80000 espacios sin #"
+    expected: "discovery lo resuelve en menos de 50 ms (no segundos)"
+  - step: "Un frontmatter con una línea '---x: 1' antes del cierre real '---'"
+    expected: "matchFrontmatterBlock conserva las claves posteriores al ---x"
+  - step: "awm process con name: null (o 0x1f / 1e5) vs name entrecomillado demo-ok o null"
+    expected: "rechaza los bare YAML non-string y acepta los strings entrecomillados validos como slug"
 risks:
-  - Process models that relied on bare YAML non-string tokens as slug text (name: null) now reject; quote them.
-  - Oversized or alias-bearing process-model frontmatter fails closed with size/invalid diagnostics.
-rollback: Revert the merge commit of this change; republish the previous agentic-workflow-manager patch if already released.
+  - "Process models that relied on bare YAML non-string tokens as slug text (name: null) now reject; quote them."
+  - "Oversized or alias-bearing process-model frontmatter fails closed with size/invalid diagnostics."
+rollback: "Revert the merge commit of this change; republish the previous agentic-workflow-manager patch if already released."
 ---
 
 ## Qué se hizo
