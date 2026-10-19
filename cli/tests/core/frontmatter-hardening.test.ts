@@ -42,6 +42,10 @@ describe('frontmatter hardening (FH-1, FH-2, FH-3)', () => {
             expect(findFrontmatterDescription('description: hello # drop').value).toBe('hello');
         });
 
+        it('drops trailing comment after tab before #', () => {
+            expect(findFrontmatterDescription('description: hello\t# drop').value).toBe('hello');
+        });
+
         it('keeps NBSP before # (matches js-yaml)', () => {
             const fm = 'description: hello\u00A0# keep';
             const ours = findFrontmatterDescription(fm).value;
