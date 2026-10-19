@@ -93,7 +93,10 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     const [matrixJob, hotJob] = splitJob(workflow, 'windows-arm-hot');
     const [, changesJob] = splitJob(workflow, 'windows-arm-changes');
     const [, testJob] = splitJob(workflow, 'test');
-    expect(testJob).not.toMatch(/^    continue-on-error:/m);
+    // No gating job may tolerate failure, in any quoting or expression form.
+    for (const job of [testJob, hotJob, changesJob]) {
+        expect(job).not.toContain('continue-on-error');
+    }
     expect(workflow.indexOf('  windows-arm-hot:')).toBeLessThan(workflow.indexOf('  windows-arm-changes:'));
 
     // Optional env: (e.g. AWM_BASELINE_REGISTRY_ROOT for RF-5.1 docs contract) may
@@ -137,9 +140,6 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
         }
         expect(ignored.test([root, 'core', 'changesets', 'x.test.ts'].join(separator))).toBe(false);
     }
-    const remainderStep = matrixJob.split(/- name: Tests? \(Windows ARM remainder\)\n/)[1]?.split(/^      - /m)[0];
-    expect(remainderStep).toBeDefined();
-    expect(remainderStep).not.toContain('continue-on-error');
     expect(matrixJob.match(/uses: actions\/upload-artifact@v4/g)).toHaveLength(1);
     expect(hotJob).toContain('runs-on: windows-11-arm');
     expect(hotJob).toContain('run: npm run native:build');
@@ -148,7 +148,6 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     expect(hotJob).not.toContain('upload-artifact@v4');
     expect(hotJob).not.toContain('secure-fs-win32-arm64');
     expect(hotJob).not.toMatch(/^\s*if:/m);
-    expect(hotJob).not.toContain('continue-on-error');
 
     // The Change Record shard is a verbatim copy of the hot job's setup.
     expect(setupBefore(changesJob, CHANGES_STEP)).toBe(setupBefore(hotJob, HOT_STEP));
@@ -164,12 +163,84 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     expect(changesJob).not.toContain('upload-artifact');
     expect(changesJob).not.toContain('secure-fs-win32-arm64');
     expect(changesJob).not.toMatch(/^\s*if:/m);
-    expect(changesJob).not.toContain('continue-on-error');
 
     if (gatesRelease) {
         assertReleaseGate(workflow);
     } else {
         expect(workflow).not.toMatch(/^  release:\s*$/m);
+    }
+}
+
+// Every bypass of the partition or the release gate must make assertArmPartition throw.
+function assertMutationsRejected(workflow: string, gates: boolean): void {
+    const swapped = workflow.replace(
+        /if: matrix\.target (?:!=|==) 'win32-arm64'/g,
+        (guard) => guard.includes('!=') ? "if: matrix.target == 'win32-arm64'" : "if: matrix.target != 'win32-arm64'",
+    );
+    const nonGating = workflow.replace('  windows-arm-hot:\n', '  windows-arm-hot:\n    continue-on-error: true\n');
+    const duplicateArtifact = workflow.replace(
+        'uses: actions/upload-artifact@v4',
+        'uses: actions/upload-artifact@v4\n      - uses: actions/upload-artifact@v4',
+    );
+    const broadIgnore = workflow.replace(
+        /(--testPathIgnorePatterns='[^']+)(?=')/,
+        '$1|runner\\.test\\.ts$',
+    );
+    const skippedHot = workflow.replace(
+        '      - name: Test hot Windows ARM suites\n',
+        '      - name: Test hot Windows ARM suites\n        if: false\n',
+    );
+    const nonGatingRemainder = workflow.replace(
+        /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
+        '$1        continue-on-error: true\n',
+    );
+    const maskedHot = workflow.replace(
+        /(run: npx jest --runTestsByPath [^\n]+ --runInBand --bail)(?=\n)/,
+        '$1; exit 0',
+    );
+    const nonGatingChanges = workflow.replace('  windows-arm-changes:\n', '  windows-arm-changes:\n    continue-on-error: true\n');
+    const skippedChanges = workflow.replace(
+        `      - name: ${CHANGES_STEP}\n`,
+        `      - name: ${CHANGES_STEP}\n        if: false\n`,
+    );
+    const maskedChanges = workflow.replace(
+        /(run: npx jest --runInBand --bail --testPathPatterns='[^']+')(?=\n)/,
+        '$1; exit 0',
+    );
+    const driftedShard = workflow.replace(
+        /(--testPathPatterns='[^']+)changes\?/,
+        '$1changes',
+    );
+    const jobLevel = (job: string, line: string) => workflow.replace(`  ${job}:\n`, `  ${job}:\n    ${line}\n`);
+    const mutations = [
+        swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder, maskedHot,
+        nonGatingChanges, skippedChanges, maskedChanges, driftedShard,
+        jobLevel('test', "continue-on-error: ${{ matrix.target == 'win32-arm64' }}"),
+        jobLevel('windows-arm-hot', 'continue-on-error: ${{ true }}'),
+        jobLevel('windows-arm-changes', 'continue-on-error: ${{ true }}'),
+        jobLevel('test', '"continue-on-error": true'),
+        workflow.replace(/^(        run: npx jest --runInBand --bail\n)/m, '$1        continue-on-error: true\n'),
+        workflow.replace(
+            /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
+            '$1        continue-on-error: ${{ true }}\n',
+        ),
+    ];
+    if (gates) {
+        const needs = workflow.match(RELEASE_NEEDS)?.[1];
+        expect(needs).toBeDefined();
+        const jobs = needs!.split(',').map((job) => job.trim());
+        const withNeeds = (list: string[]) => workflow.replace(RELEASE_NEEDS, (line) => line.replace(`[${needs}]`, `[${list.join(', ')}]`));
+        mutations.push(
+            withNeeds(jobs.filter((job) => job !== 'windows-arm-changes')),
+            withNeeds([...jobs, 'windows-arm-changes']),
+            jobLevel('release', 'if: always()'),
+            jobLevel('release', 'if: ${{ !cancelled() }}'),
+            jobLevel('release', 'continue-on-error: true'),
+        );
+    }
+    for (const mutated of mutations) {
+        expect(mutated).not.toBe(workflow);
+        expect(() => assertArmPartition(mutated, gates)).toThrow();
     }
 }
 
@@ -205,80 +276,16 @@ describe('native release artifacts', () => {
 
     it('rejects swapped matrix guards, non-gating ARM shards, drifted partitions and duplicate artifacts', () => {
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = readWorkflow(name);
-            const swapped = workflow.replace(
-                /if: matrix\.target (?:!=|==) 'win32-arm64'/g,
-                (guard) => guard.includes('!=') ? "if: matrix.target == 'win32-arm64'" : "if: matrix.target != 'win32-arm64'",
-            );
-            const nonGating = workflow.replace('  windows-arm-hot:\n', '  windows-arm-hot:\n    continue-on-error: true\n');
-            const duplicateArtifact = workflow.replace(
-                'uses: actions/upload-artifact@v4',
-                'uses: actions/upload-artifact@v4\n      - uses: actions/upload-artifact@v4',
-            );
-            const broadIgnore = workflow.replace(
-                /(--testPathIgnorePatterns='[^']+)(?=')/,
-                '$1|runner\\.test\\.ts$',
-            );
-            const skippedHot = workflow.replace(
-                '      - name: Test hot Windows ARM suites\n',
-                '      - name: Test hot Windows ARM suites\n        if: false\n',
-            );
-            const nonGatingRemainder = workflow.replace(
-                /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
-                '$1        continue-on-error: true\n',
-            );
-            const maskedHot = workflow.replace(
-                /(run: npx jest --runTestsByPath [^\n]+ --runInBand --bail)(?=\n)/,
-                '$1; exit 0',
-            );
-            const nonGatingChanges = workflow.replace('  windows-arm-changes:\n', '  windows-arm-changes:\n    continue-on-error: true\n');
-            const skippedChanges = workflow.replace(
-                `      - name: ${CHANGES_STEP}\n`,
-                `      - name: ${CHANGES_STEP}\n        if: false\n`,
-            );
-            const maskedChanges = workflow.replace(
-                /(run: npx jest --runInBand --bail --testPathPatterns='[^']+')(?=\n)/,
-                '$1; exit 0',
-            );
-            const driftedShard = workflow.replace(
-                /(--testPathPatterns='[^']+)changes\?/,
-                '$1changes',
-            );
-            const jobLevel = (job: string, line: string) => workflow.replace(`  ${job}:\n`, `  ${job}:\n    ${line}\n`);
-            const gates = name === 'release.yml';
-            const mutations = [
-                swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder, maskedHot,
-                nonGatingChanges, skippedChanges, maskedChanges, driftedShard,
-                jobLevel('test', "continue-on-error: ${{ matrix.target == 'win32-arm64' }}"),
-                jobLevel('windows-arm-hot', 'continue-on-error: ${{ true }}'),
-                jobLevel('windows-arm-changes', 'continue-on-error: ${{ true }}'),
-                workflow.replace(
-                    /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
-                    '$1        continue-on-error: ${{ true }}\n',
-                ),
-            ];
-            if (gates) {
-                mutations.push(
-                    workflow.replace('needs: [test, windows-arm-hot, windows-arm-changes]', 'needs: [test, windows-arm-hot]'),
-                    workflow.replace('needs: [test, windows-arm-hot, windows-arm-changes]', 'needs: [test, windows-arm-hot, windows-arm-changes, windows-arm-changes]'),
-                    jobLevel('release', 'if: always()'),
-                    jobLevel('release', 'if: ${{ !cancelled() }}'),
-                    jobLevel('release', 'continue-on-error: true'),
-                );
-            }
-            for (const mutated of mutations) {
-                expect(mutated).not.toBe(workflow);
-                expect(() => assertArmPartition(mutated, gates)).toThrow();
-            }
-            if (gates) {
-                const reordered = workflow.replace(
-                    'needs: [test, windows-arm-hot, windows-arm-changes]',
-                    'needs: [windows-arm-changes, test, windows-arm-hot]',
-                );
-                expect(reordered).not.toBe(workflow);
-                expect(() => assertArmPartition(reordered, gates)).not.toThrow();
-            }
+            assertMutationsRejected(readWorkflow(name), name === 'release.yml');
         }
+    });
+
+    it('keeps the whole self-test green when release needs is reordered', () => {
+        const workflow = readWorkflow('release.yml');
+        const reordered = workflow.replace(RELEASE_NEEDS, (line, list: string) => line.replace(`[${list}]`, '[windows-arm-changes, test, windows-arm-hot]'));
+        expect(reordered).not.toBe(workflow);
+        expect(() => assertArmPartition(reordered, true)).not.toThrow();
+        expect(() => assertMutationsRejected(reordered, true)).not.toThrow();
     });
 
     it('reports a shard directory that is missing, renamed by case or holds no suite', () => {
