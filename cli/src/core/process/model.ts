@@ -46,15 +46,31 @@ const FORBIDDEN_CHAR = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u061C\u200E\u20
 const INDENTED_DISCRIMINATOR = /^awm[ \t]*:[ \t]*process-model$/;
 /** Discriminador a nivel de línea (sin sangría) para el gate de tamaño FH-5. */
 const PROCESS_MODEL_DISCRIMINATOR_LINE = /^awm[ \t]*:[ \t]*process-model[ \t]*$/m;
+/** Discriminador en prefijo (columna 0 o indentado) cuando matchFrontmatterBlock
+ *  devolvió null por exceso de tamaño (FH-5 QA amend). */
+const PROCESS_MODEL_DISCRIMINATOR_PREFIX = /^[ \t]*awm[ \t]*:[ \t]*process-model[ \t]*$/m;
+/** Token de ancla/alias YAML con forma `&name` / `*name` (FH-4). */
+const YAML_ALIAS_TOKEN = /[&*][A-Za-z0-9_-]+/;
 const STATUSES: readonly string[] = ['draft', 'active'];
 
 /** Sentinel cuando `loadYamlScalar` no obtiene un mapeo plano con clave `v`. */
 const YAML_SCALAR_MISS: unique symbol = Symbol('yaml-scalar-miss');
 
+/** Quita un comentario de escalar plano (` #…` / `\t#…`) solo para el guard FH-4. */
+function stripTrailingPlainCommentForGuard(raw: string): string {
+    for (let i = 0; i < raw.length - 1; i++) {
+        const c = raw[i];
+        if ((c === ' ' || c === '\t') && raw[i + 1] === '#') return raw.slice(0, i);
+    }
+    return raw;
+}
+
 /** Carga un valor suelto de `readPairs` como escalar YAML (`v: <raw>`). NUNCA lanza.
- *  Rechaza sin parsear si el raw es demasiado largo o trae anclas/alias YAML (`&`/`*`). */
+ *  Rechaza sin parsear si el raw (sin comentario final) es demasiado largo o trae
+ *  un token de ancla/alias con forma `&name` / `*name`. */
 function loadYamlScalar(raw: string): unknown {
-    if (raw.length > YAML_SCALAR_RAW_MAX || raw.includes('&') || raw.includes('*')) return YAML_SCALAR_MISS;
+    const forGuard = stripTrailingPlainCommentForGuard(raw);
+    if (forGuard.length > YAML_SCALAR_RAW_MAX || YAML_ALIAS_TOKEN.test(forGuard)) return YAML_SCALAR_MISS;
     try {
         const doc = yaml.load(`v: ${raw}`);
         if (isPlainObject(doc) && Object.prototype.hasOwnProperty.call(doc, 'v')) return doc.v;
@@ -88,13 +104,20 @@ const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
  *  discriminador indentado; nunca viaja a un diagnóstico. */
 interface ContinuationLine { line: number; text: string }
 
+/** Empuja a `problems` mientras haya cupo (FH-6); cuenta el resto en `omitted`. */
+function noteProblem(problems: string[], omitted: { n: number }, msg: string): void {
+    if (problems.length < MAX_PROCESS_PROBLEMS) problems.push(msg);
+    else omitted.n++;
+}
+
 /** Lector de pares `clave: valor` de un frontmatter plano. El contrato no admite
  *  anidamiento ni block scalars: cualquier línea que no sea `clave: valor` es un
  *  rechazo, no una interpretación. (El VALOR de `description` sí pasa por el
- *  parser YAML, más abajo.) */
-function readPairs(block: string): { pairs: Map<string, string>; problems: string[]; continuations: ContinuationLine[] } {
+ *  parser YAML, más abajo.) Deja de registrar problemas tras 20 (FH-6). */
+function readPairs(block: string): { pairs: Map<string, string>; problems: string[]; continuations: ContinuationLine[]; omittedProblems: number } {
     const pairs = new Map<string, string>();
     const problems: string[] = [];
+    const omitted = { n: 0 };
     const continuations: ContinuationLine[] = [];
     // Mismo criterio que YAML, no que JS: se parte en TODO salto de línea YAML
     // (un CR suelto también; si no, `a\rclave: x` sería un par para acá y dos
@@ -106,7 +129,9 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         // NEL/LS/PS son saltos de línea para YAML 1.1 (PyYAML) y no para js-yaml:
         // un comentario podría esconder una clave que solo un runtime ve. Se
         // reporta en CUALQUIER línea, comentarios incluidos, y solo por posición.
-        if (/[\u0085\u2028\u2029]/.test(raw)) problems.push(`frontmatter line ${index + 1} contains a YAML 1.1 line break (NEL, LS or PS)`);
+        if (/[\u0085\u2028\u2029]/.test(raw)) {
+            noteProblem(problems, omitted, `frontmatter line ${index + 1} contains a YAML 1.1 line break (NEL, LS or PS)`);
+        }
         if (line === '' || line.startsWith('#')) continue;
         // El contrato es un mapa PLANO: una línea que empieza con espacio o tab
         // es continuación de un valor multilínea, diga lo que diga. Si se
@@ -120,20 +145,28 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
-        if (!m) { problems.push(`frontmatter line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
-        if (pairs.has(m[1])) { problems.push(`duplicate field ${formatFieldKey(m[1])}`); continue; }
+        if (!m) {
+            noteProblem(problems, omitted, `frontmatter line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`);
+            continue;
+        }
+        if (pairs.has(m[1])) {
+            noteProblem(problems, omitted, `duplicate field ${formatFieldKey(m[1])}`);
+            continue;
+        }
         pairs.set(m[1], m[2]);
     }
-    return { pairs, problems, continuations };
+    return { pairs, problems, continuations, omittedProblems: omitted.n };
 }
 
 type LoadedBlock = { kind: 'too-long' } | { kind: 'invalid' } | { kind: 'loaded'; doc: unknown };
 
 /** Carga el bloque de frontmatter COMPLETO con js-yaml (schema por defecto),
  *  exactamente como lo lee un runtime. Por encima del tope no se parsea. NUNCA
- *  lanza: un error de js-yaml es `invalid`. */
+ *  lanza: un error de js-yaml es `invalid`. Rechaza sin `yaml.load` si el bloque
+ *  contiene un token de ancla/alias con forma `&name` / `*name` (FH-4). */
 function loadBlock(block: string): LoadedBlock {
     if (block.length > FRONTMATTER_MAX) return { kind: 'too-long' };
+    if (YAML_ALIAS_TOKEN.test(block)) return { kind: 'invalid' };
     try { return { kind: 'loaded', doc: yaml.load(block) }; } catch { return { kind: 'invalid' }; }
 }
 
@@ -189,18 +222,29 @@ function checkDescription(raw: string, block: string, keys: ReadonlySet<string>)
 export function parseProcessFrontmatter(source: string, file: string): ProcessParseResult<ProcessModelFrontmatter> {
     let block: string | null;
     try { block = matchFrontmatterBlock(source); } catch { return { diagnostics: [] }; }
-    if (block === null) return { diagnostics: [] };
-
-    // FH-5: acotar el costo de readPairs sobre bloques hostiles. Con discriminador
-    // → diagnóstico de tamaño; sin él → silencio (no es un modelo).
-    if (block.length > FRONTMATTER_MAX) {
-        if (PROCESS_MODEL_DISCRIMINATOR_LINE.test(block)) {
-            return { diagnostics: [`${file}: invalid process model — frontmatter exceeds ${FRONTMATTER_MAX} characters`] };
+    const sizeDiag = { diagnostics: [`${file}: invalid process model — frontmatter exceeds ${FRONTMATTER_MAX} characters`] };
+    if (block === null) {
+        // FH-5: match devolvió null (sin cerrador a tiempo / tope interno). Si el
+        // prefijo declara process-model (columna 0 o indentado) → tamaño; si no → silencio.
+        if (source.startsWith('---')) {
+            const prefix = source.slice(0, FRONTMATTER_MAX + 128);
+            if (PROCESS_MODEL_DISCRIMINATOR_PREFIX.test(prefix)) return sizeDiag;
         }
         return { diagnostics: [] };
     }
 
-    const { pairs, problems, continuations } = readPairs(block);
+    // FH-5 defensa: bloque devuelto que aun así exceda el tope (no debería pasar
+    // tras FH-3). Con discriminador → tamaño; sin él → silencio.
+    if (block.length > FRONTMATTER_MAX) {
+        if (PROCESS_MODEL_DISCRIMINATOR_LINE.test(block) || PROCESS_MODEL_DISCRIMINATOR_PREFIX.test(block)) {
+            return sizeDiag;
+        }
+        return { diagnostics: [] };
+    }
+
+    const { pairs, problems, continuations, omittedProblems } = readPairs(block);
+    const omitted = { n: omittedProblems };
+    const note = (msg: string): void => noteProblem(problems, omitted, msg);
 
     // Un modelo con las claves indentadas no tiene `awm` de nivel superior y se
     // perdería en silencio como "otro documento". Se nombra solo la línea.
@@ -225,14 +269,14 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 
     for (const key of pairs.keys()) {
         if (!(ALLOWED_FIELDS as readonly string[]).includes(key)) {
-            problems.push(`unknown field ${formatFieldKey(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
+            note(`unknown field ${formatFieldKey(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
         }
     }
 
     const rawSchema = pairs.get('schema');
     const schema = rawSchema !== undefined && /^\d+$/.test(rawSchema) ? Number(rawSchema) : Number.NaN;
     if (!Number.isInteger(schema) || schema < 1) {
-        problems.push('"schema" must be a positive integer');
+        note('"schema" must be a positive integer');
     } else if (schema > KNOWN_PROCESS_SCHEMA) {
         // R1.4: detenerse e informar. Interpretarlo como el contrato anterior es
         // exactamente lo que este branch existe para impedir.
@@ -241,7 +285,7 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 
     for (const field of ['name', 'status', 'entry_point', 'terminates_to', 'created', 'updated'] as const) {
         const value = pairs.get(field);
-        if (value === undefined || value === '') problems.push(`"${field}" is required`);
+        if (value === undefined || value === '') note(`"${field}" is required`);
     }
 
     const YAML_STRING_DIAG = 'must be a YAML string scalar (quote values YAML reads as null, boolean, or number)';
@@ -250,24 +294,24 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     const rawName = pairs.get('name') ?? '';
     if (rawName !== '') {
         const resolvedName = yamlStringSlug(rawName);
-        if (resolvedName === null) problems.push(`"name" ${YAML_STRING_DIAG}`);
-        else if (!PROCESS_NAME.test(resolvedName)) problems.push('"name" must be a lowercase slug (a-z, 0-9, hyphen)');
+        if (resolvedName === null) note(`"name" ${YAML_STRING_DIAG}`);
+        else if (!PROCESS_NAME.test(resolvedName)) note('"name" must be a lowercase slug (a-z, 0-9, hyphen)');
         else name = resolvedName;
     }
 
     const status = pairs.get('status') ?? '';
-    if (status !== '' && !STATUSES.includes(status)) problems.push(`"status" must be one of ${STATUSES.join(', ')}`);
+    if (status !== '' && !STATUSES.includes(status)) note(`"status" must be one of ${STATUSES.join(', ')}`);
 
     const entryPointRaw = pairs.get('entry_point') ?? '';
-    if (entryPointRaw !== '' && entryPointRaw !== 'true' && entryPointRaw !== 'false') problems.push('"entry_point" must be true or false');
+    if (entryPointRaw !== '' && entryPointRaw !== 'true' && entryPointRaw !== 'false') note('"entry_point" must be true or false');
 
     let terminatesTo = '';
     const rawTerminatesTo = pairs.get('terminates_to') ?? '';
     if (rawTerminatesTo !== '') {
         const resolvedTerminatesTo = yamlStringSlug(rawTerminatesTo);
-        if (resolvedTerminatesTo === null) problems.push(`"terminates_to" ${YAML_STRING_DIAG}`);
+        if (resolvedTerminatesTo === null) note(`"terminates_to" ${YAML_STRING_DIAG}`);
         else if (resolvedTerminatesTo !== 'none' && !PROCESS_NAME.test(resolvedTerminatesTo)) {
-            problems.push('"terminates_to" must be a lowercase slug or "none"');
+            note('"terminates_to" must be a lowercase slug or "none"');
         } else {
             terminatesTo = resolvedTerminatesTo;
         }
@@ -275,20 +319,20 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 
     for (const field of ['created', 'updated'] as const) {
         const value = pairs.get(field) ?? '';
-        if (value !== '' && !DATE.test(value)) problems.push(`"${field}" must be YYYY-MM-DD`);
+        if (value !== '' && !DATE.test(value)) note(`"${field}" must be YYYY-MM-DD`);
     }
 
     let description: string | undefined;
     const rawDescription = pairs.get('description');
     if (rawDescription !== undefined) {
         const checked = checkDescription(rawDescription, block, new Set(pairs.keys()));
-        if ('problem' in checked) problems.push(checked.problem);
+        if ('problem' in checked) note(checked.problem);
         else description = checked.value;
     }
 
-    if (problems.length > 0) {
-        const capped = problems.length > MAX_PROCESS_PROBLEMS
-            ? problems.slice(0, MAX_PROCESS_PROBLEMS).concat([`${problems.length - MAX_PROCESS_PROBLEMS} more problems`])
+    if (problems.length > 0 || omitted.n > 0) {
+        const capped = omitted.n > 0
+            ? problems.concat([`${omitted.n} more problems`])
             : problems;
         return { diagnostics: [`${file}: invalid process model — ${capped.join('; ')}`] };
     }

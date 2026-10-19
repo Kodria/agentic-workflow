@@ -19,6 +19,10 @@
 // esperados escritos a mano, que pueden envejecer hacia la expectativa
 // equivocada.
 
+/** Tope del contenido interno (entre `---` y el cerrador) antes de abandonar el
+ *  escaneo (FH-3). Misma cifra que `FRONTMATTER_MAX` en process/model.ts. */
+const FRONTMATTER_INNER_MAX = 65536;
+
 /** ¿La linea es exactamente el cerrador `---` con espacios/tabs finales opcionales?
  *  `---x`, `---#comment` y similares NO cierran. */
 function isFrontmatterCloserLine(line: string): boolean {
@@ -32,7 +36,9 @@ function isFrontmatterCloserLine(line: string): boolean {
 
 /** Texto crudo del frontmatter (entre los delimitadores `---`), o null si el
  *  bloque falta o esta mal formado. Tolera CRLF. Cierra solo en una linea que
- *  sea exactamente `---` (con espacios/tabs finales opcionales). */
+ *  sea exactamente `---` (con espacios/tabs finales opcionales). Si el contenido
+ *  interno excederia `FRONTMATTER_INNER_MAX` antes de un cerrador valido, retorna
+ *  null sin seguir acumulando lineas (FH-3). */
 export function matchFrontmatterBlock(raw: string): string | null {
     if (!raw.startsWith('---')) return null;
     const afterOpen = raw[3] === '\r' && raw[4] === '\n' ? 5
@@ -42,6 +48,7 @@ export function matchFrontmatterBlock(raw: string): string | null {
 
     const body = raw.slice(afterOpen);
     const lines: string[] = [];
+    let innerLen = 0;
     let i = 0;
     while (i <= body.length) {
         let end = i;
@@ -50,7 +57,11 @@ export function matchFrontmatterBlock(raw: string): string | null {
         if (isFrontmatterCloserLine(line)) {
             return lines.join('\n');
         }
+        // join('\n') inserta un salto entre lineas ya acumuladas.
+        const nextLen = lines.length === 0 ? line.length : innerLen + 1 + line.length;
+        if (nextLen > FRONTMATTER_INNER_MAX) return null;
         lines.push(line);
+        innerLen = nextLen;
         if (end >= body.length) break;
         if (body[end] === '\r' && body[end + 1] === '\n') i = end + 2;
         else i = end + 1;

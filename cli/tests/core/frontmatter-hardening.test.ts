@@ -35,6 +35,29 @@ describe('frontmatter hardening (FH-1, FH-2, FH-3)', () => {
         it('yields empty string for empty frontmatter', () => {
             expect(matchFrontmatterBlock('---\n---\n')).toBe('');
         });
+
+        it('does not close on --- followed by NBSP', () => {
+            const raw = '---\nname: a\n---\u00A0\nstatus: b\n---\n\nbody\n';
+            const block = matchFrontmatterBlock(raw);
+            expect(block).not.toBeNull();
+            expect(block!).toContain('---\u00A0');
+            expect(block!).toContain('status: b');
+        });
+
+        it('returns null quickly when open frontmatter would exceed 65536 without a closer', () => {
+            const huge = `---\n${'x'.repeat(70_000)}`;
+            const started = Date.now();
+            expect(matchFrontmatterBlock(huge)).toBeNull();
+            expect(Date.now() - started).toBeLessThan(500);
+        });
+
+        it('returns null when a closer exists only after inner content would exceed 65536', () => {
+            // Without the allocation bound, this would return a 65537-char block.
+            const raw = `---\n${'x'.repeat(65_537)}\n---\n`;
+            const started = Date.now();
+            expect(matchFrontmatterBlock(raw)).toBeNull();
+            expect(Date.now() - started).toBeLessThan(500);
+        });
     });
 
     describe('FH-2: comment strip is space/tab only (not NBSP)', () => {

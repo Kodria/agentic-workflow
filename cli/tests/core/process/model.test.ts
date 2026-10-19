@@ -127,6 +127,44 @@ describe('parseProcessFrontmatter', () => {
                 load.mockRestore();
             }
         });
+
+        it('accepts name with a trailing plain comment that contains * (guard strips comment)', () => {
+            const r = parseProcessFrontmatter(
+                valid.replace('name: ejemplo-proceso', 'name: my-proc # tag*'),
+                'p',
+            );
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.name).toBe('my-proc');
+        });
+
+        it('rejects a description block with an alias-shaped token without calling yaml.load on the block', () => {
+            // Alias token lives in a comment so readPairs stays clean; loadBlock must
+            // refuse before yaml.load (same alias class as FH-4 slug guard). Slug
+            // loads (`v: …`) may still run; the full block must not.
+            const withDesc = valid.replace(
+                'updated: 2026-08-23',
+                'updated: 2026-08-23\ndescription: "ok"\n# &hostile_alias',
+            );
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const r = parseProcessFrontmatter(withDesc, 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(/"description" cannot be read: the frontmatter is not valid YAML/);
+                expect(load.mock.calls.some(([arg]) => String(arg).includes('&hostile_alias'))).toBe(false);
+                expect(load.mock.calls.some(([arg]) => String(arg).includes('description:'))).toBe(false);
+            } finally {
+                load.mockRestore();
+            }
+        });
+
+        it('accepts a quoted description with bare & that is not an alias token', () => {
+            const r = parseProcessFrontmatter(
+                valid.replace('updated: 2026-08-23', 'updated: 2026-08-23\ndescription: "foo & bar"'),
+                'p',
+            );
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('foo & bar');
+        });
     });
 
     describe('bounded frontmatter diagnostics (FH-5, FH-6)', () => {
@@ -145,18 +183,24 @@ describe('parseProcessFrontmatter', () => {
             try {
                 const r = parseProcessFrontmatter(source, 'p');
                 expect(r.model).toBeUndefined();
-                expect(r.diagnostics.join(' ')).toMatch(/65536|exceeds|too (?:large|long)|size/i);
+                expect(r.diagnostics.join(' ')).toMatch(/frontmatter exceeds 65536 characters/);
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();
             }
         });
 
-        it('stays silent for an oversized block without the process-model discriminator', () => {
+        it('stays silent for an oversized block without the process-model discriminator and never calls yaml.load', () => {
             const source = withBlockLength(valid.replace('awm: process-model\n', ''), FRONTMATTER_MAX + 1);
-            const r = parseProcessFrontmatter(source, 'p');
-            expect(r.model).toBeUndefined();
-            expect(r.diagnostics).toEqual([]);
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const r = parseProcessFrontmatter(source, 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics).toEqual([]);
+                expect(load).not.toHaveBeenCalled();
+            } finally {
+                load.mockRestore();
+            }
         });
 
         it('caps process-model problems at 20 and reports the remainder count', () => {
@@ -594,14 +638,15 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics.join(' ')).not.toMatch(/must not be indented/);
         });
 
-        it('stays silent for an indented discriminator in a block over 65536 characters without loading it', () => {
-            // FH-5: oversized blocks without a top-level (non-indented) discriminator
-            // return empty diagnostics before readPairs; indented awm never reaches
-            // the indentation diagnostic path.
+        it('rejects an oversized indented process-model with a size diagnostic and never calls yaml.load', () => {
+            // FH-5 (QA amend): indented awm: process-model in an oversized/unclosed
+            // prefix must surface the size diagnostic, not silence.
             const source = indentAll(valid.replace('\ncreated:', `\n# ${'x'.repeat(65536)}\ncreated:`));
             const load = jest.spyOn(yaml, 'load');
             try {
-                expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
+                const r = parseProcessFrontmatter(source, 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(/frontmatter exceeds 65536 characters/);
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();
