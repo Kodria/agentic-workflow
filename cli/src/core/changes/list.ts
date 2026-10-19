@@ -62,7 +62,7 @@ export interface ListResult {
 }
 
 export interface ListOptions {
-    /** Explicit base ref; omitted, R3.1 picks origin/HEAD, main or master. */
+    /** Explicit base ref; omitted, R3.1 picks origin/HEAD, origin/main, origin/master, main or master. */
     base?: string;
     since: Date;
     /** Entries listed, 1..200 (more is capped at 200). */
