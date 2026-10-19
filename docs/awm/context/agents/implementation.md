@@ -20,9 +20,17 @@
   1. **Regex sobre una URL** — `extractHost()` capturaba el bloque `userinfo@host:puerto` entero, así que `https://user:gitlab@example-host.com/...` (patrón real de inyección de credenciales en CI) se clasificaba por una substring del token. Fix: `new URL(remote).hostname`, con regex acotada SOLO para la sintaxis SCP de git.
   2. **Tipo TS sobre `JSON.parse()`** — declarar `RuffMessage[]` y leer campos directo. El tipo es una promesa que el compilador no verifica en runtime: `'{}'`, `'null'`, `'42'` o un elemento `null` son JSON válido que no calza, y crasheaban el sensor run COMPLETO. Fix: `Array.isArray(parsed)` + guardas de forma por elemento ANTES de leer propiedades.
   3. **Cobertura de un stdlib asumida en vez de verificada** — `yamlString()` confiaba en que `JSON.stringify` escapa "control bytes"; solo escapa 0x00-0x1F, y **0x7F (DEL) no está en el conjunto que JSON exige escapar**, así que sobrevivía sin escapar dentro de la scalar citada, violando el c-printable de YAML 1.2.
+  4. **Validador propio de un formato que consumen otros runtimes** — `parseProcessFrontmatter` (`core/process/model.ts`) validaba `description` del frontmatter YAML de un `SKILL.md` con reglas escritas a mano. Hicieron falta 10 enmiendas y 4 rondas de QA: en cada ronda aparecía otra forma que el CLI aceptaba y Codex/js-yaml leían distinto o rechazaban:
+     - `Use when: x` sin comillas;
+     - `true`/`null`;
+     - escapes YAML;
+     - NBSP recortado por `trim()`;
+     - un CR suelto que hacía leer una clave extra;
+     - LS/PS/NEL en comentarios.
+     Convergió solo al cargar el bloque completo con js-yaml **y** exigir que el lector propio (`readPairs`) vea las mismas claves de nivel superior que YAML.
 
 <!-- awm-context:CTX-AGENTS-032 -->
-  La contramedida no es "revisar mejor a mano" — ya se intentó las cuatro veces. Es preferir una implementación ya verificada contra la especificación, y cuando no existe, validar forma o cobertura en runtime. Un tipo TS sobre `JSON.parse()`, o un comentario que afirma "X ya escapa Y", son una nota para el autor, no una garantía.
+  La contramedida no es "revisar mejor a mano" — ya se intentó las cuatro veces. Es preferir una implementación ya verificada contra la especificación, y cuando no existe, validar forma o cobertura en runtime. Un tipo TS sobre `JSON.parse()`, o un comentario que afirma "X ya escapa Y", son una nota para el autor, no una garantía. **Si el CLI valida un formato que van a parsear otras herramientas, se valida con el parser real desde el primer commit, no después de que QA lo exija.** Si además se conserva un lector propio, por ejemplo para dar diagnósticos por línea, hay que afirmar en runtime que ese lector y el parser real leen la misma estructura (las mismas claves de nivel superior). Cerrar caso por caso cada divergencia no converge.
 
 <!-- awm-context:CTX-AGENTS-033 -->
 - **defensive-guard-consistency:** al agregar una guarda defensiva (`?? {}`, chequeo de null, un caso "N/A" tratado como satisfecho), buscar TODAS las funciones hermanas que leen el mismo campo y aplicar la misma guarda — no solo en la que se está editando. *(×5: `checkManifest` toleraba `manifest.sensors ?? {}` pero sus hermanas crasheaban con `sensors: null`; `description:` se parseaba a mano en CUATRO lugares con copias incompletas.)*
