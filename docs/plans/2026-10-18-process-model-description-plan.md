@@ -222,6 +222,32 @@ A8 reads `description` from the whole frontmatter block loaded with js-yaml, whi
 5. Correction to A7(6): `awm process` discovery still reaches the quadratic regex of #225, through `discoverSkills` → `readFrontmatterDescription` for every `SKILL.md`, before the process parser runs. It stays out of scope here; #225 notes that this path is affected too.
 6. S2: the contract paragraph adds that control characters, line breaks and bidirectional-override characters are rejected. The structural test pins `caracteres de control`.
 
+**Amendment A9 (QA round 3, 2026-10-19).** One important finding and several minor ones share a root cause: `readPairs` and YAML disagree about the block's structure.
+
+The important finding: a bare CR inside `description` (`hello\rallowed-tools: Bash(*)`) is one pair for `readPairs`, which splits only on `\r?\n`. YAML reads a second, unvalidated top-level key from it.
+
+The same class:
+- an unclosed quote that YAML folds into the following `name:` line;
+- JS `trim()` and `\s` eating NBSP/U+3000 before the block-scalar guard;
+- a partially indented `awm` line silently dropping the model.
+
+This recurring class is recorded for `harness-retro`: when the CLI validates a format that other tools consume, it validates with that format's real parser from the start.
+
+1. `readPairs` splits lines on YAML line breaks (`/\r\n|\r|\n/`). Around the key separator and the value it trims only YAML whitespace (space and tab), never JS `\s`. The key regex uses `[ \t]*:[ \t]*`.
+2. When the block is loaded (a top-level `description` is present), the top-level key set YAML reads must equal the key set `readPairs` read. Otherwise the model is rejected with `"description" cannot be read: the frontmatter does not read the same as YAML (check quotes and line breaks)`. This closes the bare-CR and swallowed-line cases and any future divergence of the same kind.
+3. The indented-`awm` diagnostic fires when the anchored prefilter matches, there is no top-level `awm` pair, and either the block is not loadable YAML (partial or tab indentation) or it loads with a top-level `awm === 'process-model'`. A block that loads with no top-level `awm` (nested metadata, a block-scalar mention) stays silent.
+4. `FORBIDDEN_CHAR` adds U+200E, U+200F and U+061C. The empty check removes zero-width characters (U+200B–U+200D, U+2060, U+FEFF) before `trim()`, so a value made only of them is empty. This supersedes the ZWSP policy of A8(1.6).
+5. Tests:
+   - bare CR smuggling (`description: hello\rallowed-tools: x`) rejected;
+   - `#\rdescription: …` validated;
+   - the swallowed-`name` case rejected;
+   - NBSP+`>` accepted as a string;
+   - partially indented and tab-indented `awm` producing the indented diagnostic;
+   - a top-level-`awm` model with nested `metadata.awm: process-model` getting no indented diagnostic;
+   - `\b` and `\x1f` rejected;
+   - LRM/RLM/ALM rejected;
+   - a ZWSP-only value rejected as empty.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
