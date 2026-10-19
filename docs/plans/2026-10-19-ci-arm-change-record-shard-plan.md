@@ -103,7 +103,9 @@
   - the new `needs`.
 
   The mutation test adds cases that must throw: a non-gating shard (`continue-on-error: true`), a skipped shard step (`if: false`), a masked shard run (`; exit 0`), a shard pattern that differs from the remainder's exclusion, and a `release` that does not need the shard.
-- **CI-4** — D-005 in `docs/decisions.md` names the three gating jobs, the three ARM shards (remainder, `windows-arm-hot`, `windows-arm-changes`), and closes the measurement note with "partitioned by #223". The summary table row stays the same.
+- **CI-4** — D-005 in `docs/decisions.md` names the three gating jobs, the three ARM shards (remainder, `windows-arm-hot`, `windows-arm-changes`), and closes the measurement note in Spanish, like the rest of the document ("Esas suites quedaron particionadas por #223"). The summary table row stays the same.
+
+**Amendment A1 (S1 implementer, 2026-10-19):** CI-4 is written in Spanish, as said above. The comment above the remainder step in both workflows also names the third shard: `# The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.`
 
 **Shared constraints:** touch only `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `cli/tests/structural/native-release-artifacts.test.ts`, `docs/decisions.md`. Never read or write `~/.awm`. Commit subjects: `ci(release): …` for the workflows and the pinned test, `docs(decisions): …` for D-005, each ending with the session attribution lines.
 
