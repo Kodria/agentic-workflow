@@ -110,6 +110,14 @@ Agentic PRs run in parallel and often unattended (`awm track`, overnight runs). 
 - **R3.11b — Refresh flags:** IF `--refresh` is combined with `--plan`, `--issue`, `--model` or `--session` (flags that only apply when a record is created), THEN THE CLI SHALL exit 2 with diagnostic `flag-invalid` and write nothing.
 - **R3.12 — Path safety:** THE CLI SHALL validate `<slug>` per R1.1 before building any path. IF the `docs/changes` path or the target is a symlink, THEN it SHALL refuse to write.
 
+#### Enmienda 2026-10-19 — derivación corregida tras el piloto
+
+The first two real records (#227, #228) showed that R3.1 and R3.3 describe the AWM process rather than the change (findings in [#222](https://github.com/Kodria/agentic-workflow/issues/222#issuecomment-6265512960)). The owner chose these rules, which replace the matching text above:
+
+- **R3.1 (amended) — Base order:** `--base`, then `refs/remotes/origin/HEAD`, then `refs/remotes/origin/main`, then `refs/remotes/origin/master`, then `main`, then `master`. A clone without `origin/HEAD` (a cloud session that fetched single branches) now compares against the remote default branch instead of a local `main` that may be far behind. Without a remote the order is unchanged. R5.1 (`changes list`) and R4.1 (`change validate`) use the same order, because all three call the one resolver. A stale remote ref is still the user's to refresh with `git fetch`.
+- **R3.3 (amended) — Process commits do not pick `type` or `scope`:** a commit whose every touched path is under `docs/plans/` (the plan, its amendments, slice and lifecycle marks) is ignored when choosing `type` and `scope`. It still counts for `breaking` and `semver`, which keep covering every commit the release parser accepts. A commit that touches `docs/plans/` and any other path counts for everything. IF every usable commit is plans-only (a pure planning change), THEN `type` and `scope` are taken from all of them, exactly as before. Precedence (breaking > feat > fix > perf > first commit), the `other` rule and the code-unit tie-break are unchanged and apply to the commits that remain. `no-commits` and `no-conventional-commits` (R3.5) still look at every commit.
+- Records already on `main` are not rewritten: `change validate` checks only the records added in the branch range (R4.1), so no existing record is re-derived.
+
 ### R4 — `awm change validate`
 
 - **R4.1 — Target selection:** WHEN called without a path, THE CLI SHALL validate every record added in `merge-base..HEAD` (resolving the base as in R3.1). WHEN called with a path, it SHALL validate that file only, as it is in the working tree. THE CLI SHALL read at most 50 records per run; WHEN more are added it SHALL validate the first 50 and report a further record `docs/changes` with diagnostic `too-many-records` (fail closed, never a silent pass).
