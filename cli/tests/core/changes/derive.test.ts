@@ -2,7 +2,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { bad, expectLinearScaling, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, withEnv, type TestRepo } from './helpers';
+import { bad, expectLinearScaling, branchOff, commitForgedSigned, cloneRepo, makeRepo, nonRepoDir as plainDir, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { US, RS } from '../../../src/release/core';
 import { changedFiles, mergeBase } from '../../../src/core/changes/git';
 import { commitsFromRecords, deriveFields, deriveFromCommits, deriveModules } from '../../../src/core/changes/derive';
@@ -126,6 +126,18 @@ describe('deriveFromCommits and deriveModules (no repository)', () => {
         expect(result.diagnostic.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/);
         expect(result.diagnostic.message).toContain('abc\\ndef');
         expect(result.diagnostic.message.length).toBeLessThanOrEqual(300);
+    });
+    test('R3.3 (amended) type and scope come from the focus commits; semver and breaking from all', () => {
+        const all = [c('docs', 'plans'), c('ci', 'release'), c('docs', 'plans'), c('feat', 'plans', true)];
+        const focus = [c('ci', 'release')];
+        expect(deriveFromCommits(all, focus)).toEqual({ type: 'ci', scope: 'release', semver: 'major', breaking: true });
+    });
+    test('R3.3 (amended) an empty, unusable or non-array focus falls back to all commits', () => {
+        const all = [c('docs', 'plans'), c('ci', 'release')];
+        const expected = deriveFromCommits(all);
+        for (const focus of [[], [{ type: 'x y', scope: null, breaking: false, subject: '' }], undefined, null, 'x'] as unknown[]) {
+            expect(deriveFromCommits(all, focus as never)).toEqual(expected);
+        }
     });
 });
 
@@ -293,11 +305,25 @@ describe('deriveFields in a repository', () => {
         const result = deriveFields(nonRepoDir(), 'a'.repeat(40));
         expect(result).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'git-failed' }) });
     });
-    test('deriveFields works from a subdirectory of the repository', () => {
+    test('deriveFields reports git-failed when only the focus log (the one that drops docs/plans) fails', () => {
         const base = branch();
+        repo.commit({ 'cli/src/a.ts': '1' }, 'feat(c): a');
+        const mb = mergeBase(repo.root, base);
+        // Only the second `git log` carries the docs/plans exclusion: the full log, HEAD and the diff all succeed.
+        const git = spyOnGit((args) => { if (args.includes(':(top,exclude,literal)docs/plans')) throw new Error('focus log failed'); });
+        try {
+            expect(deriveFields(repo.root, mb)).toEqual({ ok: false, diagnostic: expect.objectContaining({ code: 'git-failed' }) });
+        } finally { git.restore(); }
+        expect(git.calls.filter((a) => a[0] === 'log')).toHaveLength(2);
+    });
+    test('deriveFields works from a subdirectory of the repository, and still drops the top-level docs/plans there', () => {
+        const base = branch();
+        // Two plan-only commits: were docs/plans read relative to cli/ (no `top`), they would choose the scope.
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan it');
+        repo.commit({ 'docs/plans/p.md': '2' }, 'docs(plans): amend it');
         repo.commit({ 'cli/src/a.ts': '1', 'top.ts': '1' }, 'feat(c): top and sub');
         const sub = path.join(repo.root, 'cli');
-        expect(deriveFields(sub, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'c', semver: 'minor', breaking: false, modules: ['.', 'cli/src'] } });
+        expect(deriveFields(sub, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'feat', scope: 'c', semver: 'minor', breaking: false, modules: ['.', 'cli/src', 'docs/plans'] } });
     });
     test('R3.3 a signed breaking commit is derived even with log.showSignature on', () => {
         const base = branch();
@@ -428,6 +454,49 @@ describe('deriveFields in a repository', () => {
             expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'a', semver: 'patch', breaking: false, modules: ['cli/src'] } });
         } finally { spy.mockRestore(); }
         expect(moved).toBe(true);
+    });
+    test('R3.3 (amended) plan-only commits do not choose type or scope (the #228 shape)', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan it');
+        repo.commit({ '.github/workflows/ci.yml': '1' }, 'ci(release): shard');
+        repo.commit({ 'docs/plans/p.md': '2' }, 'docs(plans): amend A1');
+        repo.commit({ 'docs/plans/p.md': '3' }, 'docs(plans): amend A2');
+        repo.commit({ '.github/workflows/release.yml': '1' }, 'ci(release): gate it');
+        repo.commit({ 'docs/decisions.md': '1' }, 'docs(decisions): record it');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs', 'docs/plans'] } });
+    });
+    test('R3.3 (amended) a plan-only commit still counts for semver and breaking', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'feat(plans)!: plan a breaking change');
+        repo.commit({ 'cli/src/a.ts': '1' }, 'fix(process): code');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'process', semver: 'major', breaking: true, modules: ['cli/src', 'docs/plans'] } });
+    });
+    test('R3.3 (amended) a commit touching docs/plans and code counts for type and scope', () => {
+        const base = branch();
+        repo.commit({ 'cli/src/a.ts': '1' }, 'chore(x): first');
+        repo.commit({ 'docs/plans/p.md': '1', 'cli/src/b.ts': '1' }, 'docs(plans): mixed');
+        repo.commit({ 'docs/plans/p.md': '2', 'cli/src/c.ts': '1' }, 'docs(plans): mixed again');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toMatchObject({ ok: true, fields: { type: 'chore', scope: 'plans' } });
+    });
+    test('R3.3 (amended) a pure planning branch keeps type and scope from its plan commits', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan only');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'docs', scope: 'plans', semver: 'none', breaking: false, modules: ['docs/plans'] } });
+    });
+    test('R3.3 (amended) only the top-level docs/plans is excluded, not similarly named directories', () => {
+        const base = branch();
+        // docs/plans-old decides the type (the only feat) and cli/docs/plans the scope (nested 2 against archive 1): excluding
+        // either directory as well would change the result (chore, or the archive/nested tie broken to archive).
+        repo.commit({ 'docs/plans-old/p.md': '1' }, 'feat(archive): old plans');
+        repo.commit({ 'cli/docs/plans/p.md': '1' }, 'chore(nested): nested plans');
+        repo.commit({ 'cli/src/a.ts': '1' }, 'chore(nested): code');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toMatchObject({ ok: true, fields: { type: 'feat', scope: 'nested' } });
+    });
+    test('R3.3 (amended) non-conventional code commits leave type and scope to every conventional commit, here the plan', () => {
+        const base = branch();
+        repo.commit({ 'cli/x.ts': '1' }, 'Update the code');
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan it');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'docs', scope: 'plans', semver: 'none', breaking: false, modules: ['cli', 'docs/plans'] } });
     });
 });
 

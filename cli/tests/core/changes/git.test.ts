@@ -64,13 +64,46 @@ describe('git functions in a repository', () => {
     test('returns null for a directory that does not exist', () => {
         expect(runGit(path.join(repo.home, 'missing'), ['status'])).toBeNull();
     });
-    test('R3.1 resolves base: explicit, origin/HEAD, main, master', () => {
+    test('R3.1 resolves base: explicit, origin/HEAD, origin/main, origin/master, main, master', () => {
         branch();
         expect(baseOf(repo.root)).toBe('main');
         expect(baseOf(repo.root, 'main')).toBe('main');
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
         expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
+    });
+    test('R3.1 without origin/HEAD, origin/main wins over a local main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/main');
+    });
+    test('R3.1 origin/master is used when there is no origin/HEAD nor origin/main, before a local main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/master', 'main');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/master');
+    });
+    test('R3.1 with origin/main and origin/master on different commits and no origin/HEAD, origin/main is the base', () => {
+        branch();
+        repo.commit({ 'a.ts': '1' }, 'feat: a');
+        repo.git('update-ref', 'refs/remotes/origin/master', 'main');
+        repo.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+        expect(repo.git('rev-parse', 'refs/remotes/origin/main')).not.toBe(repo.git('rev-parse', 'refs/remotes/origin/master'));
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'refs/remotes/origin/main', sha: repo.git('rev-parse', 'refs/remotes/origin/main') });
+    });
+    test('R3.1 origin/HEAD still wins over origin/main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        repo.git('update-ref', 'refs/remotes/origin/trunk', 'main');
+        repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
+    });
+    test('R3.1 a local branch named origin/main is not taken for the remote candidate', () => {
+        repo.git('branch', 'origin/main');
+        expect(baseOf(repo.root)).toBe('main');
+    });
+    test('R3.1 an explicit base never falls back to origin/main', () => {
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        expect(baseOf(repo.root, 'nope')).toBeNull();
     });
     test('R3.1 an explicit base wins over origin/HEAD and main', () => {
         branch();
@@ -84,6 +117,50 @@ describe('git functions in a repository', () => {
         expect(baseOf(repo.root)).toBe('main');
         repo.git('branch', '-m', 'main', 'trunk');
         expect(baseOf(repo.root)).toBe('master');
+    });
+    test.each(['main', 'master'])('R3.1 (Q10) a tag named %s does not redirect the local default, and the base keeps its short name', (name) => {
+        branch();
+        if (name === 'master') repo.git('branch', '-m', 'main', 'master');
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', name, tagged);
+        expect(repo.git('rev-parse', name)).toBe(tagged); // git alone prefers the tag
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: name, sha: repo.git('rev-parse', `refs/heads/${name}`) });
+    });
+    test('R3.1 a tag literally named refs/heads/main is not the absent branch main: the base is master', () => {
+        branch();
+        repo.git('branch', '-m', 'main', 'master');
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/heads/main', tagged);
+        expect(repo.git('rev-parse', 'refs/heads/main')).toBe(tagged); // git alone falls through to refs/tags/refs/heads/main
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'master', sha: repo.git('rev-parse', 'refs/heads/master') });
+    });
+    test('R3.1 a tag literally named refs/remotes/origin/main is not the absent remote branch: the base is main', () => {
+        branch();
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/remotes/origin/main', tagged);
+        expect(repo.git('rev-parse', 'refs/remotes/origin/main')).toBe(tagged);
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'main', sha: repo.git('rev-parse', 'refs/heads/main') });
+    });
+    test('R3.1 only an exact refname counts: a branch main/x does not make refs/heads/main exist (a tag of that name is not it)', () => {
+        branch();
+        repo.git('branch', '-m', 'main', 'master');
+        repo.git('branch', 'main/x', 'master'); // `for-each-ref refs/heads/main` lists refs/heads/main/x
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/heads/main', tagged);
+        expect(repo.git('for-each-ref', '--format=%(refname)', 'refs/heads/main')).toBe('refs/heads/main/x');
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'master', sha: repo.git('rev-parse', 'refs/heads/master') });
+    });
+    test('R3.1 when git cannot list the default refs, no default is taken (fail closed)', () => {
+        const git = spyOnGit((args) => { if (args.includes('for-each-ref')) throw new Error('boom'); });
+        try {
+            expect(resolveBaseCommit(repo.root)).toBeNull();
+        } finally { git.restore(); }
+    });
+    test('R3.1 an explicit base keeps git\'s own resolution (a tag counts)', () => {
+        branch();
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'v1', tagged);
+        expect(resolveBaseCommit(repo.root, 'v1')).toEqual({ base: 'v1', sha: tagged });
     });
     test('R3.1 origin/HEAD that points nowhere is skipped', () => {
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');

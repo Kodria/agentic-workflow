@@ -5,6 +5,7 @@ import { fail, failed, inCwd } from '../../core/changes/command';
 import { repoRoot } from '../../core/changes/git';
 import { listChanges } from '../../core/changes/list';
 import { parseSince } from '../../core/changes/list-parse';
+import { BASE_OPTION_HELP } from '../../core/changes/range';
 import { renderJson, renderText, renderVoice } from '../../core/changes/render-list';
 import { esc, isObj } from '../../core/changes/text-safety';
 
@@ -72,7 +73,7 @@ export function registerChangesCommand(program: Command, deps: ChangesDeps = {})
         .command('list')
         .description('list the changes of the base branch with their Change Record and derived merge/release state')
         .option('--since <window>', '<n>h, <n>d or YYYY-MM-DD (default 24h)')
-        .option('--base <ref>', 'base branch (default: origin/HEAD, main, master)')
+        .option('--base <ref>', BASE_OPTION_HELP)
         .option('--format <format>', 'text | json | voice (default text)')
         .action((opts: ListOpts) => inCwd((cwd) => runChangesList(cwd, opts, deps), () => fail('not-a-git-repo', 'the working directory is not accessible')));
 }

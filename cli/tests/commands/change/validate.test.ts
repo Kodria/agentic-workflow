@@ -304,7 +304,7 @@ describe('base resolution (R3.1, R3.2, R3.5)', () => {
         expectFailure(r, 'base-unresolved');
         expect(r.stderr).toContain('remedy: pass --base <ref>');
     });
-    test('no main, master or origin/HEAD is base-unresolved', () => {
+    test('no default base resolves: base-unresolved', () => {
         repo.git('branch', '-m', 'main', 'trunk');
         expectFailure(runChangeValidate(repo.root, undefined, {}), 'base-unresolved');
     });
@@ -765,7 +765,7 @@ describe('R4.5 operational failures under --json', () => {
         ['path-invalid (hostile path)', 'path-invalid', () => runChangeValidate(repo.root, `docs/changes/\u001b${'z\n'.repeat(400)}.md`, J)],
         ['git-failed', 'git-failed', () => { jest.spyOn(gitModule, 'headSha').mockReturnValue(null); return runChangeValidate(repo.root, undefined, J); }],
         ['flag-invalid', 'flag-invalid', () => runChangeValidate(repo.root, undefined, bad({ ...J, base: 7 }))],
-        ['internal-error', 'internal-error', () => { jest.spyOn(gitModule, 'resolveBaseCommit').mockImplementation(() => { throw new RangeError('x'); }); return runChangeValidate(repo.root, undefined, J); }],
+        ['internal-error', 'internal-error', () => { jest.spyOn(gitModule, 'baseCandidates').mockImplementation(() => { throw new RangeError('x'); }); return runChangeValidate(repo.root, undefined, J); }],
     ];
     test.each(cases)('%s prints one JSON line of the report shape on stdout and exits 2', (_name, code, call) => {
         const r = call();
@@ -878,7 +878,7 @@ describe('one derivation, one ancestry check and one late-file listing per verif
         let result: CommandResult | undefined;
         const calls = gitCalls(() => { result = run(); });
         expect(report(result as CommandResult)).toMatchObject({ state: 'valid', records: [{ state: 'valid' }, { state: 'valid' }] });
-        expect(calls.filter((a) => a.includes('--no-merges'))).toHaveLength(1); // the derivation's git log
+        expect(calls.filter((a) => a.includes('--no-merges'))).toHaveLength(2); // the derivation's full log and its focus log
         expect(calls.filter((a) => a.includes('--is-ancestor'))).toHaveLength(1);
         expect(calls.filter((a) => a.includes('diff') && a.includes(verified))).toHaveLength(1); // the late-file listing
     });

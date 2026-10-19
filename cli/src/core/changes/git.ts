@@ -57,14 +57,50 @@ export function isSafeRevision(rev: unknown): rev is string {
     return parts.length <= 2 && parts.every(isSafeRef);
 }
 
+/** A base candidate: the ref git resolves, and the name a command reports for it. */
+export interface BaseCandidate { readonly ref: string; readonly name: string }
+
 /**
- * R3.1: --base, then origin/HEAD, then main, then master: the first that names a commit, with that commit's id. Null when none
- * does (or the explicit base is unsafe). One `rev-parse` per candidate.
+ * R3.1 (amended 2026-10-19): the default base candidates, remote first so a stale local branch is the last resort. The local
+ * branches resolve as full refs (git would otherwise prefer a tag `main` over the branch) but are reported by their short name.
+ */
+export const DEFAULT_BASES: readonly BaseCandidate[] = [
+    { ref: 'refs/remotes/origin/HEAD', name: 'refs/remotes/origin/HEAD' },
+    { ref: 'refs/remotes/origin/main', name: 'refs/remotes/origin/main' },
+    { ref: 'refs/remotes/origin/master', name: 'refs/remotes/origin/master' },
+    { ref: 'refs/heads/main', name: 'main' },
+    { ref: 'refs/heads/master', name: 'master' },
+];
+
+/**
+ * The DEFAULT_BASES whose exact ref exists, in order (one `for-each-ref` for all of them; a broken symref is not listed). Without
+ * this check git's rev-parse would fall through to `refs/tags/<ref>`, so a tag literally named `refs/heads/main` could stand in for
+ * an absent branch. The patterns are constants; only an exact refname match counts (a pattern also lists the refs below it).
+ * Empty when git fails: the defaults then fail closed as unresolved.
+ */
+function existingDefaultBases(root: string): BaseCandidate[] {
+    const out = runGit(root, ['for-each-ref', '--format=%(refname)', '--end-of-options', ...DEFAULT_BASES.map((c) => c.ref)]);
+    const present = new Set((out ?? '').split('\n'));
+    return DEFAULT_BASES.filter((c) => present.has(c.ref));
+}
+
+/**
+ * R3.1: the candidates for a base, in order. An explicit base is the only one (no fallback) and keeps git's own resolution;
+ * otherwise the DEFAULT_BASES whose exact ref exists. Every caller (`resolveBaseCommit`, `resolveRange`) takes its order from here.
+ */
+export function baseCandidates(root: string, explicit?: string): readonly BaseCandidate[] {
+    return explicit !== undefined ? [{ ref: explicit, name: explicit }] : existingDefaultBases(root);
+}
+
+/**
+ * R3.1: --base, then origin/HEAD, origin/main, origin/master, main, master: the first that names a commit, with that commit's id.
+ * An explicit base is the only candidate (no fallback). Null when none does (or the explicit base is unsafe). One `rev-parse` per
+ * candidate tried (and, for the defaults, one `for-each-ref`).
  */
 export function resolveBaseCommit(root: string, explicit?: string): { base: string; sha: string } | null {
-    for (const candidate of explicit !== undefined ? [explicit] : ['refs/remotes/origin/HEAD', 'main', 'master']) {
-        const sha = commitSha(root, candidate);
-        if (sha !== null) return { base: candidate, sha };
+    for (const { ref, name } of baseCandidates(root, explicit)) {
+        const sha = commitSha(root, ref);
+        if (sha !== null) return { base: name, sha };
     }
     return null;
 }

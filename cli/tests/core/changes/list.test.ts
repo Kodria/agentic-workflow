@@ -26,14 +26,15 @@ describe('listChanges: input and base (R5.1, R3.1, R3.2, R3.5)', () => {
         adopt();
         expect(listed().base).toBe('main');
     });
-    test('the default base costs one rev-parse per candidate tried, not a second one to pin it', () => {
+    test('the default base costs one for-each-ref for all candidates and one rev-parse per existing candidate, not a second one to pin it', () => {
         adopt();
         const spy = spyOnGit();
         listed();
         spy.restore();
         const asked = (ref: string): number => spy.calls.filter((a) => a.includes(`${ref}^{commit}`)).length;
-        expect(asked('refs/remotes/origin/HEAD')).toBe(1);
-        expect(asked('main')).toBe(1);
+        expect(spy.calls.filter((a) => a.includes('for-each-ref') && a.includes('refs/heads/main'))).toHaveLength(1);
+        expect(asked('refs/remotes/origin/HEAD')).toBe(0); // absent: never handed to rev-parse
+        expect(asked('refs/heads/main')).toBe(1); // the local default resolves as the full ref (Q10)
     });
     test('an explicit base is used and reported', () => {
         adopt();
@@ -563,7 +564,7 @@ describe('listChanges: derived fields (R5.5)', () => {
             const spy = spyOnGit();
             listed();
             spy.restore();
-            const lookups = spy.calls.filter((a) => a.includes('for-each-ref'));
+            const lookups = spy.calls.filter((a) => a.includes('for-each-ref') && a.includes('refs/tags/')); // the tag lookup, not the base's
             expect(lookups).toHaveLength(1);
             expect(lookups[0]).toContain('--count=500');
         });
@@ -605,7 +606,7 @@ describe('listChanges: derived fields (R5.5)', () => {
     test('a git failure while looking for the tags is git-failed, never a release of null', () => {
         adopt();
         repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        const spy = spyOnGit((args) => { if (args.includes('for-each-ref')) throw new Error('boom'); });
+        const spy = spyOnGit((args) => { if (args.includes('for-each-ref') && args.includes('refs/tags/')) throw new Error('boom'); });
         const outcome = list();
         spy.restore();
         expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });

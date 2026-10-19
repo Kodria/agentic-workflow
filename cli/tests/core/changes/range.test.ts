@@ -1,6 +1,9 @@
-import { bad, branchOff, cloneRepo, makeRepo, nonRepoDir, type TestRepo } from './helpers';
+import fs from 'fs';
+import path from 'path';
+import { bad, branchOff, cloneRepo, makeRepo, nonRepoDir, spyOnGit, type TestRepo } from './helpers';
 import { failed } from '../../../src/core/changes/command';
-import { HEAD_MOVED, headMovedFailure, recordDirProblem, resolveRange } from '../../../src/core/changes/range';
+import { DEFAULT_BASES } from '../../../src/core/changes/git';
+import { BASE_OPTION_HELP, HEAD_MOVED, headMovedFailure, recordDirProblem, resolveBaseRef, resolveRange } from '../../../src/core/changes/range';
 import type { RecordDir } from '../../../src/core/changes/record-io';
 
 let repo: TestRepo;
@@ -41,9 +44,87 @@ describe('resolveRange', () => {
         expect(resolveRange(repo.root, 'main')).toMatchObject({ ok: false, failure: { code: 'base-unresolved', remedy: 'pass --base <ref>' } });
         expect((resolveRange(repo.root, 'main') as { failure: { message: string } }).failure.message).toContain('no merge base');
     });
+    /** A commit on its own branch from main, made shallow (no parents as far as git can tell): it shares no merge base with feat/x. */
+    function shallowCommit(): string {
+        repo.git('checkout', '-q', '-b', 'up', 'main');
+        const up = repo.commit({ 'up.ts': '1' }, 'feat: upstream');
+        repo.git('checkout', '-q', 'feat/x');
+        repo.git('branch', '-D', 'up');
+        fs.writeFileSync(path.join(repo.root, '.git', 'shallow'), `${up}\n`);
+        return up;
+    }
+    test('R3.1 (Q7) without --base, a shallow origin/main with no merge base gives way to a connected local main', () => {
+        const main = branchOff(repo);
+        const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
+        const up = shallowCommit();
+        repo.git('update-ref', 'refs/remotes/origin/main', up);
+        expect(resolveRange(repo.root, undefined)).toEqual({ ok: true, head, mergeBase: main });
+        // `changes list` needs no merge base: it keeps the first candidate that names a commit.
+        expect(resolveBaseRef(repo.root, undefined)).toEqual({ ok: true, base: 'refs/remotes/origin/main', sha: up });
+    });
+    test('R3.1 (Q7) an explicit --base without a merge base is base-unresolved: no fallback to the defaults', () => {
+        branchOff(repo);
+        repo.commit({ 'a.ts': '1' }, 'feat: a');
+        repo.git('branch', 'shallow', shallowCommit());
+        expect(resolveRange(repo.root, 'shallow')).toEqual({ ok: false, failure: { code: 'base-unresolved', message: 'no merge base between "shallow" and HEAD', remedy: 'pass --base <ref>' } });
+    });
+    test('R3.1 (Q7) without --base, when no default that names a commit has a merge base, the failure names the first of them', () => {
+        branchOff(repo);
+        repo.commit({ 'a.ts': '1' }, 'feat: a');
+        const up = shallowCommit();
+        repo.git('update-ref', 'refs/remotes/origin/main', up);
+        repo.git('update-ref', 'refs/heads/main', up);
+        expect(resolveRange(repo.root, undefined)).toEqual({ ok: false, failure: { code: 'base-unresolved', message: 'no merge base between "refs/remotes/origin/main" and HEAD', remedy: 'pass --base <ref>' } });
+    });
+    test('R3.1 without --base, a tag literally named refs/heads/main is not taken for the absent branch main', () => {
+        branchOff(repo);
+        const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
+        const master = repo.git('rev-parse', 'main');
+        repo.git('branch', '-m', 'main', 'master');
+        repo.git('tag', 'refs/heads/main', head);
+        expect(resolveRange(repo.root, undefined)).toEqual({ ok: true, head, mergeBase: master });
+    });
+    test('R3.1 (Q9) the merge base comes from the commit id the base resolved to, not from the base name read again', () => {
+        const main = branchOff(repo);
+        const head = repo.commit({ 'a.ts': '1' }, 'feat: a');
+        const elsewhere = shallowCommit();
+        let moved = false;
+        const git = spyOnGit((args) => {
+            if (!moved && args[0] === 'merge-base') { moved = true; repo.git('update-ref', 'refs/heads/main', elsewhere); }
+        });
+        try {
+            expect(resolveRange(repo.root, undefined)).toEqual({ ok: true, head, mergeBase: main });
+        } finally { git.restore(); }
+        expect(moved).toBe(true);
+    });
     test('an unreadable HEAD is git-failed', () => {
         expect(resolveRange(nonRepoDir(repo), undefined)).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
         expect(resolveRange(bad(undefined), undefined)).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
+    });
+});
+
+describe('BASE_OPTION_HELP (R3.1, Q6)', () => {
+    test('names the default candidates in order', () => {
+        expect(BASE_OPTION_HELP).toBe('base branch (default: origin/HEAD, origin/main, origin/master, main, master)');
+    });
+    test('is built from the candidate list, not written by hand', () => {
+        jest.isolateModules(() => {
+            jest.doMock('../../../src/core/changes/git', () => ({
+                ...jest.requireActual('../../../src/core/changes/git'),
+                DEFAULT_BASES: [{ ref: 'refs/remotes/origin/trunk', name: 'refs/remotes/origin/trunk' }, { ref: 'refs/heads/dev', name: 'dev' }],
+            }));
+            expect(require('../../../src/core/changes/range').BASE_OPTION_HELP).toBe('base branch (default: origin/trunk, dev)');
+        });
+        jest.dontMock('../../../src/core/changes/git');
+    });
+    test('the default candidates are the remote ones, then the local branches as full refs that report their short name', () => {
+        expect(DEFAULT_BASES).toEqual([
+            { ref: 'refs/remotes/origin/HEAD', name: 'refs/remotes/origin/HEAD' },
+            { ref: 'refs/remotes/origin/main', name: 'refs/remotes/origin/main' },
+            { ref: 'refs/remotes/origin/master', name: 'refs/remotes/origin/master' },
+            { ref: 'refs/heads/main', name: 'main' },
+            { ref: 'refs/heads/master', name: 'master' },
+        ]);
     });
 });
 
