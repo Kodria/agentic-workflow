@@ -287,11 +287,52 @@ describe('parseProcessFrontmatter', () => {
         it.each([
             ['an escaped tab', '"a\\tb"', 'a\tb'],
             ['a surrogate pair', '"\\uD83D\\uDE00"', '\u{1F600}'],
-            ['a zero-width-space-only value (documented policy: non-empty)', '"\\u200B"', '\u200B'],
         ])('accepts %s', (_kind, value, expected) => {
             const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
             expect(r.diagnostics).toEqual([]);
             expect(r.model?.description).toBe(expected);
+        });
+
+        it.each(['"\\u200B"', '"\\u200B\\u200C\\u200D"', '"\\u2060\\uFEFF "'])('rejects a value made only of zero-width characters as empty: %j', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(/"description" must not be empty/);
+        });
+
+        it.each(['"a\\bb"', '"a\\x1fb"', '"a\\u200Eb"', '"a\\u200Fb"', '"a\\u061Cb"'])('rejects backspace, US and LRM/RLM/ALM: %j', (value) => {
+            const r = parseProcessFrontmatter(withDescription(`description: ${value}`), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(CONTROL);
+        });
+
+        const DIVERGES = /"description" cannot be read: the frontmatter does not read the same as YAML \(check quotes and line breaks\)/;
+
+        it('rejects a bare CR that smuggles a second top-level key', () => {
+            const r = parseProcessFrontmatter(withDescription('description: hello\rallowed-tools: x'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(DIVERGES);
+            for (const d of r.diagnostics) expect(d).not.toContain('allowed-tools');
+        });
+
+        it('rejects an unclosed quote that YAML folds into the following name line', () => {
+            const r = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', 'description: "hola\nname: ejemplo-proceso"'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).toMatch(DIVERGES);
+        });
+
+        it('validates a description that follows a comment on a bare CR', () => {
+            const bad = parseProcessFrontmatter(withDescription('#\rdescription: 123'), 'p');
+            expect(bad.model).toBeUndefined();
+            expect(bad.diagnostics.join(' ')).toMatch(NOT_A_STRING);
+            const ok = parseProcessFrontmatter(withDescription('#\rdescription: ok'), 'p');
+            expect(ok.diagnostics).toEqual([]);
+            expect(ok.model?.description).toBe('ok');
+        });
+
+        it('reads NBSP followed by > as a string, not as a block-scalar header', () => {
+            const r = parseProcessFrontmatter(withDescription('description: \u00A0>'), 'p');
+            expect(r.diagnostics).toEqual([]);
+            expect(r.model?.description).toBe('\u00A0>');
         });
 
         it('lists description in the unknown-field message', () => {
@@ -366,16 +407,32 @@ describe('parseProcessFrontmatter', () => {
             ['a mention nested under metadata', '---\nname: x\nmetadata:\n  awm: process-model\n---\n'],
             ['a mention inside a block-scalar description', '---\nname: x\ndescription: >\n  awm: process-model\n---\n'],
             ['a near-miss discriminator', '---\n  awm: process-model-x\n  name: x\n---\n'],
-            ['an indentation YAML cannot load', '---\n\tawm: process-model\nname: x\n---\n'],
         ])('stays silent for a non-model with %s', (_kind, source) => {
             expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
         });
 
-        it('does not load a block over 65536 characters to confirm an indented discriminator', () => {
+        it.each([
+            ['only the awm line indented', valid.replace('awm: process-model', '  awm: process-model')],
+            ['a tab-indented awm line', valid.replace('awm: process-model', '\tawm: process-model')],
+        ])('reports %s even though YAML cannot load the block', (_kind, source) => {
+            expect(parseProcessFrontmatter(source, 'p')).toEqual({
+                diagnostics: ['p: invalid process model — frontmatter keys must not be indented (frontmatter line 1)'],
+            });
+        });
+
+        it('gives no indented diagnostic to a top-level-awm model with a nested metadata.awm', () => {
+            const r = parseProcessFrontmatter(valid.replace('created:', 'metadata:\n  awm: process-model\ncreated:'), 'p');
+            expect(r.model).toBeUndefined();
+            expect(r.diagnostics.join(' ')).not.toMatch(/must not be indented/);
+        });
+
+        it('reports an indented discriminator in a block over 65536 characters without loading it', () => {
             const source = indentAll(valid.replace('\ncreated:', `\n# ${'x'.repeat(65536)}\ncreated:`));
             const load = jest.spyOn(yaml, 'load');
             try {
-                expect(parseProcessFrontmatter(source, 'p')).toEqual({ diagnostics: [] });
+                expect(parseProcessFrontmatter(source, 'p')).toEqual({
+                    diagnostics: ['p: invalid process model — frontmatter keys must not be indented (frontmatter line 1)'],
+                });
                 expect(load).not.toHaveBeenCalled();
             } finally {
                 load.mockRestore();

@@ -25,13 +25,14 @@ const DESCRIPTION_MAX = 1024;
 const FRONTMATTER_MAX = 65536;
 
 /** Lo que un runtime mostraría mal o usaría para engañar: controles C0 (salvo
- *  tab), DEL, C1, separadores U+2028/U+2029, overrides e isolates bidi, y
- *  surrogates sueltos (regex en vez de `isWellFormed`: el lib de TS es ES2022). */
-const FORBIDDEN_CHAR = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u2028\u2029\u202A-\u202E\u2066-\u2069]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+ *  tab), DEL, C1, separadores U+2028/U+2029, marcas LRM/RLM/ALM, overrides e
+ *  isolates bidi, y surrogates sueltos (regex en vez de `isWellFormed`: el lib
+ *  de TS es ES2022). */
+const FORBIDDEN_CHAR = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** Discriminador indentado: un modelo cuyas claves quedaron con sangría se
  *  perdería en silencio como "no es un modelo". */
-const INDENTED_DISCRIMINATOR = /^awm\s*:\s*process-model$/;
+const INDENTED_DISCRIMINATOR = /^awm[ \t]*:[ \t]*process-model$/;
 const STATUSES: readonly string[] = ['draft', 'active'];
 
 /** El slug es lo único del modelo que puede viajar dentro de un id del Dashboard
@@ -40,6 +41,9 @@ const STATUSES: readonly string[] = ['draft', 'active'];
 export const PROCESS_NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Caracteres de ancho cero: un valor hecho solo de ellos se ve vacío. */
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 
 /** Línea de continuación (indentada): su texto se guarda SOLO para detectar un
  *  discriminador indentado; nunca viaja a un diagnóstico. */
@@ -53,9 +57,13 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
     const pairs = new Map<string, string>();
     const problems: string[] = [];
     const continuations: ContinuationLine[] = [];
-    const lines = block.split(/\r?\n/);
+    // Mismo criterio que YAML, no que JS: se parte en TODO salto de línea YAML
+    // (un CR suelto también; si no, `a\rclave: x` sería un par para acá y dos
+    // claves para un runtime) y solo se recorta espacio y tab (`\s`/`trim()`
+    // comerían NBSP o U+3000, que para YAML son contenido).
+    const lines = block.split(/\r\n|\r|\n/);
     for (const [index, raw] of lines.entries()) {
-        const line = raw.trim();
+        const line = raw.replace(/^[ \t]+|[ \t]+$/g, '');
         if (line === '' || line.startsWith('#')) continue;
         // El contrato es un mapa PLANO: una línea que empieza con espacio o tab
         // es continuación de un valor multilínea, diga lo que diga. Si se
@@ -65,40 +73,51 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         if (indented) continuations.push({ line: index + 1, text: line });
         // `[\s\S]` y no `.`: un U+2028/U+2029 dentro del valor no lo vuelve
         // "no-par" (la línea ya viene partida); lo rechaza el chequeo de controles.
-        const m = indented ? null : /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]*)$/.exec(line);
+        const m = indented ? null : /^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*([\s\S]*)$/.exec(line);
         // Se reporta la POSICIÓN (1-based dentro del bloque), nunca el
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
         if (!m) { problems.push(`frontmatter line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
         if (pairs.has(m[1])) { problems.push(`duplicate field ${JSON.stringify(m[1])}`); continue; }
-        pairs.set(m[1], m[2].trim());
+        pairs.set(m[1], m[2]);
     }
     return { pairs, problems, continuations };
 }
 
+type LoadedBlock = { kind: 'too-long' } | { kind: 'invalid' } | { kind: 'loaded'; doc: unknown };
+
 /** Carga el bloque de frontmatter COMPLETO con js-yaml (schema por defecto),
- *  exactamente como lo lee un runtime. `'too-long'` sin parsear; `null` si no es
- *  YAML válido o no es un mapa plano. NUNCA lanza. */
-function loadBlock(block: string): Record<string, unknown> | null | 'too-long' {
-    if (block.length > FRONTMATTER_MAX) return 'too-long';
-    let doc: unknown;
-    try { doc = yaml.load(block); } catch { return null; }
-    if (doc === null || typeof doc !== 'object' || Object.getPrototypeOf(doc) !== Object.prototype) return null;
-    return doc as Record<string, unknown>;
+ *  exactamente como lo lee un runtime. Por encima del tope no se parsea. NUNCA
+ *  lanza: un error de js-yaml es `invalid`. */
+function loadBlock(block: string): LoadedBlock {
+    if (block.length > FRONTMATTER_MAX) return { kind: 'too-long' };
+    try { return { kind: 'loaded', doc: yaml.load(block) }; } catch { return { kind: 'invalid' }; }
+}
+
+function isPlainObject(doc: unknown): doc is Record<string, unknown> {
+    return doc !== null && typeof doc === 'object' && Object.getPrototypeOf(doc) === Object.prototype;
 }
 
 /** Valida `description` leyéndola del bloque entero con el parser YAML real, no
  *  de la salida de readPairs (ya recortada y partida en `:`, que difiere de lo
  *  que lee un runtime). Ni el valor ni el texto del error de js-yaml (que puede
  *  citar contenido) llegan al problema. */
-function checkDescription(raw: string, block: string): { value: string } | { problem: string } {
+function checkDescription(raw: string, block: string, keys: ReadonlySet<string>): { value: string } | { problem: string } {
     // El prefijo alcanza: todo header de block scalar (bien o mal formado)
     // empieza con `>` o `|`.
     if (/^[>|]/.test(raw)) return { problem: '"description" must be a single-line string (block scalars are not supported in a process model)' };
     const tooLong = { problem: `"description" must be at most ${DESCRIPTION_MAX} characters` };
-    const doc = loadBlock(block);
-    if (doc === 'too-long') return tooLong;
-    if (doc === null) return { problem: '"description" cannot be read: the frontmatter is not valid YAML' };
+    const loaded = loadBlock(block);
+    if (loaded.kind === 'too-long') return tooLong;
+    if (loaded.kind === 'invalid' || !isPlainObject(loaded.doc)) return { problem: '"description" cannot be read: the frontmatter is not valid YAML' };
+    const doc = loaded.doc;
+    // Si YAML lee otras claves de nivel superior que readPairs (un CR suelto,
+    // una comilla que se traga la línea siguiente), lo validado acá no es lo
+    // que verá un runtime. Ni claves ni valores van al problema.
+    const yamlKeys = Object.keys(doc);
+    if (yamlKeys.length !== keys.size || yamlKeys.some((k) => !keys.has(k))) {
+        return { problem: '"description" cannot be read: the frontmatter does not read the same as YAML (check quotes and line breaks)' };
+    }
 
     const value = doc.description;
     const empty = { problem: '"description" must not be empty' };
@@ -106,7 +125,7 @@ function checkDescription(raw: string, block: string): { value: string } | { pro
     if (typeof value !== 'string') {
         return { problem: '"description" must be a string (quote values YAML reads as a boolean, a number, a date or a collection)' };
     }
-    if (value.trim() === '') return empty;
+    if (value.replace(ZERO_WIDTH, '').trim() === '') return empty;
     if ([...value].length > DESCRIPTION_MAX) return tooLong;
     if (FORBIDDEN_CHAR.test(value)) return { problem: '"description" must not contain control, line-break or bidirectional-override characters' };
     // Se guarda tal cual lo devuelve YAML: sin trim, con NBSP/BOM intactos.
@@ -121,14 +140,17 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     const { pairs, problems, continuations } = readPairs(block);
 
     // Un modelo con las claves indentadas no tiene `awm` de nivel superior y se
-    // perdería en silencio como "otro documento". Se nombra solo la línea. Dos
-    // condiciones: el prefiltro barato y que el bloque entero cargue como YAML
-    // con `awm: process-model` en su nivel superior — así una mención anidada
-    // (bajo `metadata:` o dentro de un block scalar) no se confunde con un modelo.
+    // perdería en silencio como "otro documento". Se nombra solo la línea.
+    // Dispara con el prefiltro barato y, además, si el bloque NO carga como YAML
+    // (sangría parcial o con tab; por encima del tope cuenta como no cargable)
+    // o carga con `awm: process-model` en su nivel superior. Si carga sin `awm`
+    // arriba (mención bajo `metadata:` o dentro de un block scalar), silencio.
     if (!pairs.has('awm')) {
         const indentedAwm = continuations.find((c) => INDENTED_DISCRIMINATOR.test(c.text));
-        const doc = indentedAwm ? loadBlock(block) : null;
-        if (indentedAwm && doc !== null && doc !== 'too-long' && doc.awm === DISCRIMINATOR) {
+        const loaded = indentedAwm ? loadBlock(block) : undefined;
+        const fires = loaded !== undefined
+            && (loaded.kind !== 'loaded' || (isPlainObject(loaded.doc) && loaded.doc.awm === DISCRIMINATOR));
+        if (indentedAwm && fires) {
             return { diagnostics: [`${file}: invalid process model — frontmatter keys must not be indented (frontmatter line ${indentedAwm.line})`] };
         }
     }
@@ -181,7 +203,7 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
     let description: string | undefined;
     const rawDescription = pairs.get('description');
     if (rawDescription !== undefined) {
-        const checked = checkDescription(rawDescription, block);
+        const checked = checkDescription(rawDescription, block, new Set(pairs.keys()));
         if ('problem' in checked) problems.push(checked.problem);
         else description = checked.value;
     }
