@@ -1052,7 +1052,7 @@ awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m
 
 | Flag | Description |
 |---|---|
-| `--base <ref>` | Base branch. Default: `origin/HEAD`, then `origin/main`, `origin/master`, `main`, `master`. |
+| `--base <ref>` | Base branch, the only candidate when given. Default: the first of `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master` that names a commit and shares history with HEAD, so a shallow remote ref gives way to the next. `main` and `master` are the local branches, never a tag of that name. |
 | `--plan <path>` | Repo-relative path of the plan file to link (`links.plan`); must be an existing regular file inside the repository. |
 | `--issue <url>` | `https` issue URL to link (`links.issue`); credentials in the URL are rejected. |
 | `--model <model>` | Provenance: model identifier (one line, at most 200 characters). |
@@ -1063,7 +1063,7 @@ awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m
 
 - `type`, `breaking`, `semver`: from the conventional-commit subjects, with the release parser. `semver` is `major` if any commit is breaking, else `minor` if any is `feat`, else `patch` if any is `fix` or `perf`, else `none`. `type` is the highest-impact commit's type (breaking > feat > fix > perf > first commit).
 - `scope`: the most frequent scope, or `null`.
-- Commits that only touch `docs/plans/` (the plan, its amendments and lifecycle marks) do not choose `type` or `scope`, unless every conventional commit is like that; they still count for `semver` and `breaking`.
+- Commits that only touch `docs/plans/` (the plan, its amendments and lifecycle marks) do not choose `type` or `scope`, unless every conventional commit is like that; they still count for `semver` and `breaking`. When the code commits are not conventional (for example `Update the code` next to `docs(plans): plan it`), `type` and `scope` come from every conventional commit, here the plan's (`docs`, `plans`): no type is invented.
 - `modules`: the sorted parent directories of the changed files, cut to three segments (`.` for root files).
 - `verification`: `commit`, `overall`, `sensors` and `receipt_digest` copied from the receipt of HEAD.
 - `provenance`: `agent`, `started_at` and `finished_at` from the branch journal when present; `model` and `session` only from the flags.
@@ -1199,7 +1199,7 @@ awm changes list [--since <window>] [--base <ref>] [--format text|json|voice]
 | Flag | Description |
 |---|---|
 | `--since <window>` | `<n>h`, `<n>d` (n of at least 1) or an ISO date `YYYY-MM-DD`. Default `24h`. Invalid: `since-invalid`. |
-| `--base <ref>` | Base branch, resolved as in `change new`. |
+| `--base <ref>` | Base branch, the only candidate when given. Default: the first of `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master` that names a commit (the order of `change new`; no shared history with HEAD is needed). |
 | `--format <format>` | `text` (default), `json` or `voice`. Invalid: `format-invalid`. |
 
 The command reads the first-parent history of the base ref and the record contents from that ref (never the working tree), so run `git fetch` first if the remote branch is stale. Each commit in the window is classified, first match wins:
