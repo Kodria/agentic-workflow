@@ -14,7 +14,20 @@ const CHANGES_PATTERN = String.raw`[/\\]cli[/\\]tests[/\\](core[/\\]changes|comm
 const HOT_STEP = 'Test hot Windows ARM suites';
 const CHANGES_STEP = 'Test Change Record Windows ARM suites';
 const CHANGES_RUN = `npx jest --runInBand --bail --testPathPatterns='${CHANGES_PATTERN}'`;
+const REMAINDER_COMMENT = "      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.\n";
 const RELEASE_NEEDS = /^  release:\s*\n    needs: \[test, windows-arm-hot, windows-arm-changes\] # rojo en cualquier plataforma o shard ARM no publica$/m;
+
+// Jest compiles --testPathPatterns with the `i` flag but --testPathIgnorePatterns
+// without it, so a directory differing only in case would run in both the shard
+// and the remainder. Returns every directory that falls in that gap.
+function caseOnlyShardPaths(directories: string[], pattern: string): string[] {
+    const insensitive = new RegExp(pattern, 'i');
+    const sensitive = new RegExp(pattern);
+    return directories.filter((directory) => {
+        const candidate = `${directory}/`;
+        return insensitive.test(candidate) && !sensitive.test(candidate);
+    });
+}
 
 function splitJob(workflow: string, name: string): [string, string] {
     const header = new RegExp(`^  ${name}:\\s*$`, 'gm');
@@ -38,6 +51,9 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
 
     // Optional env: (e.g. AWM_BASELINE_REGISTRY_ROOT for RF-5.1 docs contract) may
     // sit between working-directory and run; release.yml still omits it.
+    expect(matrixJob).toMatch(/- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n/);
+    expect(matrixJob.split(REMAINDER_COMMENT)).toHaveLength(2);
+    expect(matrixJob.split(/      - name: Tests? \(Windows ARM remainder\)\n/)[0].endsWith(REMAINDER_COMMENT)).toBe(true);
     expect(matrixJob).toMatch(
         /- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n        working-directory: cli\n(?:        env:\n(?:          [^\n]+\n)+)?        run: npx jest --runInBand --bail\n/,
     );
@@ -62,7 +78,7 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     const shardPattern = changesRun?.match(/--testPathPatterns='([^']+)'$/)?.[1];
     expect(shardPattern).toBe(CHANGES_PATTERN);
     expect(ignorePattern).toBe(`${HOT_IGNORE}|${shardPattern}`);
-    const shard = new RegExp(shardPattern!);
+    const shard = new RegExp(shardPattern!, 'i');
     for (const separator of ['/', '\\']) {
         const root = ['repo', 'cli', 'tests'].join(separator);
         for (const file of [['core', 'changes', 'x.test.ts'], ['commands', 'change', 'new.test.ts'], ['commands', 'changes', 'list.test.ts']]) {
@@ -194,6 +210,24 @@ describe('native release artifacts', () => {
                 expect(mutated).not.toBe(workflow);
                 expect(() => assertArmPartition(mutated, gates)).toThrow();
             }
+        }
+    });
+
+    it('flags test directories that only the case-insensitive shard pattern selects', () => {
+        expect(caseOnlyShardPaths(['repo/cli/tests/core/Changes'], CHANGES_PATTERN)).toEqual(['repo/cli/tests/core/Changes']);
+        expect(caseOnlyShardPaths(['repo\\cli\\tests\\commands\\CHANGE'], CHANGES_PATTERN)).toEqual(['repo\\cli\\tests\\commands\\CHANGE']);
+        expect(caseOnlyShardPaths(['repo/cli/tests/core/changes', 'repo/cli/tests/commands/change', 'repo/cli/tests/core/Changesets'], CHANGES_PATTERN)).toEqual([]);
+    });
+
+    it('has no test directory selected by the shard but kept by the remainder through case alone', () => {
+        const testsRoot = path.join(CLI_ROOT, 'tests');
+        const directories = (fs.readdirSync(testsRoot, { recursive: true }) as string[])
+            .map((relative) => path.join(testsRoot, relative))
+            .filter((candidate) => fs.statSync(candidate).isDirectory());
+        expect(directories.length).toBeGreaterThan(0);
+        const flagged = caseOnlyShardPaths(directories, CHANGES_PATTERN);
+        if (flagged.length > 0) {
+            throw new Error(`Case-only Change Record directories would run in both ARM shards: ${flagged.join(', ')}`);
         }
     });
 
