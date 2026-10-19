@@ -1,5 +1,37 @@
 # Harness Retros
 
+## 2026-10-19 — Kodria/awm-personal-registry#3: `description` opcional en modelos de proceso
+
+Este es el primer ciclo con Change Record real del CLI. Plan: `docs/plans/2026-10-18-process-model-description-plan.md`, con 10 enmiendas (A1–A10).
+
+- **Class:** logic + seguridad (un validador propio de un formato que parsean otros runtimes) + process (QA que no convergía).
+- **Occurrences (ledger count):** 108 entradas:
+  - 70 hallazgos: 14 important, 55 minor, 1 info;
+  - 38 wins.
+
+  Un clúster convergente de 50 firmas con una sola causa: validar a mano un formato YAML que leen Codex y js-yaml. Revisiones por slice, revisión final y 4 rondas de QA encontraron cada vez otra divergencia:
+  - indicadores y `: ` sin comillas;
+  - escalares no-string (`true`/`null`/fechas);
+  - escapes;
+  - NBSP recortado por `trim()`;
+  - un CR suelto que hacía leer una clave extra;
+  - LS/PS/NEL en comentarios;
+  - una comilla plegada sobre una línea `#`.
+
+  Convergió al validar con js-yaml sobre el bloque completo (A7–A8) y al exigir que `readPairs` vea las mismas claves de nivel superior que YAML (A9).
+- **Rule:** `docs/awm/context/agents/implementation.md`, CTX-AGENTS-031 (ocurrencia 4) y CTX-AGENTS-032 (corolario). Dice que se valida con el parser real desde el primer commit, y que un lector propio debe leer la misma estructura que el parser real. Es una edición aditiva aprobada por el dueño. El inventario de IDs no cambió (99 antes y después), Context Kernel v1 sigue válido y el presupuesto no se movió (18 KB de 69 KB).
+- **Sensor:** `agents-md`, como lección. No es atrapable por un sensor estático: el síntoma es semántico, un parser propio que diverge del real.
+- **Recomendaciones (registry, aprobadas para Kodria/awm-baseline-registry#77):**
+  1. En la lente de tests de `post-implementation-qa`, mutar solo en un worktree aparte. En la ronda 1, la lente mutó `model.ts` en el árbol de trabajo mientras otras tres lentes lo leían. Una de ellas lo detectó a mitad de corrida, y otra reportó probes de otro agente sobrescritos.
+  2. Incluir en los prompts de las lentes la disciplina de severidad: important solo para lo que un autor real encontraría; los casos esotéricos que no contradicen ninguna cláusula, como minor. Con esa regla, la ronda 4 cerró con hallazgos clasificables y el dueño pudo decidir el cierre (A10).
+- **Descartes de QA (A10, decididos por el dueño):**
+  - diagnóstico de `awm` indentado sobre un no-modelo con YAML roto;
+  - NBSP final tras `awm: process-model`, que YAML lee como otro valor;
+  - caracteres invisibles fuera de los conjuntos de A9.
+
+  Los preexistentes pasaron a #225 (regex cuadrática de `findFrontmatterDescription`, alcanzable también desde `awm process`) y a #226 (cierre de frontmatter con `---x`, slugs que YAML lee como no-string, diagnósticos sin tope).
+- **Change Record:** se genera en el cierre de la rama (`process-model-description`) y valida el flujo de #217 sobre un desarrollo real con release.
+
 ## 2026-10-18 — Seguimiento de la retro de #217 (cierre)
 
 Cierra los cuatro ítems de la retro del CLI del 2026-10-17 que seguían abiertos en #217.

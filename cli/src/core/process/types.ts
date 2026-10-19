@@ -11,6 +11,8 @@ export interface ProcessModelFrontmatter {
     terminatesTo: string;
     created: string;
     updated: string;
+    /** Optional. Single-line YAML string exactly as the YAML parser returns it (not trimmed). Absent → no key. */
+    description?: string;
 }
 
 export interface ProcessRoutingRow {
