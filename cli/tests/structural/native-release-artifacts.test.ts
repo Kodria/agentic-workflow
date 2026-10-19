@@ -201,6 +201,9 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
 
     if (gatesRelease) {
         assertReleaseGate(jobs);
+        // CI-2 keeps the comment on the release job's needs line.
+        const releaseText = workflow.slice(workflow.search(/^  release:\n/m));
+        expect(releaseText.match(/^    needs: [^\n]*$/m)?.[0]).toMatch(/ # rojo en cualquier plataforma o shard ARM no publica$/);
     } else {
         expect(names).not.toContain('release');
     }
@@ -282,6 +285,9 @@ function assertMutationsRejected(workflow: string, gates: boolean): void {
             jobLevel('release', "'if': false"),
             jobLevel('release', 'continue-on-error: true'),
             jobLevel('release', '"continue-on-error": true'),
+            // The needs comment is part of CI-2.
+            workflow.slice(0, workflow.search(/^  release:\n/m))
+                + workflow.slice(workflow.search(/^  release:\n/m)).replace(/^(    needs: [^\n]*?) # rojo en cualquier plataforma o shard ARM no publica$/m, '$1'),
         );
     }
     for (const mutated of mutations) {
