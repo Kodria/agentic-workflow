@@ -128,8 +128,7 @@ jobs:
           AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
         run: npx jest --runInBand --bail
 
-      # The ARM runner's two slow watch suites run in a separate job. Keep
-      # runInBand within each job; no test file may run twice or be dropped.
+      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.
       - name: Test (Windows ARM remainder)
         if: matrix.target == 'win32-arm64'
         working-directory: cli
