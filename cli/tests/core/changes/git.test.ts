@@ -82,6 +82,14 @@ describe('git functions in a repository', () => {
         repo.git('update-ref', 'refs/remotes/origin/master', 'main');
         expect(baseOf(repo.root)).toBe('refs/remotes/origin/master');
     });
+    test('R3.1 with origin/main and origin/master on different commits and no origin/HEAD, origin/main is the base', () => {
+        branch();
+        repo.commit({ 'a.ts': '1' }, 'feat: a');
+        repo.git('update-ref', 'refs/remotes/origin/master', 'main');
+        repo.git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+        expect(repo.git('rev-parse', 'refs/remotes/origin/main')).not.toBe(repo.git('rev-parse', 'refs/remotes/origin/master'));
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'refs/remotes/origin/main', sha: repo.git('rev-parse', 'refs/remotes/origin/main') });
+    });
     test('R3.1 origin/HEAD still wins over origin/main', () => {
         branch();
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
