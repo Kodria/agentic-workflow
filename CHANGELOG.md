@@ -1,3 +1,8 @@
+## v9.20.1 - 2026-10-19
+
+### Fixes
+- **process:** admit an optional description in process models (#227)
+
 ## v9.20.0 - 2026-10-17
 
 ### Features
