@@ -125,6 +125,10 @@
 
 **Amendment A1 (S1 specification review, 2026-10-19):** CRD-1's doc comments also include the `ListOptions.base` comment in `cli/src/core/changes/list.ts` (line ~65, "omitted, R3.1 picks origin/HEAD, main or master"), which the S1 surfaces had missed. S1 owns that one comment line; nothing else in `list.ts` changes. SRC-CLIREF's locator moves to the stable usage line `awm change new <slug> [--base <ref>]`, because S1 rewrote the `--base` row it used to point at.
 
+**Amendment A2 (S2 implementer, 2026-10-19):** two corrections found while implementing S2.
+1. In the S2 test "plan-only commits do not choose type or scope (the #228 shape)", the `docs(decisions)` commit also chooses, so `release` and `decisions` tied 1:1 and the unchanged code-unit tie-break gave `decisions`. The fixture gains a second `ci(release): gate it` commit touching `.github/workflows/release.yml` (closer to the real #228, which had six), so `release` wins 2:1 under the new rule. Under the old rule `plans` (3) would still win, so the test keeps failing first. The expected record stays `{ type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs', 'docs/plans'] }`.
+2. `cli/tests/commands/change/validate.test.ts` (~line 881, "both records are valid, and git derives, checks ancestry and lists late files once") counts the derivation's `git log` calls (`--no-merges`) as 1. The second, focus log makes it 2 per derivation, still one derivation per verification commit. S2 owns that assertion: expect 2, with a comment naming the full log and the focus log.
+
 **Shared constraints:** touch only `cli/src/core/changes/git.ts`, `cli/src/core/changes/range.ts`, `cli/src/core/changes/list.ts` (one comment, A1), `cli/src/core/changes/derive.ts`, `cli/src/commands/change/**`, `cli/src/commands/changes/**` (help text only), `cli/tests/core/changes/**`, `cli/tests/commands/change/**`, `cli/tests/commands/changes/**`, `docs/cli-reference.md`. Never read or write `~/.awm`. Tests use the existing helpers in `cli/tests/core/changes/helpers.ts` (isolated tmp repos). Commit subjects: `fix(changes): …` for code and tests, `docs(changes): …` for documentation only, each ending with the session attribution lines.
 
 <a id="slice-s1"></a>
@@ -202,6 +206,7 @@ Owns CRD-2 and CRD-3. The derivation and its user documentation change together.
 
 - Modify `cli/src/core/changes/derive.ts` (`deriveFromCommits`, `deriveFields`).
 - Modify `cli/tests/core/changes/derive.test.ts`.
+- Modify the git-call count assertion in `cli/tests/commands/change/validate.test.ts` (A2).
 - Modify `docs/cli-reference.md` (the `awm change new` derived-fields list).
 
 #### Implementation
@@ -234,6 +239,7 @@ Owns CRD-2 and CRD-3. The derivation and its user documentation change together.
       repo.commit({ '.github/workflows/ci.yml': '1' }, 'ci(release): shard');
       repo.commit({ 'docs/plans/p.md': '2' }, 'docs(plans): amend A1');
       repo.commit({ 'docs/plans/p.md': '3' }, 'docs(plans): amend A2');
+      repo.commit({ '.github/workflows/release.yml': '1' }, 'ci(release): gate it');
       repo.commit({ 'docs/decisions.md': '1' }, 'docs(decisions): record it');
       expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs', 'docs/plans'] } });
   });
