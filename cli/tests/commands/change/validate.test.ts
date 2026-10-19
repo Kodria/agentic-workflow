@@ -878,7 +878,7 @@ describe('one derivation, one ancestry check and one late-file listing per verif
         let result: CommandResult | undefined;
         const calls = gitCalls(() => { result = run(); });
         expect(report(result as CommandResult)).toMatchObject({ state: 'valid', records: [{ state: 'valid' }, { state: 'valid' }] });
-        expect(calls.filter((a) => a.includes('--no-merges'))).toHaveLength(1); // the derivation's git log
+        expect(calls.filter((a) => a.includes('--no-merges'))).toHaveLength(2); // the derivation's full log and its focus log
         expect(calls.filter((a) => a.includes('--is-ancestor'))).toHaveLength(1);
         expect(calls.filter((a) => a.includes('diff') && a.includes(verified))).toHaveLength(1); // the late-file listing
     });

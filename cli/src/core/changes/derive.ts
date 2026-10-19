@@ -7,6 +7,7 @@ import { COMMIT_ID, RECORD_DIR, type DerivedFields, type Diagnostic, type Semver
 // Pathspecs relative to the repository top, so the result does not depend on the directory git runs in.
 const ALL_FILES = ':/';
 const EXCLUDE_RECORDS = `:(top,exclude,literal)${RECORD_DIR}`;
+const EXCLUDE_PLANS = ':(top,exclude,literal)docs/plans';
 const PARSER_TYPE = /^\w+$/;
 const RECORD_TYPE = /^[a-z]+$/;
 const MODULE_DEPTH = 3;
@@ -31,17 +32,21 @@ function usable(commits: unknown): Commit[] {
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * R3.3. `breaking` and `semver` cover every usable commit, with the release parser's exact-type semantics; the recorded type is
- * the highest-impact commit's type lowercased, or `other` when that is still not purely letters. Null when no commit is usable.
+ * R3.3 as amended 2026-10-19. `breaking` and `semver` cover every usable commit, with the release parser's exact-type semantics.
+ * `type` and `scope` come from the usable `focus` commits (those touching a path outside docs/changes/ and docs/plans/), or from
+ * every usable commit when `focus` is omitted or has none. The recorded type is the highest-impact chosen commit's type
+ * lowercased, or `other` when that is still not purely letters. Null when no commit is usable.
  */
-export function deriveFromCommits(input: Commit[]): Omit<DerivedFields, 'modules'> | null {
+export function deriveFromCommits(input: Commit[], focusInput?: Commit[]): Omit<DerivedFields, 'modules'> | null {
     const commits = usable(input);
     if (commits.length === 0) return null;
+    const focused = usable(focusInput);
+    const chooser = focused.length > 0 ? focused : commits;
     const breaking = commits.some((c) => c.breaking);
-    const pick = commits.find((c) => c.breaking) ?? commits.find((c) => c.type === 'feat') ?? commits.find((c) => c.type === 'fix')
-        ?? commits.find((c) => c.type === 'perf') ?? commits[0];
+    const pick = chooser.find((c) => c.breaking) ?? chooser.find((c) => c.type === 'feat') ?? chooser.find((c) => c.type === 'fix')
+        ?? chooser.find((c) => c.type === 'perf') ?? chooser[0];
     const counts = new Map<string, number>();
-    for (const c of commits) if (c.scope) counts.set(c.scope, (counts.get(c.scope) ?? 0) + 1);
+    for (const c of chooser) if (c.scope) counts.set(c.scope, (counts.get(c.scope) ?? 0) + 1);
     const scope = [...counts.entries()].sort((a, b) => b[1] - a[1] || byCodeUnit(a[0], b[0]))[0]?.[0] ?? null;
     const semver: Semver = determineBump(commits) ?? 'none';
     const type = pick.type.toLowerCase();
@@ -92,12 +97,17 @@ export function deriveFields(root: string, mergeBaseSha: string | null): Derived
     // (`merge -s ours`), silently dropping real commits from the range.
     // -z ends every commit with NUL, which a message cannot contain: each record is exactly one commit, so a message that
     // embeds the parser's own separator cannot be read as a second commit.
-    const raw = runGit(root, ['log', ...LOG_SAFETY_ARGS, '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS]);
+    const logArgs = ['log', ...LOG_SAFETY_ARGS, '--no-merges', '--full-history', '--reverse', '-z', `--format=${GIT_LOG_FORMAT}`, '--end-of-options', range, '--', ALL_FILES, EXCLUDE_RECORDS];
+    const raw = runGit(root, logArgs);
     if (raw === null) return fail('git-failed', `git could not read the commits in ${range}`);
     const records = raw.split('\0').filter((record) => record !== '');
     if (records.length === 0) return fail('no-commits', `no non-merge commits outside ${RECORD_DIR}/ in ${range}`);
     const commits = commitsFromRecords(records);
-    const derived = deriveFromCommits(commits);
+    // R3.3 amended: plan-only commits do not choose type or scope, so a second log over the same range drops docs/plans/.
+    const focusRaw = runGit(root, [...logArgs, EXCLUDE_PLANS]);
+    if (focusRaw === null) return fail('git-failed', `git could not read the commits in ${range}`);
+    const focus = commitsFromRecords(focusRaw.split('\0').filter((record) => record !== ''));
+    const derived = deriveFromCommits(commits, focus);
     if (derived === null) return fail('no-conventional-commits', 'no commit in the range uses a conventional-commit subject (type(scope): subject)');
     const files = changedFiles(root, mergeBaseSha, head);
     if (files === null) return fail('git-failed', `git could not list the files changed in ${range}`);

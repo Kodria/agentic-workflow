@@ -127,6 +127,18 @@ describe('deriveFromCommits and deriveModules (no repository)', () => {
         expect(result.diagnostic.message).toContain('abc\\ndef');
         expect(result.diagnostic.message.length).toBeLessThanOrEqual(300);
     });
+    test('R3.3 (amended) type and scope come from the focus commits; semver and breaking from all', () => {
+        const all = [c('docs', 'plans'), c('ci', 'release'), c('docs', 'plans'), c('feat', 'plans', true)];
+        const focus = [c('ci', 'release')];
+        expect(deriveFromCommits(all, focus)).toEqual({ type: 'ci', scope: 'release', semver: 'major', breaking: true });
+    });
+    test('R3.3 (amended) an empty, unusable or non-array focus falls back to all commits', () => {
+        const all = [c('docs', 'plans'), c('ci', 'release')];
+        const expected = deriveFromCommits(all);
+        for (const focus of [[], [{ type: 'x y', scope: null, breaking: false, subject: '' }], undefined, null, 'x'] as unknown[]) {
+            expect(deriveFromCommits(all, focus as never)).toEqual(expected);
+        }
+    });
 });
 
 describe('deriveFields in a repository', () => {
@@ -428,6 +440,40 @@ describe('deriveFields in a repository', () => {
             expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'a', semver: 'patch', breaking: false, modules: ['cli/src'] } });
         } finally { spy.mockRestore(); }
         expect(moved).toBe(true);
+    });
+    test('R3.3 (amended) plan-only commits do not choose type or scope (the #228 shape)', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan it');
+        repo.commit({ '.github/workflows/ci.yml': '1' }, 'ci(release): shard');
+        repo.commit({ 'docs/plans/p.md': '2' }, 'docs(plans): amend A1');
+        repo.commit({ 'docs/plans/p.md': '3' }, 'docs(plans): amend A2');
+        repo.commit({ '.github/workflows/release.yml': '1' }, 'ci(release): gate it');
+        repo.commit({ 'docs/decisions.md': '1' }, 'docs(decisions): record it');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs', 'docs/plans'] } });
+    });
+    test('R3.3 (amended) a plan-only commit still counts for semver and breaking', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'feat(plans)!: plan a breaking change');
+        repo.commit({ 'cli/src/a.ts': '1' }, 'fix(process): code');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'fix', scope: 'process', semver: 'major', breaking: true, modules: ['cli/src', 'docs/plans'] } });
+    });
+    test('R3.3 (amended) a commit touching docs/plans and code counts for type and scope', () => {
+        const base = branch();
+        repo.commit({ 'cli/src/a.ts': '1' }, 'chore(x): first');
+        repo.commit({ 'docs/plans/p.md': '1', 'cli/src/b.ts': '1' }, 'docs(plans): mixed');
+        repo.commit({ 'docs/plans/p.md': '2', 'cli/src/c.ts': '1' }, 'docs(plans): mixed again');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toMatchObject({ ok: true, fields: { type: 'chore', scope: 'plans' } });
+    });
+    test('R3.3 (amended) a pure planning branch keeps type and scope from its plan commits', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan only');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toEqual({ ok: true, fields: { type: 'docs', scope: 'plans', semver: 'none', breaking: false, modules: ['docs/plans'] } });
+    });
+    test('R3.3 (amended) only the top-level docs/plans is excluded, not similarly named directories', () => {
+        const base = branch();
+        repo.commit({ 'docs/plans-old/p.md': '1' }, 'docs(archive): old plans');
+        repo.commit({ 'cli/docs/plans/p.md': '1' }, 'chore(cli): nested');
+        expect(deriveFields(repo.root, mergeBase(repo.root, base))).toMatchObject({ ok: true, fields: { type: 'docs', scope: 'archive' } });
     });
 });
 
