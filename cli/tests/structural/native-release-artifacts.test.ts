@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import yaml from 'js-yaml';
 
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const REPO_ROOT = path.resolve(CLI_ROOT, '..');
@@ -16,7 +17,15 @@ const HOT_STEP = 'Test hot Windows ARM suites';
 const CHANGES_STEP = 'Test Change Record Windows ARM suites';
 const CHANGES_RUN = `npx jest --runInBand --bail --testPathPatterns='${CHANGES_PATTERN}'`;
 const REMAINDER_COMMENT = "      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.\n";
-const RELEASE_NEEDS = /^    needs: \[([^\]\n]*)\] # rojo en cualquier plataforma o shard ARM no publica$/m;
+const HOT_RUN = 'npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail';
+const RELEASE_GATE = ['test', 'windows-arm-changes', 'windows-arm-hot'];
+const SHARD_SETUP = [
+    { uses: 'actions/checkout@v4' },
+    { uses: 'actions/setup-node@v4', with: { 'node-version': '22' } },
+    { name: 'Install', 'working-directory': 'cli', run: 'npm ci' },
+    { name: 'Build', 'working-directory': 'cli', run: 'npm run native:build && npm run build' },
+    { name: 'Build test-only native addon', 'working-directory': 'cli', run: 'npm run native:test-build' },
+];
 
 // Jest compiles --testPathPatterns with the `i` flag but --testPathIgnorePatterns
 // without it, so a directory differing only in case would run in both the shard
@@ -63,55 +72,108 @@ function shardDirectoryProblems(testsRoot: string): string[] {
     return problems;
 }
 
-// The release job publishes only when every test job passed: no if:, no
+type Step = Record<string, unknown>;
+type Job = Record<string, unknown> & { steps: Step[] };
+
+function parseJobs(source: string): Record<string, Job> {
+    const parsed = yaml.load(source) as { jobs?: Record<string, Job> } | null;
+    expect(parsed?.jobs).toBeDefined();
+    return parsed!.jobs!;
+}
+
+function getJob(jobs: Record<string, Job>, name: string): Job {
+    const job = jobs[name];
+    expect(job).toBeDefined();
+    expect(Array.isArray(job.steps)).toBe(true);
+    return job;
+}
+
+function keysOf(value: object): string[] {
+    return Object.keys(value);
+}
+
+// The release job publishes only when every test job passed: no if, no
 // continue-on-error, and needs is exactly the three gating jobs in any order.
-function assertReleaseGate(workflow: string): void {
-    const [, releaseJob] = splitJob(workflow, 'release');
-    expect(releaseJob).not.toMatch(/^\s*if:/m);
-    expect(releaseJob).not.toContain('continue-on-error');
-    const needs = releaseJob.match(RELEASE_NEEDS)?.[1].split(',').map((job) => job.trim());
-    expect(needs).toHaveLength(3);
-    expect([...needs!].sort()).toEqual(['test', 'windows-arm-changes', 'windows-arm-hot']);
+function assertReleaseGate(jobs: Record<string, Job>): void {
+    const release = getJob(jobs, 'release');
+    expect(keysOf(release)).not.toContain('if');
+    expect(keysOf(release)).not.toContain('continue-on-error');
+    for (const step of release.steps) {
+        expect(keysOf(step)).not.toContain('continue-on-error');
+    }
+    expect(Array.isArray(release.needs)).toBe(true);
+    const needs = release.needs as string[];
+    expect(needs).toHaveLength(RELEASE_GATE.length);
+    expect([...needs].sort()).toEqual(RELEASE_GATE);
 }
 
-function splitJob(workflow: string, name: string): [string, string] {
-    const header = new RegExp(`^  ${name}:\\s*$`, 'gm');
-    expect(workflow.match(header)).toHaveLength(1);
-    const [before, rest] = workflow.split(new RegExp(`^  ${name}:\\s*$`, 'm'));
-    expect(rest).toBeDefined();
-    return [before, rest.split(/^  [a-z][\w-]*:\s*$/m)[0]];
-}
-
-function setupBefore(job: string, step: string): string {
-    const marker = `      - name: ${step}\n`;
-    expect(job.split(marker)).toHaveLength(2);
-    return job.split(marker)[0];
-}
-
+// Gate semantics are asserted on the parsed workflow, so key quoting or escaping
+// cannot hide an if or a continue-on-error. Text is checked only where the exact
+// text is the contract: the run lines and the A1 comment.
 function assertArmPartition(source: string, gatesRelease: boolean): void {
     const workflow = source.replace(/\r\n/g, '\n');
-    const [matrixJob, hotJob] = splitJob(workflow, 'windows-arm-hot');
-    const [, changesJob] = splitJob(workflow, 'windows-arm-changes');
-    const [, testJob] = splitJob(workflow, 'test');
-    // No gating job may tolerate failure, in any quoting or expression form.
-    for (const job of [testJob, hotJob, changesJob]) {
-        expect(job).not.toContain('continue-on-error');
-    }
-    expect(workflow.indexOf('  windows-arm-hot:')).toBeLessThan(workflow.indexOf('  windows-arm-changes:'));
+    const jobs = parseJobs(source);
+    const names = keysOf(jobs);
+    const test = getJob(jobs, 'test');
+    const hot = getJob(jobs, 'windows-arm-hot');
+    const changes = getJob(jobs, 'windows-arm-changes');
+    expect(names.indexOf('windows-arm-hot')).toBeGreaterThan(names.indexOf('test'));
+    expect(names.indexOf('windows-arm-changes')).toBe(names.indexOf('windows-arm-hot') + 1);
 
-    // Optional env: (e.g. AWM_BASELINE_REGISTRY_ROOT for RF-5.1 docs contract) may
-    // sit between working-directory and run; release.yml still omits it.
-    expect(matrixJob.split(REMAINDER_COMMENT)).toHaveLength(2);
-    expect(matrixJob.split(/      - name: Tests? \(Windows ARM remainder\)\n/)[0].endsWith(REMAINDER_COMMENT)).toBe(true);
-    expect(matrixJob).toMatch(
-        /- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n        working-directory: cli\n(?:        env:\n(?:          [^\n]+\n)+)?        run: npx jest --runInBand --bail\n/,
-    );
-    const remainder = matrixJob.match(
-        /- name: Tests? \(Windows ARM remainder\)\n        if: matrix\.target == 'win32-arm64'\n        working-directory: cli\n(?:        env:\n(?:          [^\n]+\n)+)?        run: ([^\n]+)/,
-    )?.[1];
-    expect(remainder).toMatch(/^npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'$/);
-    const ignorePattern = remainder?.match(/--testPathIgnorePatterns='([^']+)'/)?.[1];
+    // No gating job tolerates failure, at job or step level.
+    for (const job of [test, hot, changes]) {
+        expect(keysOf(job)).not.toContain('continue-on-error');
+        for (const step of job.steps) {
+            expect(keysOf(step)).not.toContain('continue-on-error');
+        }
+    }
+    // The ARM shards never skip, at job or step level.
+    for (const job of [hot, changes]) {
+        expect(keysOf(job)).not.toContain('if');
+        for (const step of job.steps) {
+            expect(keysOf(step)).not.toContain('if');
+        }
+    }
+
+    // In the matrix, only the two test steps are guarded, with complementary targets.
+    const guarded = test.steps.filter((step) => keysOf(step).includes('if'));
+    expect(guarded).toHaveLength(2);
+    const [regular, remainder] = guarded;
+    expect(regular.name).toMatch(/^Tests?$/);
+    expect(regular.if).toBe("matrix.target != 'win32-arm64'");
+    expect(regular['working-directory']).toBe('cli');
+    expect(regular.run).toBe('npx jest --runInBand --bail');
+    expect(remainder.name).toMatch(/^Tests? \(Windows ARM remainder\)$/);
+    expect(remainder.if).toBe("matrix.target == 'win32-arm64'");
+    expect(remainder['working-directory']).toBe('cli');
+    const ignorePattern = String(remainder.run).match(/^npx jest --runInBand --bail --testPathIgnorePatterns='([^']+)'$/)?.[1];
     expect(ignorePattern).toBe(`${HOT_IGNORE}|${CHANGES_PATTERN}`);
+    expect(test.steps.filter((step) => step.uses === 'actions/upload-artifact@v4')).toHaveLength(1);
+
+    // A1 comment, directly above the remainder step.
+    expect(workflow.split(REMAINDER_COMMENT)).toHaveLength(2);
+    const aroundRemainder = workflow.split(/      - name: Tests? \(Windows ARM remainder\)\n/);
+    expect(aroundRemainder).toHaveLength(2);
+    expect(aroundRemainder[0].endsWith(REMAINDER_COMMENT)).toBe(true);
+
+    // Both shards share the same setup; only their test step differs.
+    expect(hot['runs-on']).toBe('windows-11-arm');
+    expect(hot.steps.slice(0, -1)).toEqual(SHARD_SETUP);
+    expect(hot.steps.at(-1)).toEqual({ name: HOT_STEP, 'working-directory': 'cli', run: HOT_RUN });
+    expect(changes.steps.at(-1)).toEqual({ name: CHANGES_STEP, 'working-directory': 'cli', run: CHANGES_RUN });
+    expect({ ...changes, steps: changes.steps.slice(0, -1) }).toEqual({ ...hot, steps: hot.steps.slice(0, -1) });
+    if (gatesRelease) {
+        expect(changes.permissions).toEqual({ contents: 'read' });
+    }
+    for (const job of [hot, changes]) {
+        expect(job.steps.some((step) => String(step.uses ?? '').includes('upload-artifact'))).toBe(false);
+        expect(JSON.stringify(job)).not.toContain('secure-fs-win32-arm64');
+    }
+    const lines = workflow.split('\n');
+    expect(lines).toContain(`        run: ${HOT_RUN}`);
+    expect(lines).toContain(`        run: ${CHANGES_RUN}`);
+
+    // The remainder ignores exactly the hot suites plus what the Change Record shard runs.
     const ignored = new RegExp(ignorePattern!);
     for (const separator of ['/', '\\']) {
         const root = ['repo', 'cli', 'tests'].join(separator);
@@ -120,11 +182,7 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
             expect(ignored.test([root, 'other', `${suite}.test.ts`].join(separator))).toBe(false);
         }
     }
-
-    // The shard runs exactly what the remainder excludes beyond the hot suites.
-    const changesRun = changesJob.match(/^        run: (npx jest [^\n]+)$/m)?.[1];
-    expect(changesRun).toBe(CHANGES_RUN);
-    const shardPattern = changesRun?.match(/--testPathPatterns='([^']+)'$/)?.[1];
+    const shardPattern = String(changes.steps.at(-1)?.run).match(/--testPathPatterns='([^']+)'$/)?.[1];
     expect(shardPattern).toBe(CHANGES_PATTERN);
     expect(ignorePattern).toBe(`${HOT_IGNORE}|${shardPattern}`);
     const shard = new RegExp(shardPattern!, 'i');
@@ -140,102 +198,90 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
         }
         expect(ignored.test([root, 'core', 'changesets', 'x.test.ts'].join(separator))).toBe(false);
     }
-    expect(matrixJob.match(/uses: actions\/upload-artifact@v4/g)).toHaveLength(1);
-    expect(hotJob).toContain('runs-on: windows-11-arm');
-    expect(hotJob).toContain('run: npm run native:build');
-    expect(hotJob).toContain('run: npm run native:test-build');
-    expect(hotJob.split('\n')).toContain('        run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail');
-    expect(hotJob).not.toContain('upload-artifact@v4');
-    expect(hotJob).not.toContain('secure-fs-win32-arm64');
-    expect(hotJob).not.toMatch(/^\s*if:/m);
-
-    // The Change Record shard is a verbatim copy of the hot job's setup.
-    expect(setupBefore(changesJob, CHANGES_STEP)).toBe(setupBefore(hotJob, HOT_STEP));
-    expect(changesJob).toContain('runs-on: windows-11-arm');
-    expect(changesJob).toContain('run: npm ci');
-    expect(changesJob).toContain('run: npm run native:build && npm run build');
-    expect(changesJob).toContain('run: npm run native:test-build');
-    if (gatesRelease) {
-        expect(changesJob).toMatch(/^    permissions:\n      contents: read\n/m);
-    }
-    const changesStep = changesJob.split(`      - name: ${CHANGES_STEP}\n`)[1].trimEnd();
-    expect(changesStep).toBe(`        working-directory: cli\n        run: ${CHANGES_RUN}`);
-    expect(changesJob).not.toContain('upload-artifact');
-    expect(changesJob).not.toContain('secure-fs-win32-arm64');
-    expect(changesJob).not.toMatch(/^\s*if:/m);
 
     if (gatesRelease) {
-        assertReleaseGate(workflow);
+        assertReleaseGate(jobs);
     } else {
-        expect(workflow).not.toMatch(/^  release:\s*$/m);
+        expect(names).not.toContain('release');
     }
 }
 
-// Every bypass of the partition or the release gate must make assertArmPartition throw.
+// Rewrites the release job's inline `needs` list in the workflow text.
+function rewriteReleaseNeeds(workflow: string, rewrite: (jobs: string[]) => string[]): string {
+    const header = workflow.search(/^  release:\n/m);
+    expect(header).toBeGreaterThanOrEqual(0);
+    const head = workflow.slice(0, header);
+    const tail = workflow.slice(header).replace(
+        /^(    needs: )\[([^\]\n]*)\]/m,
+        (_line, prefix: string, list: string) => `${prefix}[${rewrite(list.split(',').map((job) => job.trim())).join(', ')}]`,
+    );
+    return head + tail;
+}
+
+function permutations(items: string[]): string[][] {
+    if (items.length <= 1) return [items];
+    return items.flatMap((item, index) =>
+        permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
+}
+
+// Every bypass of the partition or the release gate must make assertArmPartition
+// throw: a failed assertion or a mutated text that no longer parses as YAML.
 function assertMutationsRejected(workflow: string, gates: boolean): void {
-    const swapped = workflow.replace(
-        /if: matrix\.target (?:!=|==) 'win32-arm64'/g,
-        (guard) => guard.includes('!=') ? "if: matrix.target == 'win32-arm64'" : "if: matrix.target != 'win32-arm64'",
-    );
-    const nonGating = workflow.replace('  windows-arm-hot:\n', '  windows-arm-hot:\n    continue-on-error: true\n');
-    const duplicateArtifact = workflow.replace(
-        'uses: actions/upload-artifact@v4',
-        'uses: actions/upload-artifact@v4\n      - uses: actions/upload-artifact@v4',
-    );
-    const broadIgnore = workflow.replace(
-        /(--testPathIgnorePatterns='[^']+)(?=')/,
-        '$1|runner\\.test\\.ts$',
-    );
-    const skippedHot = workflow.replace(
-        '      - name: Test hot Windows ARM suites\n',
-        '      - name: Test hot Windows ARM suites\n        if: false\n',
-    );
-    const nonGatingRemainder = workflow.replace(
-        /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
-        '$1        continue-on-error: true\n',
-    );
-    const maskedHot = workflow.replace(
-        /(run: npx jest --runTestsByPath [^\n]+ --runInBand --bail)(?=\n)/,
-        '$1; exit 0',
-    );
-    const nonGatingChanges = workflow.replace('  windows-arm-changes:\n', '  windows-arm-changes:\n    continue-on-error: true\n');
-    const skippedChanges = workflow.replace(
-        `      - name: ${CHANGES_STEP}\n`,
-        `      - name: ${CHANGES_STEP}\n        if: false\n`,
-    );
-    const maskedChanges = workflow.replace(
-        /(run: npx jest --runInBand --bail --testPathPatterns='[^']+')(?=\n)/,
-        '$1; exit 0',
-    );
-    const driftedShard = workflow.replace(
-        /(--testPathPatterns='[^']+)changes\?/,
-        '$1changes',
-    );
-    const jobLevel = (job: string, line: string) => workflow.replace(`  ${job}:\n`, `  ${job}:\n    ${line}\n`);
+    const jobLevel = (job: string, line: string) => workflow.replace(new RegExp(`^  ${job}:\\n`, 'm'), `  ${job}:\n    ${line}\n`);
+    const inStep = (step: string, line: string) => workflow.replace(`      - name: ${step}\n`, `      - name: ${step}\n        ${line}\n`);
     const mutations = [
-        swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder, maskedHot,
-        nonGatingChanges, skippedChanges, maskedChanges, driftedShard,
-        jobLevel('test', "continue-on-error: ${{ matrix.target == 'win32-arm64' }}"),
-        jobLevel('windows-arm-hot', 'continue-on-error: ${{ true }}'),
-        jobLevel('windows-arm-changes', 'continue-on-error: ${{ true }}'),
-        jobLevel('test', '"continue-on-error": true'),
-        workflow.replace(/^(        run: npx jest --runInBand --bail\n)/m, '$1        continue-on-error: true\n'),
+        // Swapped matrix guards.
         workflow.replace(
-            /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
-            '$1        continue-on-error: ${{ true }}\n',
+            /if: matrix\.target (?:!=|==) 'win32-arm64'/g,
+            (guard) => guard.includes('!=') ? "if: matrix.target == 'win32-arm64'" : "if: matrix.target != 'win32-arm64'",
         ),
+        // A second producer of the native artifact.
+        workflow.replace('uses: actions/upload-artifact@v4', 'uses: actions/upload-artifact@v4\n      - uses: actions/upload-artifact@v4'),
+        // A remainder that drops more than the shards run.
+        workflow.replace(/(--testPathIgnorePatterns='[^']+)(?=')/, '$1|runner\\.test\\.ts$'),
+        // A shard pattern that differs from the remainder's exclusion.
+        workflow.replace(/(--testPathPatterns='[^']+)changes\?/, '$1changes'),
+        // Masked shard runs.
+        workflow.replace(/(run: npx jest --runTestsByPath [^\n]+ --runInBand --bail)(?=\n)/, '$1; exit 0'),
+        workflow.replace(/(run: npx jest --runInBand --bail --testPathPatterns='[^']+')(?=\n)/, '$1; exit 0'),
+        // Skipped steps or jobs, in any key quoting.
+        inStep(HOT_STEP, 'if: false'),
+        inStep(HOT_STEP, '"if": always()'),
+        inStep(HOT_STEP, "'if': false"),
+        inStep(CHANGES_STEP, 'if: false'),
+        inStep(CHANGES_STEP, '"if": always()'),
+        inStep(CHANGES_STEP, "'if': false"),
+        inStep('Upload native secure-fs artifact', "'if': false"),
+        jobLevel('windows-arm-hot', '"if": always()'),
+        jobLevel('windows-arm-hot', "'if': false"),
+        jobLevel('windows-arm-changes', '"if": always()'),
+        jobLevel('windows-arm-changes', "'if': false"),
+        // Tolerated failures, in any key quoting, escaping or expression form.
+        jobLevel('test', "continue-on-error: ${{ matrix.target == 'win32-arm64' }}"),
+        jobLevel('test', '"continue-on-error": true'),
+        jobLevel('test', '"continue\\x2Don-error": true'),
+        jobLevel('windows-arm-hot', 'continue-on-error: true'),
+        jobLevel('windows-arm-hot', 'continue-on-error: ${{ true }}'),
+        jobLevel('windows-arm-hot', '"continue-on-error": true'),
+        jobLevel('windows-arm-changes', 'continue-on-error: true'),
+        jobLevel('windows-arm-changes', 'continue-on-error: ${{ true }}'),
+        jobLevel('windows-arm-changes', '"continue-on-error": true'),
+        inStep(HOT_STEP, '"continue-on-error": true'),
+        inStep(CHANGES_STEP, "'continue-on-error': true"),
+        workflow.replace(/^(        run: npx jest --runInBand --bail\n)/m, '$1        continue-on-error: true\n'),
+        workflow.replace(/(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/, '$1        continue-on-error: true\n'),
+        workflow.replace(/(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/, '$1        continue-on-error: ${{ true }}\n'),
     ];
     if (gates) {
-        const needs = workflow.match(RELEASE_NEEDS)?.[1];
-        expect(needs).toBeDefined();
-        const jobs = needs!.split(',').map((job) => job.trim());
-        const withNeeds = (list: string[]) => workflow.replace(RELEASE_NEEDS, (line) => line.replace(`[${needs}]`, `[${list.join(', ')}]`));
         mutations.push(
-            withNeeds(jobs.filter((job) => job !== 'windows-arm-changes')),
-            withNeeds([...jobs, 'windows-arm-changes']),
+            rewriteReleaseNeeds(workflow, (jobs) => jobs.filter((job) => job !== 'windows-arm-changes')),
+            rewriteReleaseNeeds(workflow, (jobs) => [...jobs, 'windows-arm-changes']),
             jobLevel('release', 'if: always()'),
             jobLevel('release', 'if: ${{ !cancelled() }}'),
+            jobLevel('release', '"if": always()'),
+            jobLevel('release', "'if': false"),
             jobLevel('release', 'continue-on-error: true'),
+            jobLevel('release', '"continue-on-error": true'),
         );
     }
     for (const mutated of mutations) {
@@ -253,7 +299,7 @@ describe('native release artifacts', () => {
             expect(workflow).toContain('run: npx jest --runInBand --bail');
         }
         const release = readWorkflow('release.yml');
-        assertReleaseGate(release);
+        assertReleaseGate(parseJobs(release));
         for (const target of ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']) {
             expect(release).toContain(`target: ${target}`);
         }
@@ -282,7 +328,11 @@ describe('native release artifacts', () => {
 
     it('keeps the whole self-test green when release needs is reordered', () => {
         const workflow = readWorkflow('release.yml');
-        const reordered = workflow.replace(RELEASE_NEEDS, (line, list: string) => line.replace(`[${list}]`, '[windows-arm-changes, test, windows-arm-hot]'));
+        let current: string[] = [];
+        rewriteReleaseNeeds(workflow, (jobs) => (current = jobs));
+        const reorderedJobs = permutations(current).find((jobs) => jobs.join() !== current.join());
+        expect(reorderedJobs).toBeDefined();
+        const reordered = rewriteReleaseNeeds(workflow, () => reorderedJobs!);
         expect(reordered).not.toBe(workflow);
         expect(() => assertArmPartition(reordered, true)).not.toThrow();
         expect(() => assertMutationsRejected(reordered, true)).not.toThrow();
