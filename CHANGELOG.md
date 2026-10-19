@@ -1,3 +1,8 @@
+## v9.20.2 - 2026-10-19
+
+### Fixes
+- **changes:** derive the Change Record from the change, not the plan, and prefer the remote base (#229)
+
 ## v9.20.1 - 2026-10-19
 
 ### Fixes
