@@ -19,11 +19,66 @@
 // esperados escritos a mano, que pueden envejecer hacia la expectativa
 // equivocada.
 
+/** Tope del contenido interno (entre `---` y el cerrador) antes de abandonar el
+ *  escaneo (FH-3). Misma cifra que `FRONTMATTER_MAX` en process/model.ts. */
+const FRONTMATTER_INNER_MAX = 65536;
+
+/** ¿La linea es exactamente el cerrador `---` con espacios/tabs finales opcionales?
+ *  `---x`, `---#comment` y similares NO cierran. */
+function isFrontmatterCloserLine(line: string): boolean {
+    if (!line.startsWith('---')) return false;
+    for (let i = 3; i < line.length; i++) {
+        const c = line[i];
+        if (c !== ' ' && c !== '\t') return false;
+    }
+    return true;
+}
+
 /** Texto crudo del frontmatter (entre los delimitadores `---`), o null si el
- *  bloque falta o esta mal formado. Tolera CRLF. */
+ *  bloque falta o esta mal formado. Tolera CRLF. Cierra solo en una linea que
+ *  sea exactamente `---` (con espacios/tabs finales opcionales). Si el contenido
+ *  interno excederia `FRONTMATTER_INNER_MAX` antes de un cerrador valido, retorna
+ *  null sin seguir acumulando lineas (FH-3). */
 export function matchFrontmatterBlock(raw: string): string | null {
-    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    return fmMatch ? fmMatch[1] : null;
+    if (!raw.startsWith('---')) return null;
+    const afterOpen = raw[3] === '\r' && raw[4] === '\n' ? 5
+        : raw[3] === '\n' ? 4
+        : -1;
+    if (afterOpen < 0) return null;
+
+    const body = raw.slice(afterOpen);
+    const lines: string[] = [];
+    let innerLen = 0;
+    let i = 0;
+    while (i <= body.length) {
+        let end = i;
+        while (end < body.length && body[end] !== '\n' && body[end] !== '\r') end++;
+        const line = body.slice(i, end);
+        if (isFrontmatterCloserLine(line)) {
+            return lines.join('\n');
+        }
+        // join('\n') inserta un salto entre lineas ya acumuladas.
+        const nextLen = lines.length === 0 ? line.length : innerLen + 1 + line.length;
+        if (nextLen > FRONTMATTER_INNER_MAX) return null;
+        lines.push(line);
+        innerLen = nextLen;
+        if (end >= body.length) break;
+        if (body[end] === '\r' && body[end + 1] === '\n') i = end + 2;
+        else i = end + 1;
+    }
+    return null;
+}
+
+/** Quita un comentario YAML de escalar plano: solo `#` precedido de espacio o
+ *  tab (no NBSP ni otros whitespace Unicode). Lineal en la longitud del valor. */
+function stripPlainScalarComment(value: string): string {
+    for (let i = 0; i < value.length - 1; i++) {
+        const c = value[i];
+        if ((c === ' ' || c === '\t') && value[i + 1] === '#') {
+            return value.slice(0, i).trim();
+        }
+    }
+    return value.trim();
 }
 
 /** Indicador de block scalar en la linea de la clave: estilo (`>` folded /
@@ -193,10 +248,11 @@ export function findFrontmatterDescription(frontmatter: string): DescriptionFiel
             catch { return { value: scalar.slice(1, -1).trim(), startLine, endLine }; }
         }
     }
-    // Escalar plano: un `#` PRECEDIDO DE ESPACIO abre un comentario y no forma
-    // parte del valor (un `#` pegado a texto, como en `C#`, si). Dentro de
+    // Escalar plano: un `#` PRECEDIDO DE ESPACIO O TAB abre un comentario y no
+    // forma parte del valor (un `#` pegado a texto, como en `C#`, si; NBSP
+    // antes de `#` tampoco abre comentario — alineado con js-yaml). Dentro de
     // comillas el `#` es literal, y esas ramas ya retornaron.
-    return { value: value.replace(/\s+#.*$/, '').trim(), startLine, endLine };
+    return { value: stripPlainScalarComment(value), startLine, endLine };
 }
 
 /** Azucar para el caso comun: solo el valor resuelto de `description`. */

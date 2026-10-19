@@ -1,5 +1,16 @@
 # Harness Retros
 
+## 2026-10-19 — #225/#226: frontmatter hardening (Package A)
+
+Plan: `docs/plans/2026-10-19-frontmatter-hardening-plan.md` (enmiendas post-QA incluidas).
+
+- **Class:** seguridad (ReDoS / yaml.load / allocation) + structural (ledger branch miss).
+- **Occurrences:** ReDoS de `\s+#.*$` es la misma clase `regex-cuantificador-adyacente-a-clase-que-lo-solapa` (harness-retro 2026-08-23) en otra superficie (`findFrontmatterDescription`). La QA encontró además caps solo-en-emisión y un bypass de alias vía `loadBlock` de `description`.
+- **Rule:** lecciones en `AGENTS.md` — (1) bounds que detienen el trabajo, no solo el mensaje; (2) ledger en la rama de ejecución. No se agregó sensor ReDoS genérico (misma autoridad pendiente que en 2026-08-23).
+- **Sensor:** ninguno nuevo; regresiones en `frontmatter-hardening.test.ts` + `process/model.test.ts`.
+- **Descartes (desatendido):** nits de comentario stale / helpers de test duplicados / wording de diagnóstico YAML — no cambian la frontera de confianza; no se structuralizaron.
+- **Hallazgo de proceso:** el ledger del ciclo quedó en `main.jsonl` (4 findings de debugging) mientras la ejecución fue en `cursor/frontmatter-hardening-225-226-3fdc` → `awm ledger list` vacío en la rama. Cerrado con la lección de branch-before-ledger.
+
 ## 2026-10-19 — #223: shard ARM del Change Record
 
 Plan: `docs/plans/2026-10-19-ci-arm-change-record-shard-plan.md`, con enmiendas A1–A4.
