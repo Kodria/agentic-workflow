@@ -107,6 +107,16 @@
 
 **Amendment A1 (S1 implementer, 2026-10-19):** CI-4 is written in Spanish, as said above. The comment above the remainder step in both workflows also names the third shard: `# The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.`
 
+**Amendment A2 (post-implementation QA, 2026-10-19).** The pinned test also guards the release gate's other bypasses:
+1. The `release` job has no `if:` and no `continue-on-error` (QA important: `if: always()` would publish past red shards).
+2. Neither the `test` job nor the two ARM shard jobs has a job-level `continue-on-error`, in any form, including expressions.
+3. The remainder step rejects `continue-on-error` in any form, not only `true`.
+4. `needs` is compared as a set, so reordering it stays green. The set must still be exactly `{test, windows-arm-hot, windows-arm-changes}`.
+5. Each real shard directory (`cli/tests/core/changes`, `cli/tests/commands/change`, `cli/tests/commands/changes`) exists, contains at least one `*.test.ts`, and matches `CHANGES_PATTERN`, so the case-only walk cannot pass vacuously.
+6. The redundant prefix assertion is dropped.
+
+Discarded, with reason: commit `c21b206f` touched `ci.yml` under a `docs(ci)` subject instead of `ci(release)`. Neither prefix produces a release, and rewriting pushed history is not worth it.
+
 **Shared constraints:** touch only `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `cli/tests/structural/native-release-artifacts.test.ts`, `docs/decisions.md`. Never read or write `~/.awm`. Commit subjects: `ci(release): …` for the workflows and the pinned test, `docs(decisions): …` for D-005, each ending with the session attribution lines.
 
 <a id="slice-s1"></a>
