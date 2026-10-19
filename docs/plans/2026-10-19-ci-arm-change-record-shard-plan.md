@@ -117,6 +117,12 @@
 
 Discarded, with reason: commit `c21b206f` touched `ci.yml` under a `docs(ci)` subject instead of `ci(release)`. Neither prefix produces a release, and rewriting pushed history is not worth it.
 
+**Amendment A3 (QA verification of A2, 2026-10-19).** Two gaps remained.
+
+First, A2 items 2 and 3 checked only specific places and spellings. The regular `Tests` step still accepted `continue-on-error: true` after its `run:` line, and the `test` job accepted a quoted `"continue-on-error"` key. A3 replaces items 2 and 3 with one rule: the gating jobs `test`, `windows-arm-hot`, `windows-arm-changes` and (in release.yml) `release` do not contain the text `continue-on-error` anywhere, in any quoting. Today neither workflow uses it.
+
+Second, the self-test built its `needs` mutations by replacing the literal `[test, windows-arm-hot, windows-arm-changes]`, so a legitimate reorder turned it red. The mutations are now built from the list `RELEASE_NEEDS` actually matched, and a reordered `needs` keeps the whole file green.
+
 **Shared constraints:** touch only `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `cli/tests/structural/native-release-artifacts.test.ts`, `docs/decisions.md`. Never read or write `~/.awm`. Commit subjects: `ci(release): …` for the workflows and the pinned test, `docs(decisions): …` for D-005, each ending with the session attribution lines.
 
 <a id="slice-s1"></a>
