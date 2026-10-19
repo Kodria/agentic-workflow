@@ -16,7 +16,16 @@
 - Con la versión publicada, en un clon de `agentic-workflow` sin `origin/HEAD` (`git remote set-head origin -d`) y con el `main` local atrasado, correr `awm changes list --format voice` → lista los Change Records de `origin/main`, no dice que el repo todavía no usa Change Records
 - Con la versión publicada, en una rama cuyo primer commit es `docs(plans): …` y el resto son `ci(release): …`, correr `awm sensors run` y `awm change new prueba` → el registro dice `type: ci` y `scope: release`
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
+
+> Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
+> entre tareas, ni de confirmación entre fases (development-process rutea
+> automáticamente y subagent-driven-development no pregunta si continuar con
+> el cierre). harness-retro triagea con criterio propio del agente (solo valor
+> real, recurrente o sistémico — descarta el resto sin preguntar).
+> post-implementation-qa corrige TODOS los hallazgos que surjan, no solo algunos.
+> finishing-a-development-branch crea el PR directamente (opción "push + PR"),
+> sin presentar el menú de 4 opciones.
 
 **Modo de despacho:** proveedor-nativo
 
@@ -128,6 +137,21 @@
 **Amendment A2 (S2 implementer, 2026-10-19):** two corrections found while implementing S2.
 1. In the S2 test "plan-only commits do not choose type or scope (the #228 shape)", the `docs(decisions)` commit also chooses, so `release` and `decisions` tied 1:1 and the unchanged code-unit tie-break gave `decisions`. The fixture gains a second `ci(release): gate it` commit touching `.github/workflows/release.yml` (closer to the real #228, which had six), so `release` wins 2:1 under the new rule. Under the old rule `plans` (3) would still win, so the test keeps failing first. The expected record stays `{ type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs', 'docs/plans'] }`.
 2. `cli/tests/commands/change/validate.test.ts` (~line 881, "both records are valid, and git derives, checks ancestry and lists late files once") counts the derivation's `git log` calls (`--no-merges`) as 1. The second, focus log makes it 2 per derivation, still one derivation per verification commit. S2 owns that assertion: expect 2, with a comment naming the full log and the focus log.
+
+**Amendment A3 (post-implementation QA, 2026-10-19).** The owner switched this plan to unattended mode after both slices were complete ("avanza desatendido hasta el PR"), so QA fixes every finding. Track A and the robustness, logic and tests lenses found no blockers. The fixes below are owned by a QA fix pass (requirements CRD-1 and CRD-2):
+
+- **Q1 (tests)** — a test makes the second, focus `git log` fail while the first succeeds and asserts `deriveFields` returns `git-failed`. The fail-open mutant `(focusRaw ?? '')` must fail it.
+- **Q2 (tests)** — with both `refs/remotes/origin/main` and `refs/remotes/origin/master` (different commits) and no `origin/HEAD`, the base is `origin/main`. Swapping them in the candidate list must fail it.
+- **Q3 (tests)** — command-level tests exercise both fixes end to end: `awm change new` on a branch shaped like #228 (plan commits first, then `ci(release)` commits) writes `type: ci` and `scope: release`; and a command run with no `origin/HEAD`, a current `origin/main` and a stale local `main` uses `origin/main`.
+- **Q4 (tests)** — the "only the top-level docs/plans is excluded" test gets fixtures that fail if nested `cli/docs/plans/` or `docs/plans-old/` were also excluded.
+- **Q5 (tests)** — the subdirectory derivation test includes a plan-only commit, so dropping `top` from `EXCLUDE_PLANS` fails it.
+- **Q6 (tests + code)** — the `--base` help text is built from the candidate list, not hand-written, and a test asserts it names the defaults in order.
+- **Q7 (code, regression)** — without `--base`, `resolveRange` (used by `change new` and `change validate`) uses the first candidate that both names a commit and has a merge base with HEAD. A shallow `origin/main` that does not connect to HEAD no longer hides a connected local `main`. `changes list` keeps the first candidate that names a commit, because it needs no merge base.
+- **Q8 (docs + test)** — when the branch's code commits are not conventional, `type` and `scope` fall back to every conventional commit, which can be the plan's. That is the fallback the amendment defines (no type is invented). The design amendment and `docs/cli-reference.md` say so explicitly, and a test pins it.
+- **Q9 (code)** — `resolveRange` computes the merge base from the pinned commit id it resolved, not by resolving the base name a second time.
+- **Q10 (code)** — the local defaults resolve as the full refs `refs/heads/main` and `refs/heads/master`, so a tag named `main` cannot redirect the base. The reported `base` stays `main`/`master`. A test with a tag `main` pointing elsewhere pins it.
+
+The design amendment's R3.1 bullet gains Q7 and Q10, and its R3.3 bullet gains Q8. The QA fix pass may also touch `docs/plans/2026-10-17-change-record-design.md` (that amendment section only).
 
 **Shared constraints:** touch only `cli/src/core/changes/git.ts`, `cli/src/core/changes/range.ts`, `cli/src/core/changes/list.ts` (one comment, A1), `cli/src/core/changes/derive.ts`, `cli/src/commands/change/**`, `cli/src/commands/changes/**` (help text only), `cli/tests/core/changes/**`, `cli/tests/commands/change/**`, `cli/tests/commands/changes/**`, `docs/cli-reference.md`. Never read or write `~/.awm`. Tests use the existing helpers in `cli/tests/core/changes/helpers.ts` (isolated tmp repos). Commit subjects: `fix(changes): …` for code and tests, `docs(changes): …` for documentation only, each ending with the session attribution lines.
 
