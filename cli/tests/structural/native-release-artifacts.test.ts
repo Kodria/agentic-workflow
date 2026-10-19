@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
@@ -15,7 +16,7 @@ const HOT_STEP = 'Test hot Windows ARM suites';
 const CHANGES_STEP = 'Test Change Record Windows ARM suites';
 const CHANGES_RUN = `npx jest --runInBand --bail --testPathPatterns='${CHANGES_PATTERN}'`;
 const REMAINDER_COMMENT = "      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.\n";
-const RELEASE_NEEDS = /^  release:\s*\n    needs: \[test, windows-arm-hot, windows-arm-changes\] # rojo en cualquier plataforma o shard ARM no publica$/m;
+const RELEASE_NEEDS = /^    needs: \[([^\]\n]*)\] # rojo en cualquier plataforma o shard ARM no publica$/m;
 
 // Jest compiles --testPathPatterns with the `i` flag but --testPathIgnorePatterns
 // without it, so a directory differing only in case would run in both the shard
@@ -27,6 +28,50 @@ function caseOnlyShardPaths(directories: string[], pattern: string): string[] {
         const candidate = `${directory}/`;
         return insensitive.test(candidate) && !sensitive.test(candidate);
     });
+}
+
+const SHARD_DIRECTORIES = [['core', 'changes'], ['commands', 'change'], ['commands', 'changes']];
+
+// Each real shard directory must exist with its exact case, hold at least one
+// suite and match CHANGES_PATTERN, so the case-only walk cannot pass vacuously.
+function shardDirectoryProblems(testsRoot: string): string[] {
+    const shard = new RegExp(CHANGES_PATTERN);
+    const problems: string[] = [];
+    for (const segments of SHARD_DIRECTORIES) {
+        const label = segments.join('/');
+        let current = testsRoot;
+        let found = true;
+        for (const segment of segments) {
+            // readdirSync keeps the on-disk case even on case-insensitive file systems.
+            if (!fs.existsSync(current) || !fs.readdirSync(current).includes(segment)) {
+                found = false;
+                break;
+            }
+            current = path.join(current, segment);
+        }
+        if (!found) {
+            problems.push(`${label}: missing with this exact case`);
+            continue;
+        }
+        if (!fs.readdirSync(current).some((entry) => entry.endsWith('.test.ts'))) {
+            problems.push(`${label}: holds no *.test.ts`);
+        }
+        if (!shard.test(`${current}${path.sep}`)) {
+            problems.push(`${label}: does not match CHANGES_PATTERN`);
+        }
+    }
+    return problems;
+}
+
+// The release job publishes only when every test job passed: no if:, no
+// continue-on-error, and needs is exactly the three gating jobs in any order.
+function assertReleaseGate(workflow: string): void {
+    const [, releaseJob] = splitJob(workflow, 'release');
+    expect(releaseJob).not.toMatch(/^\s*if:/m);
+    expect(releaseJob).not.toContain('continue-on-error');
+    const needs = releaseJob.match(RELEASE_NEEDS)?.[1].split(',').map((job) => job.trim());
+    expect(needs).toHaveLength(3);
+    expect([...needs!].sort()).toEqual(['test', 'windows-arm-changes', 'windows-arm-hot']);
 }
 
 function splitJob(workflow: string, name: string): [string, string] {
@@ -47,11 +92,12 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     const workflow = source.replace(/\r\n/g, '\n');
     const [matrixJob, hotJob] = splitJob(workflow, 'windows-arm-hot');
     const [, changesJob] = splitJob(workflow, 'windows-arm-changes');
+    const [, testJob] = splitJob(workflow, 'test');
+    expect(testJob).not.toMatch(/^    continue-on-error:/m);
     expect(workflow.indexOf('  windows-arm-hot:')).toBeLessThan(workflow.indexOf('  windows-arm-changes:'));
 
     // Optional env: (e.g. AWM_BASELINE_REGISTRY_ROOT for RF-5.1 docs contract) may
     // sit between working-directory and run; release.yml still omits it.
-    expect(matrixJob).toMatch(/- name: Tests?\n        if: matrix\.target != 'win32-arm64'\n/);
     expect(matrixJob.split(REMAINDER_COMMENT)).toHaveLength(2);
     expect(matrixJob.split(/      - name: Tests? \(Windows ARM remainder\)\n/)[0].endsWith(REMAINDER_COMMENT)).toBe(true);
     expect(matrixJob).toMatch(
@@ -91,9 +137,9 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
         }
         expect(ignored.test([root, 'core', 'changesets', 'x.test.ts'].join(separator))).toBe(false);
     }
-    const remainderStep = matrixJob.split(/- name: Tests? \(Windows ARM remainder\)\n/)[1]?.split(/^      - name:/m)[0];
+    const remainderStep = matrixJob.split(/- name: Tests? \(Windows ARM remainder\)\n/)[1]?.split(/^      - /m)[0];
     expect(remainderStep).toBeDefined();
-    expect(remainderStep).not.toContain('continue-on-error: true');
+    expect(remainderStep).not.toContain('continue-on-error');
     expect(matrixJob.match(/uses: actions\/upload-artifact@v4/g)).toHaveLength(1);
     expect(hotJob).toContain('runs-on: windows-11-arm');
     expect(hotJob).toContain('run: npm run native:build');
@@ -102,7 +148,7 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     expect(hotJob).not.toContain('upload-artifact@v4');
     expect(hotJob).not.toContain('secure-fs-win32-arm64');
     expect(hotJob).not.toMatch(/^\s*if:/m);
-    expect(hotJob).not.toContain('continue-on-error: true');
+    expect(hotJob).not.toContain('continue-on-error');
 
     // The Change Record shard is a verbatim copy of the hot job's setup.
     expect(setupBefore(changesJob, CHANGES_STEP)).toBe(setupBefore(hotJob, HOT_STEP));
@@ -121,7 +167,7 @@ function assertArmPartition(source: string, gatesRelease: boolean): void {
     expect(changesJob).not.toContain('continue-on-error');
 
     if (gatesRelease) {
-        expect(workflow).toMatch(RELEASE_NEEDS);
+        assertReleaseGate(workflow);
     } else {
         expect(workflow).not.toMatch(/^  release:\s*$/m);
     }
@@ -136,7 +182,7 @@ describe('native release artifacts', () => {
             expect(workflow).toContain('run: npx jest --runInBand --bail');
         }
         const release = readWorkflow('release.yml');
-        expect(release).toMatch(RELEASE_NEEDS);
+        assertReleaseGate(release);
         for (const target of ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']) {
             expect(release).toContain(`target: ${target}`);
         }
@@ -198,18 +244,64 @@ describe('native release artifacts', () => {
                 /(--testPathPatterns='[^']+)changes\?/,
                 '$1changes',
             );
+            const jobLevel = (job: string, line: string) => workflow.replace(`  ${job}:\n`, `  ${job}:\n    ${line}\n`);
             const gates = name === 'release.yml';
             const mutations = [
                 swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder, maskedHot,
                 nonGatingChanges, skippedChanges, maskedChanges, driftedShard,
+                jobLevel('test', "continue-on-error: ${{ matrix.target == 'win32-arm64' }}"),
+                jobLevel('windows-arm-hot', 'continue-on-error: ${{ true }}'),
+                jobLevel('windows-arm-changes', 'continue-on-error: ${{ true }}'),
+                workflow.replace(
+                    /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
+                    '$1        continue-on-error: ${{ true }}\n',
+                ),
             ];
             if (gates) {
-                mutations.push(workflow.replace('needs: [test, windows-arm-hot, windows-arm-changes]', 'needs: [test, windows-arm-hot]'));
+                mutations.push(
+                    workflow.replace('needs: [test, windows-arm-hot, windows-arm-changes]', 'needs: [test, windows-arm-hot]'),
+                    workflow.replace('needs: [test, windows-arm-hot, windows-arm-changes]', 'needs: [test, windows-arm-hot, windows-arm-changes, windows-arm-changes]'),
+                    jobLevel('release', 'if: always()'),
+                    jobLevel('release', 'if: ${{ !cancelled() }}'),
+                    jobLevel('release', 'continue-on-error: true'),
+                );
             }
             for (const mutated of mutations) {
                 expect(mutated).not.toBe(workflow);
                 expect(() => assertArmPartition(mutated, gates)).toThrow();
             }
+            if (gates) {
+                const reordered = workflow.replace(
+                    'needs: [test, windows-arm-hot, windows-arm-changes]',
+                    'needs: [windows-arm-changes, test, windows-arm-hot]',
+                );
+                expect(reordered).not.toBe(workflow);
+                expect(() => assertArmPartition(reordered, gates)).not.toThrow();
+            }
+        }
+    });
+
+    it('reports a shard directory that is missing, renamed by case or holds no suite', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-arm-shard-'));
+        try {
+            const testsRoot = path.join(tmp, 'cli', 'tests');
+            for (const segments of SHARD_DIRECTORIES) {
+                fs.mkdirSync(path.join(testsRoot, ...segments), { recursive: true });
+                fs.writeFileSync(path.join(testsRoot, ...segments, 'x.test.ts'), '');
+            }
+            expect(shardDirectoryProblems(testsRoot)).toEqual([]);
+
+            fs.renameSync(path.join(testsRoot, 'core', 'changes'), path.join(testsRoot, 'core', 'Changes'));
+            expect(shardDirectoryProblems(testsRoot)).toEqual([expect.stringContaining('core/changes')]);
+            fs.renameSync(path.join(testsRoot, 'core', 'Changes'), path.join(testsRoot, 'core', 'changes'));
+
+            fs.renameSync(path.join(testsRoot, 'commands', 'change', 'x.test.ts'), path.join(testsRoot, 'commands', 'change', 'helpers.ts'));
+            expect(shardDirectoryProblems(testsRoot)).toEqual([expect.stringContaining('commands/change')]);
+
+            fs.rmSync(path.join(testsRoot, 'commands', 'changes'), { recursive: true });
+            expect(shardDirectoryProblems(testsRoot)).toHaveLength(2);
+        } finally {
+            fs.rmSync(tmp, { recursive: true, force: true });
         }
     });
 
@@ -224,7 +316,7 @@ describe('native release artifacts', () => {
         const directories = (fs.readdirSync(testsRoot, { recursive: true }) as string[])
             .map((relative) => path.join(testsRoot, relative))
             .filter((candidate) => fs.statSync(candidate).isDirectory());
-        expect(directories.length).toBeGreaterThan(0);
+        expect(shardDirectoryProblems(testsRoot)).toEqual([]);
         const flagged = caseOnlyShardPaths(directories, CHANGES_PATTERN);
         if (flagged.length > 0) {
             throw new Error(`Case-only Change Record directories would run in both ARM shards: ${flagged.join(', ')}`);
