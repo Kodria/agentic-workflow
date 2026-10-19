@@ -141,6 +141,15 @@ describe('git functions in a repository', () => {
         expect(repo.git('rev-parse', 'refs/remotes/origin/main')).toBe(tagged);
         expect(resolveBaseCommit(repo.root)).toEqual({ base: 'main', sha: repo.git('rev-parse', 'refs/heads/main') });
     });
+    test('R3.1 only an exact refname counts: a branch main/x does not make refs/heads/main exist (a tag of that name is not it)', () => {
+        branch();
+        repo.git('branch', '-m', 'main', 'master');
+        repo.git('branch', 'main/x', 'master'); // `for-each-ref refs/heads/main` lists refs/heads/main/x
+        const tagged = repo.commit({ 'tagged.ts': '1' }, 'feat: tagged');
+        repo.git('tag', 'refs/heads/main', tagged);
+        expect(repo.git('for-each-ref', '--format=%(refname)', 'refs/heads/main')).toBe('refs/heads/main/x');
+        expect(resolveBaseCommit(repo.root)).toEqual({ base: 'master', sha: repo.git('rev-parse', 'refs/heads/master') });
+    });
     test('R3.1 when git cannot list the default refs, no default is taken (fail closed)', () => {
         const git = spyOnGit((args) => { if (args.includes('for-each-ref')) throw new Error('boom'); });
         try {
