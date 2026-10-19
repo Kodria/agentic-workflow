@@ -94,6 +94,39 @@ describe('parseProcessFrontmatter', () => {
             expect(r.diagnostics).toEqual([]);
             expect(r.model?.terminatesTo).toBe('none');
         });
+
+        it('rejects a nested-alias bomb in name without calling yaml.load on it', () => {
+            // Classic self-referential alias expansion; the pre-load guard must
+            // refuse &/* (and never hang) before js-yaml sees the value.
+            const bomb = '&a [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]';
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const started = Date.now();
+                const r = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', `name: ${bomb}`), 'p');
+                expect(Date.now() - started).toBeLessThan(500);
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(YAML_STRING);
+                expect(r.diagnostics.join(' ')).toMatch(/"name"/);
+                expect(load.mock.calls.some(([arg]) => String(arg).includes(bomb))).toBe(false);
+                expect(load.mock.calls.some(([arg]) => /[&*]/.test(String(arg)))).toBe(false);
+            } finally {
+                load.mockRestore();
+            }
+        });
+
+        it('rejects a name raw longer than 128 characters without calling yaml.load on it', () => {
+            const raw = `"${'a'.repeat(129)}"`;
+            expect(raw.length).toBeGreaterThan(128);
+            const load = jest.spyOn(yaml, 'load');
+            try {
+                const r = parseProcessFrontmatter(valid.replace('name: ejemplo-proceso', `name: ${raw}`), 'p');
+                expect(r.model).toBeUndefined();
+                expect(r.diagnostics.join(' ')).toMatch(YAML_STRING);
+                expect(load.mock.calls.some(([arg]) => String(arg).includes(raw))).toBe(false);
+            } finally {
+                load.mockRestore();
+            }
+        });
     });
 
     describe('bounded frontmatter diagnostics (FH-5, FH-6)', () => {
@@ -132,8 +165,8 @@ describe('parseProcessFrontmatter', () => {
             expect(r.model).toBeUndefined();
             const joined = r.diagnostics.join(' ');
             const unknownMentions = joined.match(/unknown field/g) ?? [];
-            expect(unknownMentions.length).toBeLessThanOrEqual(20);
-            expect(joined).toMatch(/\d+ more problems/);
+            expect(unknownMentions.length).toBe(20);
+            expect(joined).toContain('5 more problems');
         });
 
         it('truncates unknown field keys longer than 64 characters with an ellipsis', () => {
@@ -144,6 +177,20 @@ describe('parseProcessFrontmatter', () => {
             const joined = r.diagnostics.join(' ');
             expect(joined).toMatch(/unknown field/);
             expect(joined).toContain(`${'a'.repeat(63)}…`);
+            expect(joined).not.toContain(longKey);
+        });
+
+        it('truncates duplicate field keys longer than 64 characters with an ellipsis', () => {
+            const longKey = `d${'b'.repeat(199)}`;
+            expect(longKey).toHaveLength(200);
+            const r = parseProcessFrontmatter(
+                valid.replace('created:', `${longKey}: a\n${longKey}: b\ncreated:`),
+                'p',
+            );
+            expect(r.model).toBeUndefined();
+            const joined = r.diagnostics.join(' ');
+            expect(joined).toMatch(/duplicate field/);
+            expect(joined).toContain(`${'b'.repeat(63)}…`);
             expect(joined).not.toContain(longKey);
         });
     });

@@ -29,8 +29,11 @@ const FRONTMATTER_MAX = 65536;
 /** Tope de problemas acumulados en un solo diagnóstico de proceso (FH-6). */
 const MAX_PROCESS_PROBLEMS = 20;
 
-/** Tope de caracteres de una clave desconocida embebida en el diagnóstico (FH-6). */
+/** Tope de caracteres de una clave desconocida/duplicada embebida en el diagnóstico (FH-6). */
 const UNKNOWN_FIELD_KEY_MAX = 64;
+
+/** Tope del valor crudo de `name`/`terminates_to` antes de `yaml.load` (FH-4). */
+const YAML_SCALAR_RAW_MAX = 128;
 
 /** Lo que un runtime mostraría mal o usaría para engañar: controles C0 (salvo
  *  tab), DEL, C1, separadores U+2028/U+2029, marcas LRM/RLM/ALM, overrides e
@@ -48,8 +51,10 @@ const STATUSES: readonly string[] = ['draft', 'active'];
 /** Sentinel cuando `loadYamlScalar` no obtiene un mapeo plano con clave `v`. */
 const YAML_SCALAR_MISS: unique symbol = Symbol('yaml-scalar-miss');
 
-/** Carga un valor suelto de `readPairs` como escalar YAML (`v: <raw>`). NUNCA lanza. */
+/** Carga un valor suelto de `readPairs` como escalar YAML (`v: <raw>`). NUNCA lanza.
+ *  Rechaza sin parsear si el raw es demasiado largo o trae anclas/alias YAML (`&`/`*`). */
 function loadYamlScalar(raw: string): unknown {
+    if (raw.length > YAML_SCALAR_RAW_MAX || raw.includes('&') || raw.includes('*')) return YAML_SCALAR_MISS;
     try {
         const doc = yaml.load(`v: ${raw}`);
         if (isPlainObject(doc) && Object.prototype.hasOwnProperty.call(doc, 'v')) return doc.v;
@@ -63,7 +68,8 @@ function yamlStringSlug(raw: string): string | null {
     return typeof value === 'string' ? value : null;
 }
 
-function formatUnknownFieldKey(key: string): string {
+/** Clave truncada para diagnósticos `unknown field` / `duplicate field` (FH-6). */
+function formatFieldKey(key: string): string {
     const shown = key.length > UNKNOWN_FIELD_KEY_MAX ? `${key.slice(0, UNKNOWN_FIELD_KEY_MAX)}…` : key;
     return JSON.stringify(shown);
 }
@@ -115,7 +121,7 @@ function readPairs(block: string): { pairs: Map<string, string>; problems: strin
         // contenido: una línea suelta suele ser la continuación de un valor
         // multilínea, y los diagnósticos no transportan valores de campos.
         if (!m) { problems.push(`frontmatter line ${index + 1} is not a "key: value" pair (multi-line values are not supported)`); continue; }
-        if (pairs.has(m[1])) { problems.push(`duplicate field ${JSON.stringify(m[1])}`); continue; }
+        if (pairs.has(m[1])) { problems.push(`duplicate field ${formatFieldKey(m[1])}`); continue; }
         pairs.set(m[1], m[2]);
     }
     return { pairs, problems, continuations };
@@ -219,7 +225,7 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 
     for (const key of pairs.keys()) {
         if (!(ALLOWED_FIELDS as readonly string[]).includes(key)) {
-            problems.push(`unknown field ${formatUnknownFieldKey(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
+            problems.push(`unknown field ${formatFieldKey(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
         }
     }
 
