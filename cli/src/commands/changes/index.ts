@@ -72,7 +72,7 @@ export function registerChangesCommand(program: Command, deps: ChangesDeps = {})
         .command('list')
         .description('list the changes of the base branch with their Change Record and derived merge/release state')
         .option('--since <window>', '<n>h, <n>d or YYYY-MM-DD (default 24h)')
-        .option('--base <ref>', 'base branch (default: origin/HEAD, main, master)')
+        .option('--base <ref>', 'base branch (default: origin/HEAD, origin/main, origin/master, main, master)')
         .option('--format <format>', 'text | json | voice (default text)')
         .action((opts: ListOpts) => inCwd((cwd) => runChangesList(cwd, opts, deps), () => fail('not-a-git-repo', 'the working directory is not accessible')));
 }

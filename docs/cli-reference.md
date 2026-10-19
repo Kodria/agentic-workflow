@@ -1052,7 +1052,7 @@ awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m
 
 | Flag | Description |
 |---|---|
-| `--base <ref>` | Base branch. Default: `origin/HEAD`, then `main`, then `master`. |
+| `--base <ref>` | Base branch. Default: `origin/HEAD`, then `origin/main`, `origin/master`, `main`, `master`. |
 | `--plan <path>` | Repo-relative path of the plan file to link (`links.plan`); must be an existing regular file inside the repository. |
 | `--issue <url>` | `https` issue URL to link (`links.issue`); credentials in the URL are rejected. |
 | `--model <model>` | Provenance: model identifier (one line, at most 200 characters). |
@@ -1201,7 +1201,7 @@ awm changes list [--since <window>] [--base <ref>] [--format text|json|voice]
 | `--base <ref>` | Base branch, resolved as in `change new`. |
 | `--format <format>` | `text` (default), `json` or `voice`. Invalid: `format-invalid`. |
 
-The command reads the first-parent history of the base ref and the record contents from that ref (never the working tree), so run `git fetch` first if `origin/HEAD` is stale. Each commit in the window is classified, first match wins:
+The command reads the first-parent history of the base ref and the record contents from that ref (never the working tree), so run `git fetch` first if the remote branch is stale. Each commit in the window is classified, first match wins:
 
 | Classification | Meaning |
 |---|---|

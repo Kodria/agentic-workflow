@@ -64,13 +64,34 @@ describe('git functions in a repository', () => {
     test('returns null for a directory that does not exist', () => {
         expect(runGit(path.join(repo.home, 'missing'), ['status'])).toBeNull();
     });
-    test('R3.1 resolves base: explicit, origin/HEAD, main, master', () => {
+    test('R3.1 resolves base: explicit, origin/HEAD, origin/main, origin/master, main, master', () => {
         branch();
         expect(baseOf(repo.root)).toBe('main');
         expect(baseOf(repo.root, 'main')).toBe('main');
         repo.git('update-ref', 'refs/remotes/origin/main', 'main');
         repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
         expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
+    });
+    test('R3.1 without origin/HEAD, origin/main wins over a local main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/main');
+    });
+    test('R3.1 origin/master is used when there is no origin/HEAD nor origin/main, before a local main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/master', 'main');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/master');
+    });
+    test('R3.1 origin/HEAD still wins over origin/main', () => {
+        branch();
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        repo.git('update-ref', 'refs/remotes/origin/trunk', 'main');
+        repo.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk');
+        expect(baseOf(repo.root)).toBe('refs/remotes/origin/HEAD');
+    });
+    test('R3.1 an explicit base never falls back to origin/main', () => {
+        repo.git('update-ref', 'refs/remotes/origin/main', 'main');
+        expect(baseOf(repo.root, 'nope')).toBeNull();
     });
     test('R3.1 an explicit base wins over origin/HEAD and main', () => {
         branch();

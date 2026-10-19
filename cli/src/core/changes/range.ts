@@ -23,7 +23,7 @@ const failure = (code: string, message: string, remedy?: string): { ok: false; f
 
 /**
  * R3.1/R3.2/R3.5: the base ref: `explicitBase` (checked with `isSafeRef` before git sees it: `invalid-input`), else origin/HEAD,
- * main, master; `base-unresolved` when none resolves. The one place that decides it, for `change new`, `change validate` and `changes list`.
+ * origin/main, origin/master, main, master; `base-unresolved` when none resolves. The one place that decides it, for `change new`, `change validate` and `changes list`.
  */
 export function resolveBaseRef(root: string, explicitBase: string | undefined): BaseRef {
     if (explicitBase !== undefined && !isSafeRef(explicitBase)) return failure('invalid-input', `--base "${esc(explicitBase)}" is not a safe git ref`);
@@ -32,7 +32,7 @@ export function resolveBaseRef(root: string, explicitBase: string | undefined): 
 }
 
 /**
- * R3.1/R3.2/R3.5: pins HEAD, then resolves the base (explicit `--base`, else origin/HEAD, main, master) and its merge base with HEAD.
+ * R3.1/R3.2/R3.5: pins HEAD, then resolves the base (explicit `--base`, else origin/HEAD, origin/main, origin/master, main, master) and its merge base with HEAD.
  * An explicit base is checked with `isSafeRef` before git sees it.
  */
 export function resolveRange(root: string, explicitBase: string | undefined): Range {
