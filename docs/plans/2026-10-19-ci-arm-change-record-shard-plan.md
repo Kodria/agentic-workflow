@@ -122,7 +122,7 @@ Owns CI-1..CI-4: one partition boundary. The workflows, the test that pins them,
 
 #### Implementation
 
-- [ ] **Step 1 — RED.** In `native-release-artifacts.test.ts`:
+- [x] **Step 1 — RED.** In `native-release-artifacts.test.ts`:
   - add the constants `HOT_IGNORE` (the current pattern) and `CHANGES_PATTERN = String.raw\`[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]\``;
   - make `assertArmPartition` expect the remainder pattern `${HOT_IGNORE}|${CHANGES_PATTERN}`;
   - make it split out a second job at `  windows-arm-changes:` and assert CI-1 for it;
@@ -130,12 +130,12 @@ Owns CI-1..CI-4: one partition boundary. The workflows, the test that pins them,
   - add the CI-3 path-coverage checks and mutation cases.
 
   Run CMD-PIN → it fails, because the workflows are unchanged.
-- [ ] **Step 2 — Implementation.**
+- [x] **Step 2 — Implementation.**
   - In both workflows, change the remainder's `--testPathIgnorePatterns` to the CI-2 pattern.
   - Add the job `windows-arm-changes` right after `windows-arm-hot`. Copy the hot job verbatim, including the release.yml permissions block. Replace the test step name with `Test Change Record Windows ARM suites` and its run line with the CI-1 command. In release.yml, also add a one-line comment above it: `# The Change Record suites (git-heavy) are the ARM remainder's largest block (#223).`.
   - In release.yml, set `needs: [test, windows-arm-hot, windows-arm-changes] # rojo en cualquier plataforma o shard ARM no publica`.
   - Update D-005 per CI-4.
-- [ ] **Step 3 — GREEN.** Run CMD-PIN, CMD-STRUCTURAL, CMD-TYPECHECK → pass. Locally confirm the counts with `npx jest --listTests` for:
+- [x] **Step 3 — GREEN.** Run CMD-PIN, CMD-STRUCTURAL, CMD-TYPECHECK → pass. Locally confirm the counts with `npx jest --listTests` for:
   - the shard pattern (23);
   - the remainder ignore (355);
   - the two hot files (2);
