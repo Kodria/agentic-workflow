@@ -743,6 +743,29 @@ describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', (
         run('change-record', { base: 'mid' });
         expect(frontmatter(read())).toMatchObject({ type: 'fix', scope: 'core', semver: 'patch', modules: ['cli/src'] });
     });
+    test('a #228-shaped branch (plan commits first, then ci(release) commits) records type ci and scope release', () => {
+        repo.git('checkout', '-q', '-b', 'ci/shard', 'main');
+        repo.commit({ 'docs/plans/p.md': '1' }, 'docs(plans): plan it');
+        repo.commit({ '.github/workflows/ci.yml': '1' }, 'ci(release): shard');
+        repo.commit({ 'docs/plans/p.md': '2' }, 'docs(plans): amend A1');
+        repo.commit({ 'docs/plans/p.md': '3' }, 'docs(plans): amend A2');
+        repo.commit({ '.github/workflows/release.yml': '1' }, 'ci(release): gate it');
+        receiptForHead();
+        expect(run('change-record').code).toBe(0);
+        expect(frontmatter(read())).toMatchObject({ type: 'ci', scope: 'release', semver: 'none', breaking: false, modules: ['.github/workflows', 'docs/plans'] });
+    });
+    test('without origin/HEAD, a current origin/main is the base, not a stale local main', () => {
+        repo.git('checkout', '-q', '-b', 'upstream', 'main');
+        repo.commit({ 'other/u.ts': '1' }, 'feat(other)!: merged upstream');
+        repo.git('update-ref', 'refs/remotes/origin/main', 'upstream');
+        repo.git('checkout', '-q', '-b', 'feat/y', 'upstream');
+        repo.git('branch', '-D', 'upstream');
+        repo.commit({ 'cli/src/m.ts': '1' }, 'fix(core): mine');
+        receiptForHead();
+        expect(run('change-record').code).toBe(0);
+        // Against the stale local main, the upstream breaking feat would be in the range.
+        expect(frontmatter(read())).toMatchObject({ type: 'fix', scope: 'core', semver: 'patch', breaking: false, modules: ['cli/src'] });
+    });
     test('a branch with no commits beyond the base is no-commits', () => {
         repo.git('checkout', '-q', 'main');
         expectFailure(run('ok'), 'no-commits');
