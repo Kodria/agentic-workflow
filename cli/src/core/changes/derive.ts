@@ -84,6 +84,8 @@ const fail = (code: string, message: string): Derived => ({ ok: false, diagnosti
 
 /**
  * Derives from the non-merge commits in mergeBaseSha..HEAD, ignoring commits and files that only touch docs/changes/.
+ * R3.3 amended: `type` and `scope` come from the commits that also touch a path outside docs/plans/ (all of them when no
+ * conventional commit does), while `semver` and `breaking` cover every commit.
  * `mergeBaseSha` must be a full commit id (the output of `mergeBase`); anything else is `invalid-input`.
  */
 export function deriveFields(root: string, mergeBaseSha: string | null): Derived {

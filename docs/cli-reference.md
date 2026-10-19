@@ -1063,7 +1063,7 @@ awm change new <slug> [--base <ref>] [--plan <path>] [--issue <url>] [--model <m
 
 - `type`, `breaking`, `semver`: from the conventional-commit subjects, with the release parser. `semver` is `major` if any commit is breaking, else `minor` if any is `feat`, else `patch` if any is `fix` or `perf`, else `none`. `type` is the highest-impact commit's type (breaking > feat > fix > perf > first commit).
 - `scope`: the most frequent scope, or `null`.
-- Commits that only touch `docs/plans/` (the plan, its amendments and lifecycle marks) do not choose `type` or `scope`, unless every commit is like that; they still count for `semver` and `breaking`.
+- Commits that only touch `docs/plans/` (the plan, its amendments and lifecycle marks) do not choose `type` or `scope`, unless every conventional commit is like that; they still count for `semver` and `breaking`.
 - `modules`: the sorted parent directories of the changed files, cut to three segments (`.` for root files).
 - `verification`: `commit`, `overall`, `sensors` and `receipt_digest` copied from the receipt of HEAD.
 - `provenance`: `agent`, `started_at` and `finished_at` from the branch journal when present; `model` and `session` only from the flags.
