@@ -1,3 +1,8 @@
+## v9.20.3 - 2026-10-19
+
+### Fixes
+- **frontmatter:** harden parse for #225 and #226 (#230)
+
 ## v9.20.2 - 2026-10-19
 
 ### Fixes
