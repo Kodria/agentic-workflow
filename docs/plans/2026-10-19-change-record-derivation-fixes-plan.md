@@ -142,7 +142,7 @@ Owns CRD-1. One resolver decides the base for all three commands, so the order c
 
 #### Implementation
 
-- [ ] **Step 1 — RED.** In `git.test.ts`, next to `R3.1 resolves base: explicit, origin/HEAD, main, master`, add:
+- [x] **Step 1 — RED.** In `git.test.ts`, next to `R3.1 resolves base: explicit, origin/HEAD, main, master`, add:
 
   ```ts
   test('R3.1 without origin/HEAD, origin/main wins over a local main', () => {
@@ -169,7 +169,7 @@ Owns CRD-1. One resolver decides the base for all three commands, so the order c
   ```
 
   Rename the existing test to `R3.1 resolves base: explicit, origin/HEAD, origin/main, origin/master, main, master`. Run CMD-BASE. The first two new tests fail.
-- [ ] **Step 2 — Implementation.** In `git.ts`:
+- [x] **Step 2 — Implementation.** In `git.ts`:
 
   ```ts
   /** R3.1 (amended 2026-10-19): the default base candidates, remote first so a stale local branch is the last resort. */
@@ -177,7 +177,7 @@ Owns CRD-1. One resolver decides the base for all three commands, so the order c
   ```
 
   Loop over `explicit !== undefined ? [explicit] : DEFAULT_BASES`. Update the doc comment of `resolveBaseCommit` and the two in `range.ts` to `--base, then origin/HEAD, origin/main, origin/master, main, master`. Update every `--base` help string that lists the default (grep `origin/HEAD` under `cli/src/commands/change` and `cli/src/commands/changes`). In `docs/cli-reference.md`, update each `--base` row to `Default: \`origin/HEAD\`, then \`origin/main\`, \`origin/master\`, \`main\`, \`master\`.` and change the `changes list` sentence to `run \`git fetch\` first if the remote branch is stale`.
-- [ ] **Step 3 — GREEN.** Run CMD-BASE, CMD-CHANGES, CMD-TYPECHECK → pass. Commit `fix(changes): prefer the remote default branch as the Change Record base`.
+- [x] **Step 3 — GREEN.** Run CMD-BASE, CMD-CHANGES, CMD-TYPECHECK → pass. Commit `fix(changes): prefer the remote default branch as the Change Record base`.
 
 #### Edge cases
 
