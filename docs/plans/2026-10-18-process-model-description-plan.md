@@ -185,6 +185,43 @@ S1 tests: the four plain shapes above are rejected with the new message; `"Use w
 5. S2: the contract paragraph states that the value is validated with a YAML parser. It must be a single-line YAML string (plain or quoted), not empty and at most 1024 characters (code points). Values YAML reads as null, a boolean, a number, a date or a collection are rejected (they go in quotes). The "no reemplaza a un parser YAML" limitation sentence is removed. The structural test replaces `termina en` with `parser YAML`.
 6. Out of scope, filed separately: `findFrontmatterDescription`'s comment regex (`frontmatter.ts`, `/\s+#.*$/`) is quadratic on long whitespace runs. That is pre-existing and reached by discovery for every `SKILL.md`, and after A7 it is no longer on the process-model path.
 
+**Amendment A8 (QA revalidation, 2026-10-19).** The revalidation found one important finding and several minor ones, all with one cause: the value was re-parsed from a synthetic `description: <raw>` line built from `readPairs` output. That output is already JS-trimmed and split on `\s*:\s*`, so it differs from what a runtime reads:
+- NBSP, BOM and U+3000 were stripped (important);
+- `description:value` with no space after the colon passed;
+- a short value with a long comment hit the raw cap.
+
+A8 reads `description` from the whole frontmatter block loaded with js-yaml, which is exactly what a runtime does. It supersedes A7(1.2) and A7(1.3), and corrects A7(3) and A7(6).
+
+1. When the block has a top-level `description` pair, the checks run in this order and stop at the first failure:
+   1. Keep the block-scalar prefix guard on the raw pair value.
+   2. A frontmatter block longer than 65536 characters is rejected with the 1024 message without parsing. This bounds the cost of untrusted input.
+   3. `yaml.load(block)` runs inside try/catch:
+      - a parse error is rejected with `"description" cannot be read: the frontmatter is not valid YAML`;
+      - a result that is not a plain object is rejected with the same message;
+      - otherwise the value under `description` goes through the A7 checks, in A7's order and with A7's messages: null/undefined → empty, non-string → string message, trim-empty → empty, more than 1024 code points → 1024 message.
+   4. A new check comes last. A value containing C0 controls (tab excepted), DEL, C1 controls, U+2028/U+2029, the bidi overrides and isolates U+202A–U+202E and U+2066–U+2069, or a lone surrogate (`!value.isWellFormed()`) is rejected with `"description" must not contain control, line-break or bidirectional-override characters`. That covers escaped forms such as `"a\nb"`, `"\e[31m"`, `"‮"` and `"\uD800"`.
+   5. The stored value is the YAML string as loaded from the block: untrimmed, with NBSP and BOM preserved.
+   6. A zero-width-space-only value counts as non-empty. That is the documented policy, and a test pins it.
+2. `readPairs` captures the value with `([\s\S]*)` instead of `(.*)`, so a line containing U+2028/U+2029 is still a pair. The new control-character check then rejects it, instead of the misleading multi-line message.
+3. The indented-`awm` diagnostic (A7(3)) needs two things before it fires:
+   - the cheap prefilter (a continuation line that, trimmed, is exactly `awm: process-model`, anchored);
+   - and the whole block, under the same 65536 cap, loading with js-yaml to a plain object whose top-level `awm` is `'process-model'`.
+   A non-model skill that only mentions it is no longer flagged. That covers a mention nested under `metadata:`, inside a block-scalar `description`, or as `  awm: process-model-x`.
+4. Tests to add:
+   - NBSP, BOM and U+3000 preserved;
+   - `description:value` rejected;
+   - a short value with a 20000-character comment accepted;
+   - an escape-heavy valid value (`"` + `\x41`×1024 + `"`) accepted;
+   - the 65536 block boundary;
+   - each control, line-break, bidi and lone-surrogate case rejected;
+   - the ZWSP-only value accepted;
+   - exactly 1024 emoji accepted and 1025 rejected;
+   - the unknown-field message lists `description`;
+   - three negative indented-`awm` cases: nested metadata, block-scalar mention, `process-model-x`;
+   - a discover-level test (`cli/tests/core/process/discover.test.ts`, following its existing isolated-registry pattern with tmp `HOME`/`AWM_HOME`) proving `description` survives parse → discover.
+5. Correction to A7(6): `awm process` discovery still reaches the quadratic regex of #225, through `discoverSkills` → `readFrontmatterDescription` for every `SKILL.md`, before the process parser runs. It stays out of scope here; #225 notes that this path is affected too.
+6. S2: the contract paragraph adds that control characters, line breaks and bidirectional-override characters are rejected. The structural test pins `caracteres de control`.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
