@@ -248,6 +248,28 @@ This recurring class is recorded for `harness-retro`: when the CLI validates a f
    - LRM/RLM/ALM rejected;
    - a ZWSP-only value rejected as empty.
 
+**Amendment A10 (QA round 4 close-out, 2026-10-19; owner chose "cheap fixes + close").** Four QA rounds have converged on the realistic surface:
+- 200k-case differential runs found no mismatch between the stored description and js-yaml;
+- all 473 `.md` files in the repo parse the same as on `origin/main`, apart from the intended changes;
+- both real registry models are byte-identical.
+
+Round 4's remaining findings are esoteric parser-differential cases. The validator is an authoring quality gate, not a security boundary: a registry author already controls the skill's whole body.
+
+1. Fixed: YAML 1.1 line breaks. A frontmatter line containing U+0085, U+2028 or U+2029, comment lines included, is a problem reported by position: `frontmatter line <n> contains a YAML 1.1 line break (NEL, LS or PS)`. That closes the comment-line key smuggling that PyYAML reads and js-yaml does not.
+2. Fixed: a quoted description that YAML folds across a following `#` line. After the A8/A9 checks, the raw pair value is loaded alone as `description: <raw>` in try/catch. If that throws, or gives a different string than the whole-block value, the model is rejected with the block-scalar/multi-line message of A5(3): `"description" must be a single-line string (block scalars are not supported in a process model)`.
+3. Discarded with reasons, recorded in QA:
+   - **Indented-`awm` diagnostic on a non-model** whose YAML is already broken and that nests `metadata.awm: process-model`: a diagnostic on a broken file is acceptable.
+   - **Trailing NBSP after `awm: process-model`:** YAML reads that as a different value, so dropping the model is correct.
+   - **Invisible-only characters outside the A9 sets** (U+3164, U+00AD, variation selectors, the tag block): cosmetic, and no contract clause covers them.
+   - **Moved to a separate issue, because they are pre-existing and shared by every artifact reader:**
+     - `matchFrontmatterBlock` closing on a line that only starts with `---`;
+     - slug-valid `name`/`terminates_to` values that YAML reads as non-strings (`null`, `0x1f`);
+     - unbounded diagnostic size from `readPairs` on huge blocks.
+4. Tests:
+   - an LS/PS/NEL inside a comment line and inside a value line is rejected by position;
+   - `description: "foo` followed by `# bar"` (double and single quote) is rejected with the single-line message;
+   - realistic quoted, plain and commented descriptions stay accepted.
+
 **Shared constraints (every slice):** Work only in `cli/` and `docs/`. Never read or write the real `~/.awm`; these tests are pure string parsing and need no HOME override. Commit after each slice's GREEN with a `fix(process): …` (S1) or `docs(process): …` (S2) subject ending in the session attribution lines. Run commands from the repository root exactly as declared.
 
 <a id="slice-s1"></a>
