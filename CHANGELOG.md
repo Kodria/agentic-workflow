@@ -1,3 +1,8 @@
+## v9.20.4 - 2026-10-20
+
+### Fixes
+- **sensors:** preserve packSelection in status; align doctor needs (#231) (#232)
+
 ## v9.20.3 - 2026-10-19
 
 ### Fixes
