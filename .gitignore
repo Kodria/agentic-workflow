@@ -2,14 +2,16 @@ node_modules
 dist
 coverage
 .env
-.awm
-!.awm/
+# AWM:GITIGNORE:BEGIN
 .awm/*
 !.awm/sensors.json
 !.awm/sensors.baseline.json
+!.awm/profile.json
+!.awm/context-budget.json
 !.awm/context/
 .awm/context/*
 !.awm/context/index.json
+# AWM:GITIGNORE:END
 .agent
 .agents
 skills-lock.json
