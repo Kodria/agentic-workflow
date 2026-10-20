@@ -1,3 +1,8 @@
+## v9.21.0 - 2026-10-20
+
+### Features
+- **core:** canonical .awm gitignore policy (#218) (#233)
+
 ## v9.20.4 - 2026-10-20
 
 ### Fixes
