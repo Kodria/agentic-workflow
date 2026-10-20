@@ -139,7 +139,9 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         const out = initWatch(repo, 'rama');
         expect(out.requiredVerifiers).toEqual(['test']);
         expect(readJournal(repo, 'rama').state!.requiredVerifiers).toEqual(['test']);
-        expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toContain('.awm/');
+        const gi = fs.readFileSync(path.join(repo, '.gitignore'), 'utf8');
+        expect(gi).toContain('# AWM:GITIGNORE:BEGIN');
+        expect(gi).toContain('.awm/*');
         expect(() => initWatch(repo, 'rama')).not.toThrow();   // idempotente
     });
 

@@ -10,6 +10,7 @@ import { acquireLock, releaseLock } from './lock';
 import { verifiedPlanSnapshot } from '../../core/plan/validate';
 import { EXECUTION_IDENTITY_SCHEMA } from '../../core/plan/identity';
 import { secureFs } from '../../core/secure-fs/native-bridge';
+import { upsertAwmGitignore } from '../../core/awm-gitignore';
 
 const MAX_VERIFIER_SCAN_DEPTH = 64;
 const MAX_VERIFIER_SCAN_ENTRIES = 10000;
@@ -54,19 +55,9 @@ export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
     return (['test', 'sensors'] as VerificationKind[]).filter((kind) => kinds.has(kind));
 }
 
-/** El journal es gitignoreado (R1.1): sus escrituras jamas alteran fingerprints. */
+/** El journal es gitignoreado (R1.1): bloque gestionado D-024 / #218. */
 export function ensureJournalGitignored(repoRoot: string): void {
-    const gi = path.join(repoRoot, '.gitignore');
-    let current = '';
-    try {
-        if (fs.lstatSync(gi).isSymbolicLink()) throw new Error('.gitignore must not be a symlink');
-        current = fs.readFileSync(gi, 'utf8');
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    if (!current.split('\n').some((l) => l.trim() === '.awm/' || l.trim() === '.awm')) {
-        fs.writeFileSync(gi, current.length > 0 && !current.endsWith('\n') ? `${current}\n.awm/\n` : `${current}.awm/\n`);
-    }
+    upsertAwmGitignore(repoRoot);
 }
 
 export type WatchPlanInit = { path: string; report: PlanValidationReport };
