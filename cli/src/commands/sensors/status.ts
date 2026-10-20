@@ -232,7 +232,12 @@ function packBoundOnly(manifest: SensorManifestV2 | SensorManifestV3ProjectSenso
         Object.entries(manifest.sensors).filter(([, sensor]) => !isProjectDeclaredSensor(sensor as V3ManifestSensor)),
     ) as SensorManifestV2['sensors'];
     const pack = 'pack' in manifest && typeof manifest.pack === 'string' ? manifest.pack : '';
-    return { schemaVersion: 2, pack, sensors };
+    return {
+        schemaVersion: 2,
+        pack,
+        sensors,
+        ...(manifest.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}),
+    };
 }
 
 /** Live pack sensor ids, or null when the pack cannot be resolved (fail closed). */

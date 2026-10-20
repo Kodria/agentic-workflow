@@ -26,6 +26,7 @@
     "lint": "eslint . --config eslint.config.awm.mjs --cache --format json",
     "depcheck": "depcruise --config .dep-cruiser.awm.js src",
     "test": "jest --runInBand",
+    "test:wait-npm-publication": "node --test ../.github/scripts/wait-npm-publication.test.cjs",
     "start": "ts-node src/index.ts",
     "prerelease": "npm run build",
     "release": "node dist/src/release/index.js",

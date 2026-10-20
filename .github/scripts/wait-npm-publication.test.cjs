@@ -85,6 +85,11 @@ test('release checks visibility before acceptance without rerunning or weakening
   assert.ok(consumer.indexOf('Wait for exact npm artifact installability') >= 0);
   assert.ok(consumer.indexOf('Wait for exact npm artifact installability') < consumer.indexOf('Accept published dashboard'));
   assert.match(consumer, /node \.github\/scripts\/wait-npm-publication\.cjs/);
-  assert.match(workflow, /release:\s*\n\s*needs: \[test, windows-arm-hot\]/);
+  // Same membership as RELEASE_GATE in native-release-artifacts.test.ts — order must not matter.
+  const releaseJob = workflow.slice(workflow.indexOf('\n  release:'), workflow.indexOf('\n  published-doctor-evidence:'));
+  const needsMatch = releaseJob.match(/needs:\s*\[([^\]]+)\]/);
+  assert.ok(needsMatch, 'release job must declare needs');
+  const needs = needsMatch[1].split(',').map((name) => name.trim()).filter(Boolean);
+  assert.deepEqual([...needs].sort(), ['test', 'windows-arm-changes', 'windows-arm-hot']);
   assert.match(workflow, /cancel-in-progress: false/);
 });

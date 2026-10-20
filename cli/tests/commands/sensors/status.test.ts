@@ -286,6 +286,69 @@ describe('computeSensorStatus', () => {
         }
     });
 
+    it('keeps packSelection explicit through status so explicit-opt-in sensors do not false-drift', async () => {
+        // Regression for #231: packBoundOnly used to drop packSelection before
+        // resolveStaticV2Compatibility. Without it, applies() leaves explicit-opt-in
+        // sensors not-applicable and status reports "compatibility drift: initialized
+        // prettier, resolved not-applicable" even though run() (which keeps the field)
+        // would certify the same manifest.
+        const previousHome = process.env.AWM_HOME;
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-home-'));
+        try {
+            process.env.AWM_HOME = home;
+            const registry = path.join(home, 'registries', 'baseline');
+            fs.mkdirSync(path.join(registry, 'sensor-packs', 'js-ts'), { recursive: true });
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+            fs.writeFileSync(path.join(registry, 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify({
+                schemaVersion: 2, name: 'js-ts', description: 'test', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: { format: { description: 'format', detectors: [{ sensor: 'format' }], remedy: { summary: 'Fix format', command: 'awm sensors init --pack js-ts' } } } },
+                sensors: { format: {
+                    applicability: { kind: 'explicit-opt-in' },
+                    variants: [{
+                        id: 'prettier', priority: 10, certifiedRange: '>=3.0.0 <4.0.0',
+                        requirements: { tool: 'prettier', toolRange: '>=3.0.0 <4.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
+                        assets: [], formatter: 'prettier', probe: { kind: 'package-script-present', script: 'format' },
+                        command: { executable: 'prettier', resolution: 'node-modules-bin', args: ['.'] },
+                    }],
+                } },
+            }));
+
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+                devDependencies: { prettier: '^3.0.0' },
+                scripts: { format: 'prettier .' },
+            }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'prettier'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'prettier', 'package.json'), JSON.stringify({ version: '3.3.3' }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', '.bin'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', '.bin', 'prettier'), '#!/bin/sh\nexit 0\n');
+            fs.chmodSync(path.join(tmpDir, 'node_modules', '.bin', 'prettier'), 0o755);
+
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit',
+                sensors: { format: {
+                    enabled: true, variantId: 'prettier',
+                    command: { executable: 'prettier', resolution: 'node-modules-bin', args: ['.'] },
+                    assets: [],
+                    initializedCompatibility: {
+                        state: 'certified', reason: 'range-and-probe', variantId: 'prettier',
+                        toolVersion: '3.3.3', runtimeVersion: process.versions.node,
+                        certifiedRange: '>=3.0.0 <4.0.0', evidence: [],
+                    },
+                } },
+            }));
+
+            const result = await computeSensorStatus(tmpDir);
+            expect(result.checks.format?.detail ?? '').not.toMatch(/compatibility drift/i);
+            expect(result.checks.format).toMatchObject({ ok: true });
+            expect(result.overall).toBe('READY');
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+
     it('marks disabled sensors as ok', async () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
