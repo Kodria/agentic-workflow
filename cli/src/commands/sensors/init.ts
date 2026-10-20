@@ -4,6 +4,7 @@ import { SensorManifest } from './types';
 import { resolvePackSource } from './compatibility/pack-source';
 import { applySensorBootstrap, planSensorBootstrap, type UnresolvedSensor } from './bootstrap';
 import { describeUnresolved } from './unresolved';
+import { upsertAwmGitignore } from '../../core/awm-gitignore';
 
 export type InitOptions = {
     configure?: boolean;
@@ -196,11 +197,16 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         throw new Error(`${plan.reason}: ${plan.remedy}${detail === '' ? '' : ` (${detail})`}`);
     }
     if (plan.kind === 'migrate') throw new Error('initSensors does not migrate existing v2 manifests; run awm sensors bootstrap');
-    if (plan.kind === 'noop') return {
-        // No manifest is written or synthesized here. The compatibility API only
-        // retains its historical result shape for callers that inspect detection.
-        manifest: {} as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'already-configured',
-    };
+    if (plan.kind === 'noop') {
+        // Repair path: existing project `.awm/` should still get the managed block (GI-1 remedy).
+        if (fs.existsSync(path.join(cwd, '.awm'))) upsertAwmGitignore(cwd);
+        return {
+            // No manifest is written or synthesized here. The compatibility API only
+            // retains its historical result shape for callers that inspect detection.
+            manifest: {} as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'already-configured',
+        };
+    }
     applySensorBootstrap(plan);
+    upsertAwmGitignore(cwd);
     return { manifest: plan.manifest as unknown as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'created', ...(plan.unresolved && plan.unresolved.length > 0 ? { unresolved: plan.unresolved } : {}) };
 }

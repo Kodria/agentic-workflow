@@ -1,6 +1,7 @@
 // src/core/diagnostics/checks.ts
 import path from 'path';
 import { HarnessContext, MachineFacts, ProjectFacts, CheckResult, CheckReport, Remedy, ProviderFacts, ProviderCheckState } from './types';
+import { evaluateAwmGitignorePolicy } from '../awm-gitignore';
 
 const cmd = (value: string): Remedy => ({ kind: 'command', value });
 const skillRemedy = (value: string): Remedy => ({ kind: 'skill', value });
@@ -148,6 +149,16 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
     } else {
         out.push({ id: 'project.context', level: 'project', label: 'agent context (CLAUDE.md/AGENTS.md) missing', status: 'warn',
             remedy: skillRemedy('project-context-init') });
+    }
+
+    // project.awm-gitignore — D-024 / #218 (blocking via status missing)
+    const gi = evaluateAwmGitignorePolicy(p.root);
+    if (gi.ok) {
+        out.push({ id: 'project.awm-gitignore', level: 'project', label: '.awm gitignore policy',
+            status: 'ok', detail: gi.detail, remedy: none });
+    } else {
+        out.push({ id: 'project.awm-gitignore', level: 'project', label: '.awm gitignore policy',
+            status: 'missing', detail: gi.detail, remedy: cmd(gi.remedy) });
     }
 
     return out;

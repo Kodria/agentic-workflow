@@ -320,13 +320,10 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
 
     function setUpGreenTrack(): void {
         initCompactWatch(repo, BRANCH);
-        // `initWatch` ESCRIBE `.gitignore` (`.awm/`) pero no lo commitea — un
-        // `.gitignore` sin trackear es en sí mismo un path "untracked" para
-        // `git status --porcelain` (R6.4's chequeo de limpieza no distingue
-        // "sucio de verdad" de "el propio bootstrap del journal"). Sin este
-        // commit, `isWorktreeClean` nunca sería `true` y el freeze jamás
-        // convergería — no por un bug del driver, sino por un repo de test
-        // que nunca terminó su propio setup.
+        // `initWatch` upserts the managed `# AWM:GITIGNORE` block but does not
+        // commit it — an untracked/modified `.gitignore` keeps the worktree
+        // dirty for R6.4's clean check. Commit the bootstrap side-effect so
+        // freeze can converge.
         git(repo, 'add', '.gitignore'); git(repo, 'commit', '-qm', 'gitignore .awm');
         const s = readJournal(repo, BRANCH).state!;
         s.trackContext = { trackId: 'a', taskIds: ['T1'], planDigest: '', baseSha: 'seed', planJournalId: 'j-plan' };
@@ -563,6 +560,13 @@ describe('loop end-to-end: plan (reconcileTracks) + track (Supervisor.tick) cier
     test('reconcileTracks real (plan) + Supervisor.tick real (track), en loop contra dos worktrees reales, cierran request -> drenaje -> persist -> observación -> FROZEN', async () => {
         // --- lado TRACK: registrar el trabajo y drenarlo con un Supervisor REAL ---
         initCompactWatch(trackWorktree, TRACK_BRANCH);
+        // `initWatch` migrates the seeded `.awm/` ignore into the managed
+        // `.awm/*` allowlist block. That (1) dirties `.gitignore` and (2)
+        // un-ignores `.awm/sensors.json`, which then shows up as untracked.
+        // Both must be committed or R6.4's clean-worktree gate never passes
+        // and this loop times out (same class of fixture bug as setUpGreenTrack).
+        git(trackWorktree, 'add', '.gitignore', '.awm/sensors.json');
+        git(trackWorktree, 'commit', '-qm', 'awm gitignore + sensors');
         const ts0 = readJournal(trackWorktree, TRACK_BRANCH).state!;
         ts0.trackContext = { trackId: 'a', taskIds: ['T1'], planDigest: '', baseSha, planJournalId: 'j-plan' };
         writeJournal(trackWorktree, TRACK_BRANCH, ts0);

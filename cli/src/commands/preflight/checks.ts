@@ -14,6 +14,7 @@ import { checkCurrentness } from '../../core/currentness/check';
 import type { CurrentnessReport } from '../../core/currentness/types';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { routingSetupGuidance } from '../../core/model-policy/setup-readiness';
+import { evaluateAwmGitignorePolicy } from '../../core/awm-gitignore';
 
 /**
  * Preflight: can this project be gated at all?
@@ -36,7 +37,7 @@ import { routingSetupGuidance } from '../../core/model-policy/setup-readiness';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness' | 'routing-setup';
+    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness' | 'routing-setup' | 'awm-gitignore';
     ok: boolean;
     /** Informational warning: rendered prominently, but does not degrade the harness. */
     advisory?: boolean;
@@ -497,6 +498,12 @@ function extractHost(remote: string): string | undefined {
  * a PR/MR at all (merge locally, keep the branch as-is), so gating the whole harness on
  * missing tooling here would be wrong. It is FYI, never a blocker.
  */
+function checkAwmGitignore(cwd: string): PreflightCheck {
+    const result = evaluateAwmGitignorePolicy(path.resolve(cwd));
+    if (result.ok) return { id: 'awm-gitignore', ok: true, detail: result.detail };
+    return { id: 'awm-gitignore', ok: false, detail: result.detail, remedy: result.remedy };
+}
+
 function checkHost(cwd: string): PreflightCheck {
     let remote: string;
     try {
@@ -604,6 +611,8 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         // Strict mode is the only path that contacts authoritative npm/Git sources.
         ...(opts.requireCurrent === true ? [checkCompatibility()] : []),
         ...checkRoutingSetup(cwd),
+        // Blocking .awm versioning policy (D-024 / #218).
+        checkAwmGitignore(cwd),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),
