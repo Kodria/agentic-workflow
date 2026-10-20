@@ -1,4 +1,7 @@
 # Issue #231 packSelection status + doctor needs Implementation Plan
+<!-- awm-qa-complete: 2026-10-19 -->
+<!-- awm-docs-complete: 2026-10-19 -->
+<!-- awm-retro-complete: 2026-10-19 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
