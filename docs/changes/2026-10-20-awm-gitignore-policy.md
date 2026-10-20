@@ -47,6 +47,8 @@ Se implementó la política D-024 (#218): helper `awm-gitignore` con bloque marc
 
 Suites focalizadas awm-gitignore (core, sensors init, watch init, diagnostics, preflight) 14 tests en verde; typecheck/lint; `awm sensors run` overall pass con receipt en `14378a4e`; Track A PASS; Track B findings corregidos (bloque incompleto, wiring sensors/doctor).
 
+CI follow-up (#233): `tests/core/ledger/gitignore.test.ts` accepts D-024 `.awm/*`; e2e `track-freeze` commits managed `.gitignore` + `.awm/sensors.json` after `initWatch` so R6.4 clean-worktree can converge. Local: both suites green (12 tests).
+
 ## Qué falta validar
 
 Los tres criterios de aceptación del plan contra el CLI publicado tras el release (init escribe el bloque; preflight/doctor blocking con remedio; D-024 en el tree publicado).
