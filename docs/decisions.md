@@ -28,6 +28,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-021](#d-021) | 2026-08-18 | AWM se licencia bajo Apache-2.0; la marca queda fuera del grant | Vigente |
 | [D-022](#d-022) | 2026-08-19 | Un cambio de metadata publicada se titula `fix:`, y CI puede forzar el bump | Vigente |
 | [D-023](#d-023) | 2026-09-29 | Custodia durable (`awm watch`) suspendida para todos los providers | Vigente |
+| [D-024](#d-024) | 2026-10-20 | Qué se versiona bajo `.awm/` (bloque gestionado en `.gitignore`) | Vigente |
 
 ---
 
@@ -589,3 +590,38 @@ opt-in.
   (solo en el harness). Los operadores no setean esa variable.
 - Cuando se retome routing/custody, se levanta la suspensión en
   `cli/src/core/journal/durable-custody.ts` y se revalida el camino.
+
+## D-024
+
+**Política canónica de qué se versiona bajo `.awm/`.**
+
+La carpeta `.awm/` del proyecto mezcla config compartida y estado runtime local.
+Sin una allowlist explícita, o se commitea journal/ledger (ruido, conflictos,
+fingerprints) o un `.awm/` bare ignora la config que el equipo necesita.
+
+**Versionar (commit-able):**
+
+- `.awm/sensors.json`
+- `.awm/sensors.baseline.json`
+- `.awm/context/index.json`
+- `.awm/profile.json`
+- `.awm/context-budget.json`
+
+**Local (ignorado / no trackeado):**
+
+- `.awm/journal/`
+- `.awm/ledger/`
+- `.awm/evidence/`
+- `.awm/track.json`
+- `.awm/sensors/runs/`
+- cualquier otra ruta bajo `.awm/` que no esté en la lista versionada
+
+**Implica:**
+
+- Un bloque marcado `# AWM:GITIGNORE:BEGIN` … `# AWM:GITIGNORE:END` en `.gitignore`
+  es la fuente git-facing; lo escriben `awm sensors init` y `awm watch init`
+  (`cli/src/core/awm-gitignore.ts`).
+- `awm doctor` y `awm preflight` fallan (blocking) si hay runtime trackeado o
+  config versionada ignorada / bloque ausente, y proponen remedio
+  (regenerar bloque y/o `git rm --cached`).
+- Alineado con `RUNTIME_STATE_EXCLUDES` en change-record dirty detection.
