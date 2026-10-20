@@ -19,16 +19,19 @@ describe('awm-gitignore managed block', () => {
     });
 
     it('renders the canonical managed block with versioned allowlist entries', () => {
-        const block = renderManagedBlock();
-        expect(block).toContain(AWM_GITIGNORE_BEGIN);
-        expect(block).toContain(AWM_GITIGNORE_END);
-        expect(block).toContain('.awm/*');
-        expect(block).toContain('!.awm/sensors.json');
-        expect(block).toContain('!.awm/sensors.baseline.json');
-        expect(block).toContain('!.awm/profile.json');
-        expect(block).toContain('!.awm/context-budget.json');
-        expect(block).toContain('!.awm/context/');
-        expect(block).toContain('!.awm/context/index.json');
+        expect(renderManagedBlock()).toBe([
+            AWM_GITIGNORE_BEGIN,
+            '.awm/*',
+            '!.awm/sensors.json',
+            '!.awm/sensors.baseline.json',
+            '!.awm/profile.json',
+            '!.awm/context-budget.json',
+            '!.awm/context/',
+            '.awm/context/*',
+            '!.awm/context/index.json',
+            AWM_GITIGNORE_END,
+            '',
+        ].join('\n'));
     });
 
     it('creates .gitignore with the managed block and is idempotent', () => {

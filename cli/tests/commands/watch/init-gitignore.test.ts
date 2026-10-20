@@ -25,11 +25,8 @@ describe('initWatch managed awm gitignore (GI-2/GI-10)', () => {
         expect(gi).toContain(AWM_GITIGNORE_END);
         expect(gi).toContain('!.awm/sensors.json');
         expect(gi).toContain('!.awm/profile.json');
-        // Bare directory ignore alone is migrated away; managed uses .awm/*
         const lines = gi.split('\n').map((l) => l.trim()).filter(Boolean);
-        const outside = lines.filter((l) => l !== AWM_GITIGNORE_BEGIN && l !== AWM_GITIGNORE_END && !l.startsWith('.awm') && !l.startsWith('!.awm'));
         expect(lines.filter((l) => l === '.awm' || l === '.awm/')).toEqual([]);
-        expect(outside.length).toBeGreaterThanOrEqual(0);
         expect(isAwmGitignored(repo)).toBe(true);
     });
 });

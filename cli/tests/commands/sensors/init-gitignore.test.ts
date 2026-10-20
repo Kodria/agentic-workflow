@@ -1,36 +1,61 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { upsertAwmGitignore, AWM_GITIGNORE_BEGIN } from '../../../src/core/awm-gitignore';
-import { ensureJournalGitignored } from '../../../src/commands/watch/init';
+import { AWM_GITIGNORE_BEGIN } from '../../../src/core/awm-gitignore';
 
-/**
- * Sensors init wiring is covered by asserting the shared ensure entry-point
- * used after bootstrap (and on noop repair) writes the managed block. Full
- * bootstrap fixtures are heavy; GI-1 is the upsert call site + this contract.
- */
-describe('sensors/watch shared ensureJournalGitignored (GI-1/GI-2)', () => {
+jest.mock('../../../src/commands/sensors/bootstrap', () => ({
+    planSensorBootstrap: jest.fn(),
+    applySensorBootstrap: jest.fn(),
+}));
+
+jest.mock('../../../src/commands/sensors/detection', () => ({
+    detectStack: jest.fn(() => ({ pack: 'js-ts', evidence: [] })),
+}));
+
+const { planSensorBootstrap, applySensorBootstrap } = require('../../../src/commands/sensors/bootstrap');
+const { initSensors } = require('../../../src/commands/sensors/init');
+
+describe('initSensors managed awm gitignore (GI-1)', () => {
     let tmp: string;
 
     beforeEach(() => {
         tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sensors-gi-'));
+        jest.clearAllMocks();
     });
     afterEach(() => {
         fs.rmSync(tmp, { recursive: true, force: true });
     });
 
-    it('ensureJournalGitignored upserts the managed block (no bare .awm/ only)', () => {
-        ensureJournalGitignored(tmp);
+    it('upserts the managed block after a successful create', async () => {
+        planSensorBootstrap.mockResolvedValue({
+            kind: 'create',
+            projectRoot: tmp,
+            manifestPath: path.join(tmp, '.awm', 'sensors.json'),
+            dryRun: false,
+            changes: [],
+            manifest: { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} },
+        });
+        applySensorBootstrap.mockImplementation(() => {
+            fs.mkdirSync(path.join(tmp, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmp, '.awm', 'sensors.json'), '{}');
+            return 'created';
+        });
+        await initSensors({ cwd: tmp });
+        expect(applySensorBootstrap).toHaveBeenCalled();
         const gi = fs.readFileSync(path.join(tmp, '.gitignore'), 'utf8');
         expect(gi).toContain(AWM_GITIGNORE_BEGIN);
-        expect(gi).toContain('!.awm/context-budget.json');
-        expect(gi.split('\n').map((l) => l.trim()).filter((l) => l === '.awm' || l === '.awm/')).toEqual([]);
+        expect(gi).toContain('!.awm/profile.json');
     });
 
-    it('is safe to call when a managed block already exists (sensors noop repair)', () => {
-        upsertAwmGitignore(tmp);
-        const before = fs.readFileSync(path.join(tmp, '.gitignore'), 'utf8');
-        ensureJournalGitignored(tmp);
-        expect(fs.readFileSync(path.join(tmp, '.gitignore'), 'utf8')).toBe(before);
+    it('repairs the managed block on noop when .awm/ already exists', async () => {
+        fs.mkdirSync(path.join(tmp, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.awm', 'sensors.json'), '{}');
+        fs.writeFileSync(path.join(tmp, '.gitignore'), '.awm/\n');
+        planSensorBootstrap.mockResolvedValue({ kind: 'noop' });
+        await initSensors({ cwd: tmp });
+        expect(applySensorBootstrap).not.toHaveBeenCalled();
+        const gi = fs.readFileSync(path.join(tmp, '.gitignore'), 'utf8');
+        expect(gi).toContain(AWM_GITIGNORE_BEGIN);
+        expect(gi.split('\n').map((l: string) => l.trim()).filter((l: string) => l === '.awm/')).toEqual([]);
     });
 });

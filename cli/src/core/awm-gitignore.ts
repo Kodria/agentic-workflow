@@ -123,11 +123,21 @@ function isGitRepo(repoRoot: string): boolean {
     return result.ok && result.stdout.trim() === 'true';
 }
 
-function managedBlockPresent(repoRoot: string): boolean {
+function extractManagedInner(text: string): string | null {
+    const begin = text.indexOf(AWM_GITIGNORE_BEGIN);
+    const end = text.indexOf(AWM_GITIGNORE_END);
+    if (begin === -1 || end === -1 || end <= begin) return null;
+    return text.slice(begin + AWM_GITIGNORE_BEGIN.length, end).replace(/^\n/, '').replace(/\n$/, '');
+}
+
+function managedBlockComplete(repoRoot: string): boolean {
     const gi = path.join(repoRoot, '.gitignore');
     try {
-        const text = fs.readFileSync(gi, 'utf8');
-        return text.includes(AWM_GITIGNORE_BEGIN) && text.includes(AWM_GITIGNORE_END);
+        const text = fs.readFileSync(gi, 'utf8').replace(/\r\n/g, '\n');
+        const inner = extractManagedInner(text);
+        if (inner === null) return false;
+        const expected = MANAGED_LINES.join('\n');
+        return inner === expected;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
         throw error;
@@ -177,7 +187,7 @@ export function evaluateAwmGitignorePolicy(repoRoot: string): AwmGitignorePolicy
     }
 
     const needsBlock = awmTreePresent(repoRoot) || trackedLocal.length > 0;
-    const missingBlock = needsBlock && !managedBlockPresent(repoRoot);
+    const missingBlock = needsBlock && !managedBlockComplete(repoRoot);
 
     if (trackedLocal.length === 0 && ignoredVersioned.length === 0 && !missingBlock) {
         return { ok: true, detail: needsBlock ? 'managed .awm gitignore policy satisfied' : 'no .awm project state' };
