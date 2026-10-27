@@ -231,3 +231,67 @@ describe('computeSensorStatus inputs warnings (RF-3.4)', () => {
         ]));
     });
 });
+
+describe('awm sensors status CLI renders inputs warnings (RF-3.4)', () => {
+    let tmpDir: string;
+    let previousHome: string | undefined;
+    let home: string;
+    let previousCwd: string;
+
+    beforeEach(() => {
+        previousCwd = process.cwd();
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-inputs-cli-'));
+        home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-inputs-cli-home-'));
+        previousHome = process.env.AWM_HOME;
+        process.env.AWM_HOME = home;
+        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([]));
+        fs.mkdirSync(path.join(tmpDir, 'node_modules', '.bin'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'node_modules', '.bin', 'eslint'), '');
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            sensors: {
+                custom: {
+                    source: 'project',
+                    enabled: true,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                    formatter: 'exit-code',
+                },
+            },
+        }));
+        process.chdir(tmpDir);
+    });
+
+    afterEach(() => {
+        process.chdir(previousCwd);
+        if (previousHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = previousHome;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    it('prints warning text in human-readable status output without failing READY', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { Command } = require('commander');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { registerSensorsCommand } = require('../../../src/commands/sensors/index');
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+
+        const output = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+        const exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+        try {
+            await program.parseAsync(['node', 'awm', 'sensors', 'status']);
+            const rendered = output.mock.calls.flat().join('\n');
+            expect(rendered).toMatch(/READY/);
+            expect(rendered).toMatch(/custom/);
+            expect(rendered).toMatch(/not cacheable|no effective inputs|lacks inputs/i);
+            expect(exitSpy).not.toHaveBeenCalled();
+        } finally {
+            output.mockRestore();
+            exitSpy.mockRestore();
+        }
+    });
+});

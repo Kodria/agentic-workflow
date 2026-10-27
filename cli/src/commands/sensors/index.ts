@@ -172,6 +172,11 @@ export function registerSensorsCommand(program: Command): void {
             for (const [name, gap] of Object.entries(status.uninitialized ?? {})) {
                 console.log(`  ${pc.yellow('–')}  ${name.padEnd(12)} not initialized: ${gap.state}/${gap.reason}`);
             }
+            // RF-3.4: enabled sensors without effective inputs are not cacheable.
+            // Non-blocking — same attribution pattern as uninitialized; does not exit.
+            for (const warning of status.warnings ?? []) {
+                console.log(`  ${pc.yellow('⚠')}  ${warning.sensor.padEnd(12)} ${warning.detail}`);
+            }
             console.log('');
             if (status.overall !== 'READY') process.exit(1);
         });
