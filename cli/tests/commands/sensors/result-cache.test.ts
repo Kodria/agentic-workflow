@@ -171,4 +171,59 @@ describe('result cache helpers (RF-2.4, RF-2.10, RF-2.15)', () => {
         })).toBeNull();
         void file;
     });
+
+    it('rejects cache reads whose raw would fail canCacheRawResult (RF-2.15/2.4)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcache-uncacheable-'));
+        roots.push(root);
+        const base = {
+            schema: 1 as const,
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: 'sha256:' + 'a'.repeat(64),
+            inputDigest: 'sha256:' + 'b'.repeat(64),
+            originCommit: 'c'.repeat(40),
+            originDirty: false,
+        };
+        const lookup = {
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: base.sensorFingerprint,
+            inputDigest: base.inputDigest,
+        };
+        const plant = (raw: ResultCacheRecord['raw']) => {
+            // Bypass writeResultCache so uncacheable raw can be planted on disk.
+            const dir = path.join(root, '.awm', 'sensors', 'runs');
+            fs.mkdirSync(dir, { recursive: true });
+            const { cacheFileName } = require('../../../src/commands/sensors/result-cache') as typeof import('../../../src/commands/sensors/result-cache');
+            fs.writeFileSync(path.join(dir, cacheFileName(lookup)), JSON.stringify({ ...base, raw }, null, 2) + '\n');
+        };
+
+        plant({ name: 'lint', status: 'fail', failureKind: 'exit-code', errors: [{ message: 'exit 1' }] });
+        expect(readResultCache(root, lookup)).toBeNull();
+
+        plant({ name: 'lint', status: 'fail', failureKind: 'missing-binary', errors: [{ message: 'gone' }] });
+        expect(readResultCache(root, lookup)).toBeNull();
+
+        plant({ name: 'lint', status: 'fail', failureKind: 'findings', errors: [] });
+        expect(readResultCache(root, lookup)).toBeNull();
+
+        plant({
+            name: 'lint',
+            status: 'fail',
+            failureKind: 'findings',
+            errors: [{ message: 'x', file: 'a.ts', rule: 'r' }],
+            incomplete: 'timeout after 1ms',
+        });
+        expect(readResultCache(root, lookup)).toBeNull();
+
+        plant({
+            name: 'lint',
+            status: 'fail',
+            failureKind: 'findings',
+            errors: [{ message: 'x', file: 'a.ts', rule: 'r' }],
+        });
+        expect(readResultCache(root, lookup)).toMatchObject({
+            raw: { status: 'fail', failureKind: 'findings' },
+        });
+    });
 });

@@ -15,6 +15,16 @@ export const PICOMATCH_DIGEST_OPTIONS = { dot: true, posix: true } as const;
 /** Explicit marker contributed when a listed path is gone (ENOENT on lstat). */
 export const ABSENT_MARKER = 'ABSENT';
 
+// Baseline is re-applied every run (RF-2.13) and must never enter the cache
+// digest (RF-2.12), even when authored globs like **/*.json would match it.
+/** Repo-root-relative path of the baseline file (never cache-digest measured). */
+export const CACHE_DIGEST_BASELINE_REL = '.awm/sensors.baseline.json';
+
+function isExcludedFromCacheDigest(repoRel: string): boolean {
+    const norm = repoRel.split(path.sep).join('/');
+    return norm === CACHE_DIGEST_BASELINE_REL || norm.endsWith('/' + CACHE_DIGEST_BASELINE_REL);
+}
+
 const LOCKFILE_NAMES = [
     'package-lock.json',
     'pnpm-lock.yaml',
@@ -179,10 +189,12 @@ export function computeCacheInputDigest(opts: {
     const matchers = opts.inputGlobs.map((glob) => picomatch(glob, { ...PICOMATCH_DIGEST_OPTIONS }));
     const matched = new Set<string>();
     for (const repoRel of listed) {
+        if (isExcludedFromCacheDigest(repoRel)) continue;
         if (matchGlobs(repoRel, packageRootRel === '' ? '' : packageRootRel, matchers)) matched.add(repoRel);
     }
     for (const always of opts.alwaysMeasuredRepoRels) {
         const norm = always.split(path.sep).join('/');
+        if (isExcludedFromCacheDigest(norm)) continue;
         if (listed.includes(norm) || fs.existsSync(path.join(gitRoot, ...norm.split('/')))) {
             matched.add(norm);
         } else {

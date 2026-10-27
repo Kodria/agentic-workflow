@@ -197,7 +197,10 @@ async function runPreparedSlot(
     writeCache: boolean,
 ): Promise<SensorResult> {
     const { execution, cachePlan } = slot;
-    if (cacheEnabled && cachePlan) {
+    // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
+    // be overridden by a prior cache hit.
+    const synthetic = execution.syntheticStatus !== undefined;
+    if (cacheEnabled && cachePlan && !synthetic) {
         const cached = readResultCache(cachePlan.gitRoot, {
             sensorId: execution.name,
             projectKey: cachePlan.projectKey,
@@ -232,7 +235,7 @@ async function runPreparedSlot(
     }
 
     const raw = await executePrepared(execution, projectCwd);
-    if (cacheEnabled && writeCache && cachePlan && canCacheRawResult(raw) && execution.requestedScope === 'full') {
+    if (cacheEnabled && writeCache && cachePlan && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
         const after = computeCacheInputDigest({
             gitRoot: cachePlan.gitRoot,
             packageRoot: projectCwd,

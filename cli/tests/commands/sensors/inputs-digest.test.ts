@@ -129,6 +129,50 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         expect(afterPkg.digest).not.toBe(withBaselinePoison.digest);
     });
 
+    it('hard-excludes .awm/sensors.baseline.json from cache digest even when globs match it (RF-2.12/2.13)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{"pack":"js-ts"}');
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":["old"]}');
+        fs.writeFileSync(path.join(root, 'other.json'), '{"x":1}');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        const before = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(before.ok).toBe(true);
+        if (!before.ok) return;
+        expect(before.matchedPaths).not.toContain('.awm/sensors.baseline.json');
+        expect(before.matchedPaths).toEqual(expect.arrayContaining(['.awm/sensors.json', 'other.json']));
+
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":["new-fingerprint"]}');
+        const afterBaselineEdit = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(afterBaselineEdit.ok).toBe(true);
+        if (!afterBaselineEdit.ok) return;
+        expect(afterBaselineEdit.digest).toBe(before.digest);
+
+        fs.writeFileSync(path.join(root, 'other.json'), '{"x":2}');
+        const afterOther = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(afterOther.ok).toBe(true);
+        if (!afterOther.ok) return;
+        expect(afterOther.digest).not.toBe(before.digest);
+    });
+
     it('never follows symlinks when hashing file contents (RF-2.1 security)', () => {
         const root = initRepo();
         roots.push(root);

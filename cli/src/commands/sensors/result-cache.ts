@@ -213,5 +213,16 @@ export function readResultCache(gitRoot: string, lookup: ResultCacheLookup): Res
         || record.projectKey !== lookup.projectKey
         || record.sensorFingerprint !== lookup.sensorFingerprint
         || record.inputDigest !== lookup.inputDigest) return null;
+    // RF-2.15/2.4: structural validity is not enough — reject uncacheable raw payloads.
+    const asResult: SensorResult = {
+        name: record.raw.name,
+        status: record.raw.status,
+        errors: record.raw.errors,
+        ...(record.raw.failureKind ? { failureKind: record.raw.failureKind } : {}),
+        ...(record.raw.incomplete ? { incomplete: record.raw.incomplete } : {}),
+        ...(record.raw.certification ? { certification: record.raw.certification } : {}),
+        ...(record.raw.skipReason ? { skipReason: record.raw.skipReason } : {}),
+    };
+    if (!canCacheRawResult(asResult)) return null;
     return record;
 }

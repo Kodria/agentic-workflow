@@ -249,4 +249,68 @@ describe('runSensors result cache (RF-2.*, RF-6.*, RF-E.1/E.3)', () => {
         const afterMissing = fs.readdirSync(runs).filter((n) => n.startsWith('cache-'));
         expect(afterMissing).toEqual([]);
     });
+
+    it('keeps cache hits when authored globs match baseline.json; re-applies new baseline without re-exec (RF-2.12/2.13)', async () => {
+        // Broad JSON globs would include .awm/sensors.baseline.json unless the digest hard-excludes it.
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        manifest.sensors.lint.inputs = ['**/*.json', 'src/**/*.ts'];
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+        const pack = JSON.parse(fs.readFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
+        pack.sensors.lint.variants[0].inputs = ['**/*.json', 'src/**/*.ts'];
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify(pack));
+        git(project, ['add', '-A']);
+        git(project, ['commit', '-qm', 'broad-inputs']);
+
+        mockRunStructuredCommand.mockResolvedValue(exited(1, JSON.stringify(eslintFinding)));
+        const { runSensors } = load();
+        const { writeBaseline } = require('../../../src/commands/sensors/baseline');
+        const err = { file: 'src/a.ts', line: 1, column: 1, message: 'no-x', rule: 'no-x' };
+        writeBaseline(project, { lint: [findingFingerprint('lint', err)] });
+
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+
+        // Change baseline content (would bust digest if baseline were measured) and clear acceptance.
+        writeBaseline(project, {});
+        mockRunStructuredCommand.mockClear();
+        const hit = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+        expect(hit.sensors[0]).toMatchObject({ status: 'fail', cached: true, failureKind: 'findings' });
+    });
+
+    it('does not apply cache hits over synthetic skip/disabled prepare results (RF-2.2/2.6/6.1)', async () => {
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalled();
+        expect(fs.readdirSync(path.join(project, '.awm', 'sensors', 'runs')).some((n) => n.startsWith('cache-'))).toBe(true);
+
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        manifest.sensors.lint.enabled = false;
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+
+        mockRunStructuredCommand.mockClear();
+        const skipped = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+        expect(skipped.sensors[0]).toMatchObject({ status: 'skipped', skipReason: 'disabled' });
+        expect(skipped.sensors[0].cached).toBeUndefined();
+    });
+
+    it('treats planted uncacheable raw cache entries as a miss and executes (RF-2.15/2.4)', async () => {
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        const cacheFiles = fs.readdirSync(runs).filter((n) => n.startsWith('cache-'));
+        expect(cacheFiles).toHaveLength(1);
+        const cachePath = path.join(runs, cacheFiles[0]!);
+        const record = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        record.raw = { name: 'lint', status: 'fail', failureKind: 'exit-code', errors: [{ message: 'exit 1' }] };
+        fs.writeFileSync(cachePath, JSON.stringify(record, null, 2) + '\n');
+
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const miss = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalled();
+        expect(miss.sensors[0]).toMatchObject({ status: 'pass' });
+        expect(miss.sensors[0].cached).toBeUndefined();
+    });
 });
