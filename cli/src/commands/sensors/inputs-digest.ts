@@ -15,6 +15,9 @@ export const PICOMATCH_DIGEST_OPTIONS = { dot: true, posix: true } as const;
 /** Explicit marker contributed when a listed path is gone (ENOENT on lstat). */
 export const ABSENT_MARKER = 'ABSENT';
 
+/** Hard ceiling on file content hashed into a digest contribution (QA-6). */
+export const MAX_DIGEST_FILE_BYTES = 1024 * 1024;
+
 // Baseline is re-applied every run (RF-2.13) and must never enter the cache
 // digest (RF-2.12), even when authored globs like **/*.json would match it.
 /** Repo-root-relative path of the baseline file (never cache-digest measured). */
@@ -56,34 +59,55 @@ export type AlwaysMeasuredInput = {
     assetRels: string[];
     configFileRels: string[];
     includePackageJson: boolean;
-    /** Repo-root-relative package directory (`''` for root, `cli` for monorepo). */
+    /** Repo-root-relative package directory (empty string for root, `cli` for monorepo). */
     packageRootRel: string;
 };
+
+/**
+ * Repo-root-relative path safety (QA-2): nonempty POSIX segments, no `.` / `..`,
+ * no absolute / drive / backslash forms.
+ */
+export function isSafeRepoRel(repoRel: string): boolean {
+    if (typeof repoRel !== 'string' || repoRel.length === 0 || repoRel !== repoRel.trim()) return false;
+    if (repoRel.includes('\\') || repoRel.startsWith('/') || /^[A-Za-z]:/.test(repoRel)) return false;
+    return repoRel.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+function requireSafeRepoRel(repoRel: string, label: string): string {
+    const norm = repoRel.split(path.sep).join('/');
+    if (!isSafeRepoRel(norm)) throw new Error(`${label} must be a safe relative path (no ., .., absolute, or escape)`);
+    return norm;
+}
 
 function posixRel(from: string, to: string): string {
     return path.relative(from, to).split(path.sep).join('/');
 }
 
-function joinRepoRel(packageRootRel: string, file: string): string {
-    const cleaned = file.replace(/^\/+/, '');
-    if (!packageRootRel) return cleaned;
-    return `${packageRootRel.replace(/\/+$/, '')}/${cleaned}`;
+function staysUnderRoot(rootReal: string, candidate: string): boolean {
+    const rel = path.relative(rootReal, candidate);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+export function joinRepoRel(packageRootRel: string, file: string): string {
+    if (typeof packageRootRel !== 'string') throw new Error('packageRootRel must be a string');
+    if (typeof file !== 'string' || file.length === 0) throw new Error('file must be a nonempty string');
+    const cleaned = requireSafeRepoRel(file.replace(/^\/+/, ''), 'path');
+    if (packageRootRel === '') return cleaned;
+    const rootRel = requireSafeRepoRel(packageRootRel.replace(/\/+$/, ''), 'packageRootRel');
+    return `${rootRel}/${cleaned}`;
 }
 
 /** Build the always-measured path set for the *cache* digest (RF-2.12). Never includes baseline.json. */
 export function buildAlwaysMeasuredPaths(input: AlwaysMeasuredInput): string[] {
     if (!input || typeof input !== 'object') throw new Error('always-measured input must be an object');
-    if (typeof input.sensorsJsonRel !== 'string' || input.sensorsJsonRel.length === 0) {
-        throw new Error('sensorsJsonRel must be a nonempty string');
-    }
+    if (typeof input.includePackageJson !== 'boolean') throw new Error('includePackageJson must be a boolean');
+    if (typeof input.packageRootRel !== 'string') throw new Error('packageRootRel must be a string');
     if (!Array.isArray(input.assetRels) || !Array.isArray(input.configFileRels)) {
         throw new Error('assetRels and configFileRels must be arrays');
     }
-    if (typeof input.includePackageJson !== 'boolean') throw new Error('includePackageJson must be a boolean');
-    if (typeof input.packageRootRel !== 'string') throw new Error('packageRootRel must be a string');
 
     const out = new Set<string>();
-    out.add(input.sensorsJsonRel.split(path.sep).join('/'));
+    out.add(requireSafeRepoRel(input.sensorsJsonRel.split(path.sep).join('/'), 'sensorsJsonRel'));
     for (const asset of input.assetRels) {
         if (typeof asset !== 'string' || asset.length === 0) throw new Error('asset path must be a nonempty string');
         out.add(joinRepoRel(input.packageRootRel, asset));
@@ -118,44 +142,61 @@ function matchGlobs(repoRel: string, packageRootRel: string, matchers: Array<(p:
     return matchers.some((m) => m(packageRel));
 }
 
-function hashContribution(gitRoot: string, repoRel: string): DigestContribution {
-    const abs = path.join(gitRoot, ...repoRel.split('/'));
-    let st: fs.Stats;
-    try {
-        st = fs.lstatSync(abs);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return {
-                path: repoRel,
-                kind: 'absent',
-                marker: ABSENT_MARKER,
-                hash: crypto.createHash('sha256').update(`ABSENT:${repoRel}`).digest('hex'),
-            };
-        }
-        throw error;
-    }
-    if (st.isSymbolicLink()) {
-        const target = fs.readlinkSync(abs);
-        return {
-            path: repoRel,
-            kind: 'symlink',
-            hash: crypto.createHash('sha256').update(`symlink:${target}`).digest('hex'),
-        };
-    }
-    if (!st.isFile()) {
-        return {
-            path: repoRel,
-            kind: 'absent',
-            marker: ABSENT_MARKER,
-            hash: crypto.createHash('sha256').update(`ABSENT:${repoRel}`).digest('hex'),
-        };
-    }
-    const content = fs.readFileSync(abs);
+function absentContribution(repoRel: string, reason: string): DigestContribution {
     return {
         path: repoRel,
-        kind: 'file',
-        hash: crypto.createHash('sha256').update(content).digest('hex'),
+        kind: 'absent',
+        marker: ABSENT_MARKER,
+        hash: crypto.createHash('sha256').update(`ABSENT:${reason}:${repoRel}`).digest('hex'),
     };
+}
+
+/**
+ * Hash one matched path without following intermediate symlinks (QA-1) and
+ * without reading files that escape gitRoot or exceed the size cap (QA-2/QA-6).
+ */
+function hashContribution(gitRootReal: string, repoRel: string): DigestContribution {
+    if (!isSafeRepoRel(repoRel)) return absentContribution(repoRel, 'unsafe-rel');
+
+    const segments = repoRel.split('/');
+    let current = gitRootReal;
+    for (let i = 0; i < segments.length; i++) {
+        current = path.join(current, segments[i]!);
+        if (!staysUnderRoot(gitRootReal, current)) return absentContribution(repoRel, 'escape');
+
+        let st: fs.Stats;
+        try {
+            st = fs.lstatSync(current);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return absentContribution(repoRel, 'enoent');
+            throw error;
+        }
+
+        const isLast = i === segments.length - 1;
+        if (st.isSymbolicLink()) {
+            // Intermediate symlink → fail closed (never read through redirected parents).
+            if (!isLast) return absentContribution(repoRel, 'intermediate-symlink');
+            const target = fs.readlinkSync(current);
+            return {
+                path: repoRel,
+                kind: 'symlink',
+                hash: crypto.createHash('sha256').update(`symlink:${target}`).digest('hex'),
+            };
+        }
+        if (!isLast) {
+            if (!st.isDirectory()) return absentContribution(repoRel, 'not-dir');
+            continue;
+        }
+        if (!st.isFile()) return absentContribution(repoRel, 'not-file');
+        if (st.size > MAX_DIGEST_FILE_BYTES) return absentContribution(repoRel, 'oversize');
+        const content = fs.readFileSync(current);
+        return {
+            path: repoRel,
+            kind: 'file',
+            hash: crypto.createHash('sha256').update(content).digest('hex'),
+        };
+    }
+    return absentContribution(repoRel, 'empty');
 }
 
 /**
@@ -178,33 +219,45 @@ export function computeCacheInputDigest(opts: {
         throw new Error('alwaysMeasuredRepoRels must be an array of strings');
     }
 
-    const gitRoot = path.resolve(opts.gitRoot);
+    let gitRootReal: string;
+    try {
+        gitRootReal = fs.realpathSync(path.resolve(opts.gitRoot));
+    } catch {
+        return { ok: false, reason: 'git-failed' };
+    }
     const packageRoot = path.resolve(opts.packageRoot);
-    const packageRootRel = posixRel(gitRoot, packageRoot);
-    if (packageRootRel.startsWith('..')) throw new Error('packageRoot must be inside gitRoot');
+    let packageRootReal: string;
+    try {
+        packageRootReal = fs.realpathSync(packageRoot);
+    } catch {
+        packageRootReal = packageRoot;
+    }
+    const packageRootRel = posixRel(gitRootReal, packageRootReal);
+    if (packageRootRel.startsWith('..') || path.isAbsolute(packageRootRel)) {
+        throw new Error('packageRoot must be inside gitRoot');
+    }
+    if (packageRootRel !== '' && !isSafeRepoRel(packageRootRel)) {
+        throw new Error('packageRoot must be a safe relative path under gitRoot');
+    }
 
-    const listed = listGitFiles(gitRoot);
+    const listed = listGitFiles(gitRootReal);
     if (listed === null) return { ok: false, reason: 'git-failed' };
 
     const matchers = opts.inputGlobs.map((glob) => picomatch(glob, { ...PICOMATCH_DIGEST_OPTIONS }));
     const matched = new Set<string>();
     for (const repoRel of listed) {
-        if (isExcludedFromCacheDigest(repoRel)) continue;
-        if (matchGlobs(repoRel, packageRootRel === '' ? '' : packageRootRel, matchers)) matched.add(repoRel);
+        const norm = repoRel.split(path.sep).join('/');
+        if (!isSafeRepoRel(norm) || isExcludedFromCacheDigest(norm)) continue;
+        if (matchGlobs(norm, packageRootRel === '' ? '' : packageRootRel, matchers)) matched.add(norm);
     }
     for (const always of opts.alwaysMeasuredRepoRels) {
         const norm = always.split(path.sep).join('/');
-        if (isExcludedFromCacheDigest(norm)) continue;
-        if (listed.includes(norm) || fs.existsSync(path.join(gitRoot, ...norm.split('/')))) {
-            matched.add(norm);
-        } else {
-            // Still contribute ABSENT for declared always-measured paths that are missing.
-            matched.add(norm);
-        }
+        if (!isSafeRepoRel(norm) || isExcludedFromCacheDigest(norm)) continue;
+        matched.add(norm);
     }
 
     const matchedPaths = [...matched].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    const contributions = matchedPaths.map((p) => hashContribution(gitRoot, p));
+    const contributions = matchedPaths.map((p) => hashContribution(gitRootReal, p));
     const canonical = contributions.map((c) => `${c.path}\0${c.kind}\0${c.hash}`).join('\n');
     const digest = `sha256:${crypto.createHash('sha256').update(canonical).digest('hex')}`;
     return { ok: true, digest, matchedPaths, contributions };

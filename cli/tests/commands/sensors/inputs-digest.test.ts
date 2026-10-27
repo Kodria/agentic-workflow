@@ -2,11 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import picomatch from 'picomatch/posix';
 import {
     ABSENT_MARKER,
+    MAX_DIGEST_FILE_BYTES,
     PICOMATCH_DIGEST_OPTIONS,
     buildAlwaysMeasuredPaths,
     computeCacheInputDigest,
+    isSafeRepoRel,
 } from '../../../src/commands/sensors/inputs-digest';
 
 function git(cwd: string, args: string[]): string {
@@ -29,10 +32,17 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
     });
 
-    it('documents picomatch options as {dot:true,posix:true} without nocase (RF-1.5/1.6)', () => {
+    it('uses picomatch options that match dotfiles and stay case-sensitive (RF-1.5/1.6)', () => {
+        const withOpts = picomatch('*', { ...PICOMATCH_DIGEST_OPTIONS });
+        expect(withOpts('.env')).toBe(true);
+        expect(withOpts('Env')).toBe(true);
+        // Without dot:true, leading-dot files would not match `*`.
+        expect(picomatch('*', { posix: true, dot: false })('.env')).toBe(false);
+        // Without nocase, Abc and abc are distinct under a case-sensitive pattern.
+        const caseSensitive = picomatch('Abc', { ...PICOMATCH_DIGEST_OPTIONS });
+        expect(caseSensitive('Abc')).toBe(true);
+        expect(caseSensitive('abc')).toBe(false);
         expect(PICOMATCH_DIGEST_OPTIONS).toEqual({ dot: true, posix: true });
-        expect(PICOMATCH_DIGEST_OPTIONS).not.toHaveProperty('nocase');
-        expect((PICOMATCH_DIGEST_OPTIONS as { nocase?: boolean }).nocase).toBeUndefined();
     });
 
     it('enumerates via git ls-files, matches globs with dotfiles, hashes symlink readlink, and marks ABSENT (RF-2.1)', () => {
@@ -227,5 +237,83 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         if (!digest.ok) return;
         expect(digest.matchedPaths).toContain('cli/src/a.ts');
         expect(digest.matchedPaths).not.toContain('other.ts');
+    });
+
+    it('treats intermediate directory symlink escapes as ABSENT and never reads outside secrets (QA-1)', () => {
+        const root = initRepo();
+        roots.push(root);
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-parent-esc-'));
+        roots.push(outside);
+        fs.writeFileSync(path.join(outside, 'secret.ts'), 'OUTSIDE_SECRET_CONTENT');
+        fs.mkdirSync(path.join(root, 'nested'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'nested', 'ok.ts'), 'inside');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+        // Replace parent dir with a symlink that redirects into OUTSIDE.
+        fs.rmSync(path.join(root, 'nested'), { recursive: true, force: true });
+        fs.symlinkSync(outside, path.join(root, 'nested'));
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['nested/**/*.ts'],
+            alwaysMeasuredRepoRels: ['nested/ok.ts'],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(JSON.stringify(digest)).not.toContain('OUTSIDE_SECRET_CONTENT');
+        for (const c of digest.contributions.filter((x) => x.path.startsWith('nested/'))) {
+            expect(c.kind).toBe('absent');
+            expect(c.marker).toBe(ABSENT_MARKER);
+        }
+    });
+
+    it('rejects unsafe repoRel shapes before join (QA-2)', () => {
+        expect(isSafeRepoRel('src/a.ts')).toBe(true);
+        expect(isSafeRepoRel('')).toBe(false);
+        expect(isSafeRepoRel('.')).toBe(false);
+        expect(isSafeRepoRel('..')).toBe(false);
+        expect(isSafeRepoRel('../x')).toBe(false);
+        expect(isSafeRepoRel('/abs')).toBe(false);
+        expect(isSafeRepoRel('a/../b')).toBe(false);
+        expect(isSafeRepoRel('a/./b')).toBe(false);
+        expect(() => buildAlwaysMeasuredPaths({
+            sensorsJsonRel: '../escape/sensors.json',
+            assetRels: [],
+            configFileRels: [],
+            includePackageJson: false,
+            packageRootRel: '',
+        })).toThrow(/relative|contain|safe|escape|\.\./i);
+        expect(() => buildAlwaysMeasuredPaths({
+            sensorsJsonRel: '.awm/sensors.json',
+            assetRels: ['../evil'],
+            configFileRels: [],
+            includePackageJson: false,
+            packageRootRel: 'cli',
+        })).toThrow(/relative|contain|safe|escape|\.\./i);
+    });
+
+    it('caps hashed file size and fail-closes oversized inputs (QA-6)', () => {
+        const root = initRepo();
+        roots.push(root);
+        const big = path.join(root, 'big.ts');
+        const fd = fs.openSync(big, 'w');
+        fs.writeSync(fd, Buffer.alloc(1, 0x61));
+        fs.ftruncateSync(fd, MAX_DIGEST_FILE_BYTES + 1);
+        fs.closeSync(fd);
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'big']);
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        const contrib = digest.contributions.find((c) => c.path === 'big.ts');
+        expect(contrib?.kind).toBe('absent');
+        expect(contrib?.marker).toBe(ABSENT_MARKER);
     });
 });

@@ -5,11 +5,13 @@ import {
     canCacheRawResult,
     computeSensorFingerprint,
     readResultCache,
+    toCacheRaw,
     writeResultCache,
     type ResultCacheRecord,
 } from '../../../src/commands/sensors/result-cache';
 import type { SensorResult } from '../../../src/commands/sensors/types';
-import { interpretResult } from '../../../src/commands/sensors/result';
+import { applyBaseline, interpretResult } from '../../../src/commands/sensors/result';
+import { fingerprint as findingFingerprint } from '../../../src/commands/sensors/baseline';
 import { exited, ok, spawnFailed } from './exec-fixtures';
 
 function prepared(overrides: Record<string, unknown> = {}) {
@@ -225,5 +227,41 @@ describe('result cache helpers (RF-2.4, RF-2.10, RF-2.15)', () => {
         expect(readResultCache(root, lookup)).toMatchObject({
             raw: { status: 'fail', failureKind: 'findings' },
         });
+    });
+
+    it('writeResultCache refuses uncacheable raw; toCacheRaw does not coerce skipped/inconclusive to pass (QA-3)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcache-write-gate-'));
+        roots.push(root);
+        const base = {
+            schema: 1 as const,
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: 'sha256:' + 'a'.repeat(64),
+            inputDigest: 'sha256:' + 'b'.repeat(64),
+            originCommit: 'c'.repeat(40),
+            originDirty: false,
+        };
+        expect(() => writeResultCache(root, {
+            ...base,
+            raw: { name: 'lint', status: 'fail', failureKind: 'exit-code', errors: [{ message: 'exit 1' }] },
+        })).toThrow(/cacheable|refuse|uncacheable|RF-2\.4/i);
+
+        expect(() => toCacheRaw(sampleRaw({ status: 'skipped', skipReason: 'disabled' }))).toThrow(/pass|fail|cache/i);
+        expect(() => toCacheRaw(sampleRaw({ status: 'inconclusive', skipReason: 'timeout' }))).toThrow(/pass|fail|cache/i);
+        expect(toCacheRaw(sampleRaw({ status: 'pass' }))).toMatchObject({ status: 'pass', errors: [] });
+    });
+
+    it('strips failureKind when applyBaseline yields pass (QA-4)', () => {
+        const err = { file: 'a.ts', line: 1, column: 1, message: 'no-x', rule: 'no-x' };
+        const raw: SensorResult = {
+            name: 'lint',
+            status: 'fail',
+            failureKind: 'findings',
+            errors: [err],
+        };
+        const suppressed = applyBaseline(raw, [findingFingerprint('lint', err)]);
+        expect(suppressed.status).toBe('pass');
+        expect(suppressed.failureKind).toBeUndefined();
+        expect(suppressed.errors).toEqual([]);
     });
 });

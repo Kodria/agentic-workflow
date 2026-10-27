@@ -172,5 +172,15 @@ export function applyBaseline(result: SensorResult, accepted: string[] | undefin
     if (result.status === 'skipped' || result.status === 'inconclusive') return result;
     const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
     if (suppressed === 0) return result;
-    return { ...result, errors: newErrors, status: newErrors.length > 0 ? 'fail' : 'pass', newCount: newErrors.length, baselineCount: suppressed };
+    const status = newErrors.length > 0 ? 'fail' as const : 'pass' as const;
+    const { failureKind: _drop, ...rest } = result;
+    return {
+        ...rest,
+        errors: newErrors,
+        status,
+        // failureKind only applies to fail; a baseline-suppressed pass must not keep it (QA-4).
+        ...(status === 'fail' && result.failureKind ? { failureKind: result.failureKind } : {}),
+        newCount: newErrors.length,
+        baselineCount: suppressed,
+    };
 }

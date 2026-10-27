@@ -156,9 +156,16 @@ function cacheProblem(x: unknown): string | null {
 }
 
 export function toCacheRaw(result: SensorResult): ResultCacheRaw {
+    if (!result || typeof result !== 'object') throw new Error('cache raw requires a sensor result');
+    if (result.status !== 'pass' && result.status !== 'fail') {
+        throw new Error(`toCacheRaw refuses non-pass/fail status (${result.status}); only pass|fail may be cached`);
+    }
+    if (!canCacheRawResult(result)) {
+        throw new Error('toCacheRaw refuses uncacheable raw (RF-2.4)');
+    }
     return {
         name: result.name,
-        status: result.status === 'fail' ? 'fail' : 'pass',
+        status: result.status,
         errors: result.errors,
         ...(result.failureKind ? { failureKind: result.failureKind } : {}),
         ...(result.incomplete ? { incomplete: result.incomplete } : {}),
@@ -171,6 +178,18 @@ export function writeResultCache(gitRoot: string, record: ResultCacheRecord): st
     if (typeof gitRoot !== 'string' || gitRoot.length === 0) throw new Error('cache root must be a nonempty string');
     const problem = cacheProblem(record);
     if (problem !== null) throw new Error(`invalid result cache: ${problem}`);
+    const asResult: SensorResult = {
+        name: record.raw.name,
+        status: record.raw.status,
+        errors: record.raw.errors,
+        ...(record.raw.failureKind ? { failureKind: record.raw.failureKind } : {}),
+        ...(record.raw.incomplete ? { incomplete: record.raw.incomplete } : {}),
+        ...(record.raw.certification ? { certification: record.raw.certification } : {}),
+        ...(record.raw.skipReason ? { skipReason: record.raw.skipReason } : {}),
+    };
+    if (!canCacheRawResult(asResult)) {
+        throw new Error('refusing to write uncacheable result cache entry (RF-2.4)');
+    }
     const lookup: ResultCacheLookup = {
         sensorId: record.sensorId,
         projectKey: record.projectKey,
