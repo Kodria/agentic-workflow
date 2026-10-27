@@ -92,31 +92,41 @@ function assetArray(value: unknown, source: unknown, location: string, allowEmpt
  * Validate authored sensor `inputs` globs (RF-1.5).
  * Matching (later digests) uses pinned picomatch with options `{ dot: true, posix: true }`
  * and without `nocase` (paths come from `git ls-files`, already normalized).
- * Supported patterns: `*`, `**`, `?`, character classes. Brace expansion and `!` negation
- * are rejected here so authors never depend on unsupported syntax.
+ * Supported patterns: `*`, `**`, `?`, character classes. Brace expansion, `!` negation,
+ * and parentheses / picomatch extglobs (`@(a|b)`, `+(a)`, `*(a)`, `?(a)`) are rejected
+ * here so authors never depend on unsupported syntax.
+ *
+ * Throws field-scoped Error messages (no "Invalid sensor pack/manifest" prefix) so both
+ * pack and project parsers can soft-isolate or wrap without a misleading product noun.
+ * `source` is accepted for call-site parity with other parsers; it is unused.
  */
-export function parseSensorInputs(value: unknown, source: unknown, location: string): string[] {
-    if (!Array.isArray(value) || value.length === 0) invalid(source, `${location} must be a nonempty array`);
-    return value.map((item, index) => inputGlob(item, source, `${location}[${index}]`));
+export function parseSensorInputs(value: unknown, _source: unknown, location: string): string[] {
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${location} must be a nonempty array`);
+    }
+    return value.map((item, index) => inputGlob(item, `${location}[${index}]`));
 }
 
-function inputGlob(value: unknown, source: unknown, location: string): string {
+function inputGlob(value: unknown, location: string): string {
     if (typeof value !== 'string' || value.trim().length === 0 || /[\0-\x1f\x7f]/.test(value)) {
-        invalid(source, `${location} must be a nonempty single-line string without NUL or control characters`);
+        throw new Error(`${location} must be a nonempty single-line string without NUL or control characters`);
     }
     const parsed = value;
     if (parsed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(parsed) || parsed.startsWith('\\\\')) {
-        invalid(source, `${location} must be a relative glob (absolute paths are invalid)`);
+        throw new Error(`${location} must be a relative glob (absolute paths are invalid)`);
     }
-    if (parsed.includes('\\')) invalid(source, `${location} must use POSIX separators`);
+    if (parsed.includes('\\')) throw new Error(`${location} must use POSIX separators`);
     if (parsed.includes('{') || parsed.includes('}')) {
-        invalid(source, `${location} must not use brace expansion`);
+        throw new Error(`${location} must not use brace expansion`);
     }
     if (parsed.includes('!')) {
-        invalid(source, `${location} must not use negation (!)`);
+        throw new Error(`${location} must not use negation (!)`);
+    }
+    if (parsed.includes('(') || parsed.includes(')')) {
+        throw new Error(`${location} must not use parentheses or picomatch extglobs`);
     }
     if (parsed.split('/').some(part => part === '' || part === '.' || part === '..')) {
-        invalid(source, `${location} must be a contained relative glob (no empty, ., or .. segments)`);
+        throw new Error(`${location} must be a contained relative glob (no empty, ., or .. segments)`);
     }
     return parsed;
 }

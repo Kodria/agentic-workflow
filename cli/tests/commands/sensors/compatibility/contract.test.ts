@@ -355,33 +355,38 @@ describe('sensor pack v2 contract', () => {
         it('rejects closureOnly on a variant (RF-1.7 sensor-level only)', () => {
             const pack = validPack();
             (pack.sensors.lint.variants[0] as Record<string, unknown>).closureOnly = true;
-            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "closureOnly"|closureOnly/);
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "closureOnly"/);
         });
 
         it('rejects inputs on the sensor object (inputs belong on variants)', () => {
             const pack = validPack();
             (pack.sensors.lint as Record<string, unknown>).inputs = ['**/*.ts'];
-            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "inputs"|inputs/);
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "inputs"/);
         });
 
         it.each([
-            [[''], 'empty|inputs'],
-            [['/abs'], 'absolute|inputs'],
-            [['has\u0000nul'], 'NUL|control|nonempty|single-line|inputs'],
-            [['../escape'], 'escape|contained|relative|\\.\\.|inputs'],
-            [['src/{a,b}.ts'], '\\{|brace|invalid|inputs'],
-            [['!negated.ts'], '!|negation|invalid|inputs'],
-            [[], 'nonempty array|inputs'],
+            [[''], /nonempty single-line/],
+            [['/abs'], /absolute paths are invalid/],
+            [['has\u0000nul'], /NUL or control/],
+            [['../escape'], /contained relative glob/],
+            [['src/{a,b}.ts'], /brace expansion/],
+            [['!negated.ts'], /negation/],
+            [[], /must be a nonempty array/],
+            [['@(a|b).ts'], /extglob|parentheses/],
+            [['+(a).ts'], /extglob|parentheses/],
+            [['*(a).ts'], /extglob|parentheses/],
+            [['?(a).ts'], /extglob|parentheses/],
+            [['(a|b).ts'], /extglob|parentheses/],
         ])('rejects invalid variant inputs %j', (inputs, reason) => {
             const pack = validPack();
             (pack.sensors.lint.variants[0] as Record<string, unknown>).inputs = inputs;
-            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(new RegExp(reason, 'i'));
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(reason);
         });
 
         it('rejects non-boolean sensor closureOnly', () => {
             const pack = validPack();
             (pack.sensors.lint as Record<string, unknown>).closureOnly = 1;
-            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/closureOnly/);
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/closureOnly must be a boolean/);
         });
     });
 });

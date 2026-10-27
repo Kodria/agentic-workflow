@@ -503,19 +503,24 @@ describe('sensor manifest contract', () => {
         });
 
         it.each([
-            [[''], 'empty'],
-            [['/abs/path'], 'absolute'],
-            [['C:/windows'], 'absolute'],
-            [['has\u0000nul'], 'NUL|control|nonempty|single-line'],
-            [['../escape'], 'escape|contained|relative|\\.\\.'],
-            [['foo/../bar'], 'escape|contained|relative|\\.\\.'],
-            [['a{b,c}'], '\\{|brace|invalid'],
-            [['!negated'], '!|negation|invalid'],
-            [['path/with!bang'], '!|negation|invalid'],
-            [[], 'nonempty array|must be'],
+            [[''], /sensors\.custom\.inputs\[0\] must be a nonempty single-line/],
+            [['/abs/path'], /sensors\.custom\.inputs\[0\].*absolute paths are invalid/],
+            [['C:/windows'], /sensors\.custom\.inputs\[0\].*absolute paths are invalid/],
+            [['has\u0000nul'], /sensors\.custom\.inputs\[0\].*NUL or control/],
+            [['../escape'], /sensors\.custom\.inputs\[0\].*contained relative glob/],
+            [['foo/../bar'], /sensors\.custom\.inputs\[0\].*contained relative glob/],
+            [['a{b,c}'], /sensors\.custom\.inputs\[0\].*brace expansion/],
+            [['!negated'], /sensors\.custom\.inputs\[0\].*negation/],
+            [['path/with!bang'], /sensors\.custom\.inputs\[0\].*negation/],
+            [[], /sensors\.custom\.inputs must be a nonempty array/],
+            [['@(a|b).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['+(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['*(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['?(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['(a|b).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
         ])('rejects invalid project inputs %j', (inputs, reason) => {
             expect(() => parseSensorManifest(v3WithPackAndProject({ inputs }), 'sensors.json'))
-                .toThrow(new RegExp(`sensors\\.custom\\.inputs|${reason}`, 'i'));
+                .toThrow(reason);
         });
 
         it('soft-isolates a project entry with bad inputs while keeping siblings', () => {
@@ -526,9 +531,10 @@ describe('sensor manifest contract', () => {
             expect(soft.invalidEntries).toEqual([
                 expect.objectContaining({
                     name: 'custom',
-                    reason: expect.stringMatching(/sensors\.custom\.inputs/),
+                    reason: expect.stringMatching(/sensors\.custom\.inputs\[0\].*brace expansion/),
                 }),
             ]);
+            expect(soft.invalidEntries[0]?.reason).not.toMatch(/Invalid sensor pack/);
             expect(soft).toMatchObject({
                 kind: 'v3',
                 pack: { sensors: { lint: { variantId: 'eslint-9' } } },
@@ -544,7 +550,7 @@ describe('sensor manifest contract', () => {
             expect(soft.invalidEntries).toEqual([
                 expect.objectContaining({
                     name: 'custom',
-                    reason: expect.stringMatching(/sensors\.custom\.closureOnly/),
+                    reason: expect.stringMatching(/sensors\.custom\.closureOnly must be a boolean/),
                 }),
             ]);
         });
