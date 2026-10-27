@@ -189,7 +189,7 @@ describe('RF-4.5/4.6 schema 2 unmeasured late paths', () => {
     test('schema 1 receipts keep strict late rules (only docs/changes carved out)', () => {
         const head = repo.git('rev-parse', 'HEAD');
         // Force a schema-1 write through the legacy shape helper used by older tests.
-        const { buildReceipt: build, writeReceipt: write, computeReceiptDigest } = require('../../../src/core/changes/receipt') as typeof import('../../../src/core/changes/receipt');
+        const { writeReceipt: write, computeReceiptDigest } = require('../../../src/core/changes/receipt') as typeof import('../../../src/core/changes/receipt');
         const body = {
             schema: 1 as const,
             commit: head,
