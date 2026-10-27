@@ -29,6 +29,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-022](#d-022) | 2026-08-19 | Un cambio de metadata publicada se titula `fix:`, y CI puede forzar el bump | Vigente |
 | [D-023](#d-023) | 2026-09-29 | Custodia durable (`awm watch`) suspendida para todos los providers | Vigente |
 | [D-024](#d-024) | 2026-10-20 | Qué se versiona bajo `.awm/` (bloque gestionado en `.gitignore`) | Vigente |
+| [D-025](#d-025) | 2026-10-27 | Ciclo `--slice` + `closureOnly`; selección parcial nunca es evidencia de cierre | Vigente |
 
 ---
 
@@ -625,3 +626,18 @@ fingerprints) o un `.awm/` bare ignora la config que el equipo necesita.
   config versionada ignorada / bloque ausente, y proponen remedio
   (regenerar bloque y/o `git rm --cached`).
 - Alineado con `RUNTIME_STATE_EXCLUDES` en change-record dirty detection.
+
+## D-025
+
+**Ciclo `--slice` + `closureOnly`: DONE de slice usa `--slice`; QA / docs / finish / Change Record exigen full gate.**
+
+`awm sensors run --slice` corre todo sensor seleccionado habilitado y aplicable cuyo `closureOnly` efectivo no sea true, y omite los `closureOnly` (típicamente `mutation`). Eso acorta el loop de implementación sin cobrar el trabajo de cierre en cada slice. El full gate (sin `--slice`) sigue siendo el único camino que escribe un receipt de Change Record y el que cierran QA, docs y finishing.
+
+**Implica:**
+- Task / slice DONE: `awm sensors run --slice` con `overall: pass` basta, salvo que el plan o la constitución del proyecto endurezcan el gate.
+- QA (`post-implementation-qa`), docs Step 5 (`post-implementation-docs`), finishing y Change Record: full-gate `awm sensors run` (reuse de cache permitido cuando el digest coincide).
+- `--slice`, `--fast`, `--slow` solo, y `--changed` **nunca** son closure evidence para QA, docs, finishing ni Change Record validation.
+- Constituciones pueden endurecer (exigir full gate antes); no pueden debilitar esta regla.
+- El wording de skills vive en el companion plan del registry: `awm-baseline-registry` → `docs/plans/2026-10-27-sensor-execution-optimization-registry-plan.md` (tras publicar el CLI que parsea `inputs` / `closureOnly`).
+
+**Si esto se revierte:** volvería el costo de mutation (u otros `closureOnly`) en cada slice, o se aceptaría evidencia parcial como cierre — ambos fallan el contrato de #236 / RF-5.

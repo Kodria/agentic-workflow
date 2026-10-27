@@ -831,6 +831,14 @@ awm env use <name>
 
 Sensors are deterministic checks (tsc, ESLint, Semgrep, depcheck, …) whose output is LLM-readable. They are configured per repo in `.awm/sensors.json`.
 
+### Inputs and closureOnly
+
+Pack variants and project/pack-bound sensor entries may declare `inputs`: a nonempty list of relative globs (no `..`, no `{}` / `!`) naming the paths that sensor measures. Effective `inputs` come only from the pack declaration or an explicit project override — the CLI never invents globs from `--changed` or stack detection.
+
+When a selected sensor has no effective `inputs`, the CLI always executes it for that selection and never treats a prior result as a cache hit for that sensor. Preflight and `awm sensors status` surface a non-blocking warning that such sensors are not cacheable.
+
+`closureOnly` is a **sensor-level** boolean on the sensor object (like `fast`), not a per-variant field. Effective value = project manifest override ?? pack sensor default ?? `false`. Baseline packs default `mutation` to `closureOnly: true`; `security` may; `test` must not. Projects may override it in `.awm/sensors.json`.
+
 ### Project-declared sensors
 
 A schemaVersion 3 `project-sensors` manifest may mix pack-bound sensors with
@@ -944,10 +952,10 @@ Coverage inspection is portable across native Windows, macOS, and Linux. It open
 
 ### `awm sensors run`
 
-Run the sensors in the manifest. With no flag, runs **all** sensors (the completion gate). The speed flags scope the run:
+Run the sensors in the manifest. With no flag, runs **all** sensors (the full completion gate). Selection flags scope the run; `--slice` is the per-slice DONE gate (see [D-025](decisions.md#d-025)):
 
 ```
-awm sensors run [--fast | --slow | --all] [--changed] [--base <ref>] [--json]
+awm sensors run [--fast | --slow | --all | --slice] [--changed] [--base <ref>] [--no-cache] [--json]
 ```
 
 | Flag | Description |
@@ -955,9 +963,12 @@ awm sensors run [--fast | --slow | --all] [--changed] [--base <ref>] [--json]
 | `--fast` | Fast sensors only (tsc, lint) — what the per-edit hook runs. |
 | `--slow` | Slow sensors only (semgrep, mutation). |
 | `--all` | All sensors regardless of speed. |
+| `--slice` | Every selected enabled applicable sensor whose effective `closureOnly` is not true; skips `closureOnly` sensors with a synthetic `skipped` reason. Makes `isFullSelection` false — **no Change Record receipt**. Combined with `--fast` means the intersection (fast ∧ not closureOnly). `--slice` cannot be combined with `--all` or `--slow` (the CLI refuses those invocations). |
+| `--changed` | Argv-scope opted-in sensors to files changed vs `--base` (not the digest cache). |
+| `--no-cache` | Ignore fingerprint result-cache hits and execute every selected sensor that would otherwise run. Alone, does not make the selection partial for receipt purposes. |
 | `--json` | Machine-readable output. |
 
-> The completion gate is the **full** run (no flag). Do not use `--slow` as the gate — it skips lint/typecheck, where most new findings surface.
+> The completion gate for QA, docs, finishing, and Change Record is the **full** run (no `--slice` / `--fast` xor `--slow` / `--changed`). Do not use `--slow` or `--slice` as that gate — `--slow` skips lint/typecheck; `--slice` skips `closureOnly` sensors and never writes a receipt.
 
 `awm sensors run` never changes what it measures. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. Its one write is the local [sensor receipt](#sensor-receipt) below, a side effect that changes neither stdout nor the exit code. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
 
@@ -983,27 +994,54 @@ The JSON is written before the process exit is set, so non-pass automation can
 still parse the evidence. A baseline can only suppress findings from a sensor
 that produced its own verdict; it never certifies an incomplete execution.
 
+#### Result cache
+
+Operator `awm sensors run` (unless `--no-cache`) may reuse a prior raw result when the sensor has effective `inputs` and the fingerprint + input digest still match. Cache files live under the **git-root** `.awm/sensors/runs/` directory (same tree as receipts; gitignored), not under a nested package-only manifest tree when those differ.
+
+**Cache hit semantics:** a hit restores the stored raw (pre-baseline) result, then the CLI applies the current `.awm/sensors.baseline.json` so reported status can change without re-exec when baseline membership changes. Stdout JSON marks each cached sensor with `cached: true` and provenance: origin commit when known, `originDirty` (true when the entry was written while the worktree was dirty relative to HEAD under the existing dirty rules), input digest, and fingerprint id. The CLI does not claim a tool re-executed when the status was cached.
+
+**Fingerprint and always-measured paths:** the cache key includes a `sensorFingerprint` over effective `variantId` (when pack-bound), command (and changedCommand when present), **live** tool/runtime versions from this run's `liveState` (not solely init-time stamps), `cliVersion`, and the effective `inputs` list. If a required live version cannot be obtained, that sensor neither reads nor writes the cache. The input digest always measures (repo-root normalized): `.awm/sensors.json`; pack assets of the effective variant; `requirements.configFiles` when present; `package.json` when the variant uses package-manager / package-script resolution or declares `packageJsonFields`; and lockfiles present at the package root. `.awm/sensors.baseline.json` is **not** in the cache digest (baseline is re-applied every run) but remains in the validate always-measured set.
+
+**What may be stored (`failureKind`):** the interpreter tags `fail` with `failureKind: 'findings' | 'missing-binary' | 'exit-code'`. Only raw `pass`, or raw `fail` with `failureKind === 'findings'` and at least one finding, is written. `missing-binary`, `exit-code`, inconclusive, skipped, crash/timeout, and findings-less fails are never cached. `--changed` keeps argv scoping and must not write a full-scope cache entry (`requestedScope === 'full'` only). Callers such as `preflight --verify-sensors`, admission `readOnly`, and `awm sensors baseline` / `ignoreBaseline` leave cache use off.
+
 #### Sensor receipt
 
-A clean, complete run on a committed tree leaves a receipt that [`awm change`](#awm-change-new-slug) later binds to a Change Record. The receipt is written to `.awm/sensors/runs/<full-commit-sha>.json` (mode `0600`, replaced atomically), next to a `.gitignore` containing `*` that the command creates with the directory, so `git add -A` can never commit receipts. It holds `schema`, `commit`, `ranAt`, `cliVersion`, `overall`, `sensors` (name to status, sorted by name) and a `digest` that readers recompute; a receipt whose digest or shape does not match is treated as absent (`receipt-invalid`). A `fail` verdict is recorded too; only `overall: pass` satisfies `change validate --strict`.
+A clean, complete **full-gate** run on a committed tree leaves a receipt that [`awm change`](#awm-change-new-slug) later binds to a Change Record. The receipt is written to `.awm/sensors/runs/<full-commit-sha>.json` (mode `0600`, replaced atomically), next to a `.gitignore` containing `*` that the command creates with the directory, so `git add -A` can never commit receipts. New receipts use **schema `2`**: they keep `schema`, `commit`, `ranAt`, `cliVersion`, `overall`, `sensors` (name to status, sorted by name) and a `digest` that readers recompute, and add `measurements` (per cacheable sensor: `inputs`, `packageRootRel`, `inputDigest`, `sensorFingerprint`, `measuredPaths`) plus `alwaysMeasuredPaths` (validate always-measured set, including `.awm/sensors.baseline.json`). Schema `1` remains readable with legacy late-path rules. A receipt whose digest or shape does not match is treated as absent (`receipt-invalid`). Cached passes may appear on a full-gate receipt when every selected sensor is an executed or valid cached `pass` after baseline. A `fail` verdict is recorded too; only `overall: pass` satisfies `change validate --strict`.
+
+**RF-4.6 / Change Record honesty:** if **any** sensor recorded on the verification receipt had no effective authored `inputs` at certification, `change validate` applies **schema-1 late-path** rules for that record (only `docs/changes/` carved out, plus runtime-state exclusions). Schema-2 unmeasured-path relaxation applies only when **every** sensor on the receipt had effective authored `inputs`. Stock pack defaults often leave `test` (and similar) without `inputs`, so a docs-only HEAD advance still needs a new full-gate `awm sensors run` unless the project overrides `inputs` on every sensor. “Seconds after docs-only” requires those project overrides.
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "commit": "a7fb2d2236ab8e38ad7c31e0f5cdaa1bb461e694",
-  "ranAt": "2026-10-17T18:01:47.913Z",
-  "cliVersion": "9.19.0",
+  "ranAt": "2026-10-27T18:01:47.913Z",
+  "cliVersion": "9.21.0",
   "overall": "pass",
   "sensors": {
-    "smoke": "pass"
+    "lint": "pass"
   },
+  "measurements": {
+    "lint": {
+      "inputs": ["src/**/*.ts", "tsconfig.json"],
+      "packageRootRel": "",
+      "inputDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sensorFingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "measuredPaths": [".awm/sensors.json", "package-lock.json", "src/a.ts", "tsconfig.json"]
+    }
+  },
+  "alwaysMeasuredPaths": [
+    ".awm/sensors.baseline.json",
+    ".awm/sensors.json",
+    "package-lock.json",
+    "package.json"
+  ],
   "digest": "sha256:f04ce0c78efd03ae74054fe5ec94edfdd7bd7062231d2d4e7c82fc322af9425a"
 }
 ```
 
 No receipt is written, and stdout and the exit code stay exactly as above, when:
 
-- the selection is partial (`--fast` or `--slow` alone, or `--changed`; `--all` and no flag are full). This case is silent.
+- the selection is partial (`--fast` or `--slow` alone, `--changed`, or `--slice`; `--all` and no flag are full). This case is silent for speed/changed filters; `--slice` never certifies a Change Record receipt.
 - the working tree has any uncommitted or untracked change before the run, apart from the local state under `.awm/sensors/runs`, `.awm/journal`, `.awm/ledger`, `.awm/evidence` and `.awm/track.json`. A modified tracked `.awm/sensors.json` does count.
 - HEAD moved or a tracked file changed during the run. Untracked files that sensors create (build or coverage output) do not prevent it.
 - no sensor ran, every sensor was skipped, the manifest had schema-invalid entries, the manifest is on the `generic` fallback over a real stack (`packDrift`), or the verdict is `not_certified`: a receipt certifies the whole declared sensor set or nothing.
