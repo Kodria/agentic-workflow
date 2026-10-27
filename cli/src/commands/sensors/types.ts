@@ -106,6 +106,20 @@ export type SensorCacheProvenance = {
     sensorFingerprint: string;
 };
 
+/** Measurement attached when a sensor had authored `inputs` (receipt schema 2 / RF-4.3). */
+export type SensorMeasurement = {
+    inputs: string[];
+    inputDigest: string;
+    sensorFingerprint: string;
+    /** Repo-root POSIX paths hashed into `inputDigest` (inputs matches ∪ cache always-measured). */
+    measuredPaths: string[];
+    /**
+     * Validate always-measured paths for this sensor (RF-2.12 validate set), including
+     * baseline.json. Merged into the receipt's `alwaysMeasuredPaths`.
+     */
+    alwaysMeasuredPaths?: string[];
+};
+
 export type SensorResult = {
     name: string;
     /**
@@ -137,6 +151,8 @@ export type SensorResult = {
     /** Set when this status came from the fingerprint result cache (RF-2.2/2.8). */
     cached?: true;
     cacheProvenance?: SensorCacheProvenance;
+    /** Present when the sensor had authored inputs at run time (RF-4.3). */
+    measurement?: SensorMeasurement;
     skipReason?: string;
     /**
      * Which tool version produced this verdict: the registry's frozen one

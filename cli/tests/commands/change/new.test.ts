@@ -22,7 +22,7 @@ let repo: TestRepo;
 const now = () => new Date('2026-10-17T12:00:00.000Z');
 const pass = { overall: 'pass' as const, sensors: [{ name: 'lint', status: 'pass' as const, errors: [] }] };
 const RECEIPT_TIME = '2026-10-17T11:00:00.000Z';
-const REMEDY = 'commit your work, then run awm sensors run';
+const REMEDY = 'commit your work, then run full-gate awm sensors run (cache may reuse unchanged sensors)';
 const REMEDY_SPLIT = 'split the change into smaller ones';
 const REMEDY_SENSORS = 'reduce the sensors listed in .awm/sensors.json (the sensor receipt makes the record too large)';
 

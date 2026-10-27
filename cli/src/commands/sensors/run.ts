@@ -37,7 +37,7 @@ import {
     snapshotUnavailableRemedy,
     type ExclusionPolicy,
 } from './read-only-observation';
-import { buildAlwaysMeasuredPaths, computeCacheInputDigest } from './inputs-digest';
+import { buildAlwaysMeasuredPaths, CACHE_DIGEST_BASELINE_REL, computeCacheInputDigest } from './inputs-digest';
 import {
     canCacheRawResult,
     computeSensorFingerprint,
@@ -48,6 +48,7 @@ import {
 import { cliVersion } from '../../core/cli-version';
 import { gitState } from '../../core/changes/worktree';
 import { repoRoot as resolveGitRoot } from '../../core/changes/git';
+import type { SensorMeasurement } from './types';
 
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
@@ -90,6 +91,9 @@ type CachePlan = {
     inputDigest: string;
     inputGlobs: string[];
     alwaysMeasuredRepoRels: string[];
+    measuredPaths: string[];
+    /** Validate always-measured (cache set ∪ baseline.json), repo-root POSIX. */
+    validateAlwaysMeasuredRepoRels: string[];
 };
 
 type PreparedSlot = {
@@ -179,6 +183,17 @@ function buildCachePlan(args: {
     });
     if (!digest.ok) return null;
     const projectKey = `sha256:${crypto.createHash('sha256').update(`${args.manifestPath}\0${args.packageRoot}`).digest('hex')}`;
+    // Baseline is excluded from the cache digest but required for validate (RF-2.12 / RF-4.5).
+    // It lives next to the manifest: `<packageRoot>/.awm/sensors.baseline.json` as repo-root POSIX.
+    const validateBaselineRel = posixJoinRel(
+        args.gitRoot,
+        path.join(args.packageRoot, '.awm', 'sensors.baseline.json'),
+    );
+    const baselineForValidate = validateBaselineRel === '' ? CACHE_DIGEST_BASELINE_REL : validateBaselineRel;
+    const validateAlwaysMeasuredRepoRels = [...new Set([
+        ...alwaysMeasuredRepoRels,
+        baselineForValidate,
+    ])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     return {
         gitRoot: args.gitRoot,
         projectKey,
@@ -186,6 +201,18 @@ function buildCachePlan(args: {
         inputDigest: digest.digest,
         inputGlobs: args.inputGlobs,
         alwaysMeasuredRepoRels,
+        measuredPaths: digest.matchedPaths,
+        validateAlwaysMeasuredRepoRels,
+    };
+}
+
+function measurementFromPlan(plan: CachePlan): SensorMeasurement {
+    return {
+        inputs: [...plan.inputGlobs],
+        inputDigest: plan.inputDigest,
+        sensorFingerprint: plan.sensorFingerprint,
+        measuredPaths: [...plan.measuredPaths],
+        alwaysMeasuredPaths: [...plan.validateAlwaysMeasuredRepoRels],
     };
 }
 
@@ -222,6 +249,7 @@ async function runPreparedSlot(
                     inputDigest: cached.inputDigest,
                     sensorFingerprint: cached.sensorFingerprint,
                 },
+                measurement: measurementFromPlan(cachePlan),
                 execution: {
                     timeoutMs: execution.timeoutMs,
                     timeoutSource: execution.timeoutSource,
@@ -262,7 +290,10 @@ async function runPreparedSlot(
             }
         }
     }
-    return baseline ? applyBaseline(raw, baseline[execution.name]) : raw;
+    const withMeasurement: SensorResult = cachePlan
+        ? { ...raw, measurement: measurementFromPlan(cachePlan) }
+        : raw;
+    return baseline ? applyBaseline(withMeasurement, baseline[execution.name]) : withMeasurement;
 }
 
 async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveParsedPackCompatibility>> | null> {
@@ -552,8 +583,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
             : execution;
 
+        // Measurement (and optional cache) when the sensor has authored inputs — even under
+        // `--no-cache`, so schema-2 receipts still carry digests (RF-4.3 / RF-2.9).
         let cachePlan: CachePlan | null = null;
-        if (cacheEnabled && parsed.kind !== 'legacy') {
+        if (parsed.kind !== 'legacy') {
             const variantId = (packBoundSensor as PackBoundManifestSensor).variantId;
             const variant = liveSensor?.variants.find((candidate) => candidate.id === variantId)
                 ?? liveSensor?.variants.find((candidate) => candidate.id === liveState?.variantId);
