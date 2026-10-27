@@ -97,6 +97,15 @@ export type ExecutionEvidence = {
     scopeReason?: string;
 };
 
+export type SensorFailureKind = 'findings' | 'missing-binary' | 'exit-code';
+
+export type SensorCacheProvenance = {
+    originCommit?: string;
+    originDirty?: boolean;
+    inputDigest: string;
+    sensorFingerprint: string;
+};
+
 export type SensorResult = {
     name: string;
     /**
@@ -120,6 +129,14 @@ export type SensorResult = {
      */
     status: 'pass' | 'fail' | 'inconclusive' | 'skipped';
     errors: SensorError[];
+    /**
+     * Distinguishes fail modes for cache policy (RF-2.4). Present only when
+     * `status === 'fail'`.
+     */
+    failureKind?: SensorFailureKind;
+    /** Set when this status came from the fingerprint result cache (RF-2.2/2.8). */
+    cached?: true;
+    cacheProvenance?: SensorCacheProvenance;
     skipReason?: string;
     /**
      * Which tool version produced this verdict: the registry's frozen one

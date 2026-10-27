@@ -21,12 +21,13 @@ export interface SensorReceipt {
 
 const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
 const MAX_RECEIPT_BYTES = 1024 * 1024;
-export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean }
+export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean; slice?: boolean }
 
-/** True when the run covers every sensor: `--changed` never does, `--all` always does, `--fast` xor `--slow` is partial. */
+/** True when the run covers every sensor: `--changed`/`--slice` never do, `--all` always does, `--fast` xor `--slow` is partial. */
 export function isFullSelection(opts: SelectionOpts): boolean {
     if (opts === null || typeof opts !== 'object') return false;
     if (opts.changed) return false;
+    if (opts.slice) return false;
     if (opts.all) return true;
     return Boolean(opts.fast) === Boolean(opts.slow);
 }
