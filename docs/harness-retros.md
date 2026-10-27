@@ -1,5 +1,16 @@
 # Harness Retros
 
+
+## 2026-10-27 — Sensor execution optimization (#236)
+
+- **Hallazgos:** QA Track A/B sobre el plan CLI (S1–S5): huecos de cobertura donde `CMD-CACHE` listaba RF-1.4/1.6/E.3 sin `it()` discriminante; bug de lógica — sensores project-declared con `inputs` no adjuntaban `measurements` al recibo (RF-4.6 demote falso); endurecimiento de caché (pass+errors, `raw.name`≠sensorId, globs de measurement sin RF-1.5). Cerrados en `3c6109f2`.
+- **Recurrente:** grupo convergente de firmas “RF listed / untested” (`awm ledger recurring --min 2`).
+- **Curas:** lecciones en `AGENTS.md` (covers≠coverage; cache vs measurements). Tests RED añadidos en el fix de QA.
+- **Descartes (desatendido):** scope de `--cache-location` en `.awm/sensors.json` — chore de admisión local, no RF del plan. Wins de ledger — no generan regla nueva.
+- **Recomendaciones (sin autoridad):** forzar `inputs` de proyecto en este repo para ejercitar RF-4.5 en Change Records propios; registry plan #79 tras npm publish.
+- **Cobertura:** `awm sensors coverage --json` → `overall: gaps` por sensores opcionales no inicializados — no es defecto de #236.
+- **Captura:** journal `not-required` (`proveedor-nativo` desatendido); no se inventa COMPLETE de custodia durable.
+
 ## 2026-10-19 — #225/#226: frontmatter hardening (Package A)
 
 Plan: `docs/plans/2026-10-19-frontmatter-hardening-plan.md` (enmiendas post-QA incluidas).
