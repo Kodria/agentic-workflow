@@ -142,6 +142,25 @@ function matchGlobs(repoRel: string, packageRootRel: string, matchers: Array<(p:
     return matchers.some((m) => m(packageRel));
 }
 
+/**
+ * Whether a repo-root POSIX path matches authored sensor `inputs` globs under
+ * `packageRootRel` (RF-1.5 picomatch options). Used by receipt late-path validate
+ * so new files matching inputs count as measured (RF-4.5), not only the frozen list.
+ */
+export function repoPathMatchesInputGlobs(
+    repoRel: string,
+    packageRootRel: string,
+    inputGlobs: string[],
+): boolean {
+    if (typeof repoRel !== 'string' || typeof packageRootRel !== 'string') return false;
+    if (!Array.isArray(inputGlobs) || inputGlobs.some((g) => typeof g !== 'string')) return false;
+    const norm = repoRel.split(path.sep).join('/');
+    if (!isSafeRepoRel(norm)) return false;
+    if (packageRootRel !== '' && !isSafeRepoRel(packageRootRel)) return false;
+    const matchers = inputGlobs.map((glob) => picomatch(glob, { ...PICOMATCH_DIGEST_OPTIONS }));
+    return matchGlobs(norm, packageRootRel, matchers);
+}
+
 function absentContribution(repoRel: string, reason: string): DigestContribution {
     return {
         path: repoRel,

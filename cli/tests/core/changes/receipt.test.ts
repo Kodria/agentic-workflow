@@ -871,6 +871,7 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
                     },
                     measurement: {
                         inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
                         inputDigest: `sha256:${'d'.repeat(64)}`,
                         sensorFingerprint: `sha256:${'e'.repeat(64)}`,
                         measuredPaths: ['a.txt', '.awm/sensors.json'],
@@ -887,6 +888,7 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
                     },
                     measurement: {
                         inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
                         inputDigest: `sha256:${'f'.repeat(64)}`,
                         sensorFingerprint: `sha256:${'e'.repeat(64)}`,
                         measuredPaths: ['a.txt', '.awm/sensors.json'],
@@ -922,6 +924,7 @@ describe('RF-4.3 receipt schema 2', () => {
                     errors: [],
                     measurement: {
                         inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
                         inputDigest: `sha256:${'1'.repeat(64)}`,
                         sensorFingerprint: `sha256:${'2'.repeat(64)}`,
                         measuredPaths: ['src/a.ts', '.awm/sensors.json', 'package-lock.json'],
@@ -936,6 +939,7 @@ describe('RF-4.3 receipt schema 2', () => {
         expect(v2.measurements).toEqual({
             lint: {
                 inputs: ['src/**/*.ts'],
+                packageRootRel: '',
                 inputDigest: `sha256:${'1'.repeat(64)}`,
                 sensorFingerprint: `sha256:${'2'.repeat(64)}`,
                 measuredPaths: ['.awm/sensors.json', 'package-lock.json', 'src/a.ts'],
@@ -973,6 +977,7 @@ describe('RF-4.3 receipt schema 2', () => {
             measurements: {
                 lint: {
                     inputs: ['src/**'],
+                    packageRootRel: '',
                     inputDigest: `sha256:${'1'.repeat(64)}`,
                     sensorFingerprint: `sha256:${'2'.repeat(64)}`,
                     measuredPaths: ['src/a.ts'],
@@ -1006,6 +1011,7 @@ describe('RF-4.3 receipt schema 2', () => {
             measurements: {
                 lint: {
                     inputs: ['src/**'],
+                    packageRootRel: '',
                     inputDigest: `sha256:${'1'.repeat(64)}`,
                     sensorFingerprint: `sha256:${'2'.repeat(64)}`,
                     measuredPaths: ['src/a.ts'],
@@ -1024,6 +1030,7 @@ describe('RF-4.3 receipt schema 2', () => {
             measurements: {
                 lint: {
                     inputs: ['src/**'],
+                    packageRootRel: '',
                     inputDigest: `sha256:${'1'.repeat(64)}`,
                     sensorFingerprint: `sha256:${'2'.repeat(64)}`,
                     measuredPaths: ['src/a.ts'],

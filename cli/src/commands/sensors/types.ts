@@ -109,6 +109,11 @@ export type SensorCacheProvenance = {
 /** Measurement attached when a sensor had authored `inputs` (receipt schema 2 / RF-4.3). */
 export type SensorMeasurement = {
     inputs: string[];
+    /**
+     * Repo-root-relative package root at certification (`''` for repository root).
+     * Required so late-path validate can rematch `inputs` globs against new files (RF-4.5).
+     */
+    packageRootRel: string;
     inputDigest: string;
     sensorFingerprint: string;
     /** Repo-root POSIX paths hashed into `inputDigest` (inputs matches ∪ cache always-measured). */

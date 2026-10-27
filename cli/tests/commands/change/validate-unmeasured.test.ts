@@ -46,6 +46,7 @@ const FINGERPRINT = `sha256:${'b'.repeat(64)}`;
 function measurement(overrides: Partial<SensorReceiptMeasurement> = {}): SensorReceiptMeasurement {
     return {
         inputs: ['src/**/*.ts'],
+        packageRootRel: 'cli',
         inputDigest: DIGEST,
         sensorFingerprint: FINGERPRINT,
         measuredPaths: ['cli/src/a.ts', '.awm/sensors.json', 'cli/package.json', 'cli/package-lock.json'],
@@ -129,6 +130,23 @@ describe('RF-4.5/4.6 schema 2 unmeasured late paths', () => {
         repo.commit({ 'cli/src/a.ts': '2' }, 'fix: measured');
         expect(codesOf(run())).toContain('code-changed-after-verification');
         expect(diag(run(), 'code-changed-after-verification', undefined).message).toContain('cli/src/a.ts');
+    });
+
+    test('RF-4.5: NEW file matching authored inputs globs after verify fails (not frozen measuredPaths only)', () => {
+        // Certify with measuredPaths frozen to a.ts only; a later matching source must still count.
+        commitRecord('rec', () => writeSchema2Receipt({
+            sensors: ['lint'],
+            measurements: {
+                lint: measurement({
+                    inputs: ['src/**/*.ts'],
+                    packageRootRel: 'cli',
+                    measuredPaths: ['cli/src/a.ts', '.awm/sensors.json', 'cli/package.json', 'cli/package-lock.json'],
+                }),
+            },
+        }));
+        repo.commit({ 'cli/src/brand-new.ts': 'export const x = 1;\n' }, 'feat: new matching source');
+        expect(codesOf(run())).toContain('code-changed-after-verification');
+        expect(diag(run(), 'code-changed-after-verification', undefined).message).toContain('cli/src/brand-new.ts');
     });
 
     test('RF-4.5: sensors.json late fails (always-measured)', () => {

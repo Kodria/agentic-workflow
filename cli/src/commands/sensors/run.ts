@@ -90,6 +90,8 @@ type CachePlan = {
     sensorFingerprint: string;
     inputDigest: string;
     inputGlobs: string[];
+    /** Repo-root-relative package root (`''` at repository root) for receipt rematch. */
+    packageRootRel: string;
     alwaysMeasuredRepoRels: string[];
     measuredPaths: string[];
     /** Validate always-measured (cache set ∪ baseline.json), repo-root POSIX. */
@@ -194,12 +196,14 @@ function buildCachePlan(args: {
         ...alwaysMeasuredRepoRels,
         baselineForValidate,
     ])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const rootRel = packageRootRel === '' ? '' : packageRootRel;
     return {
         gitRoot: args.gitRoot,
         projectKey,
         sensorFingerprint: fingerprint,
         inputDigest: digest.digest,
         inputGlobs: args.inputGlobs,
+        packageRootRel: rootRel,
         alwaysMeasuredRepoRels,
         measuredPaths: digest.matchedPaths,
         validateAlwaysMeasuredRepoRels,
@@ -209,6 +213,7 @@ function buildCachePlan(args: {
 function measurementFromPlan(plan: CachePlan): SensorMeasurement {
     return {
         inputs: [...plan.inputGlobs],
+        packageRootRel: plan.packageRootRel,
         inputDigest: plan.inputDigest,
         sensorFingerprint: plan.sensorFingerprint,
         measuredPaths: [...plan.measuredPaths],

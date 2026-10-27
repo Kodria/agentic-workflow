@@ -250,11 +250,11 @@ const deriveOnce = (run: ValidateRun): Derived => (run.derived ??= deriveFields(
 function lateFiles(run: ValidateRun, commit: string): { count: number; first: string[] } | null {
     if (!run.late.has(commit)) {
         const raw = changedFiles(run.root, commit, run.head);
-        if (raw === undefined || raw === null) {
+        if (raw === null) {
             run.late.set(commit, null);
         } else {
             // RF-4.5/4.6: when a schema-2 receipt covers every sensor with authored inputs,
-            // only measured ∪ always-measured paths count; otherwise schema-1 rules (docs/changes only).
+            // measured ∪ always-measured ∪ inputs-glob rematch count; otherwise schema-1 rules.
             const receiptRead = readReceipt(run.root, commit);
             const receipt = receiptRead.ok ? receiptRead.receipt : null;
             const files = filterLateFilesForReceipt(raw, receipt, RECORD_DIR);

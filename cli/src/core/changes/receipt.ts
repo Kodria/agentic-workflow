@@ -8,12 +8,17 @@ import type { RunOutput, SensorResult } from '../../commands/sensors/types';
 import { MAX_SENSOR_NAME, isCommitId, isOverall, isSensorName, isSensorStatus, type Overall, type SensorStatus } from './types';
 import { esc, isCanonicalIso, isSingleLine } from './text-safety';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from './worktree';
-import { CACHE_DIGEST_BASELINE_REL, isSafeRepoRel } from '../../commands/sensors/inputs-digest';
+import { CACHE_DIGEST_BASELINE_REL, isSafeRepoRel, repoPathMatchesInputGlobs } from '../../commands/sensors/inputs-digest';
 
 /** Per-sensor measurement recorded on a schema-2 receipt (RF-4.3). */
 export interface SensorReceiptMeasurement {
-    /** Effective authored input globs at certification (nonempty). */
+    /** Effective authored input globs at certification (nonempty), relative to `packageRootRel`. */
     inputs: string[];
+    /**
+     * Repo-root-relative package root at certification (`''` for repository root).
+     * Lets validate rematch `inputs` against late paths that were not yet on disk (RF-4.5).
+     */
+    packageRootRel: string;
     inputDigest: string;
     sensorFingerprint: string;
     /** Repo-root POSIX paths that participated in the input digest. */
@@ -87,16 +92,21 @@ function isSha256Digest(v: unknown): v is string {
     return typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v);
 }
 
+function isPackageRootRel(v: unknown): v is string {
+    return typeof v === 'string' && (v === '' || isSafeRepoRel(v));
+}
+
 function measurementProblem(name: string, value: unknown): string | null {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return `measurement for ${name} must be an object`;
     const m = value as Record<string, unknown>;
     const keys = Object.keys(m);
-    if (keys.length !== 4 || !['inputs', 'inputDigest', 'sensorFingerprint', 'measuredPaths'].every((k) => k in m)) {
-        return `measurement for ${name} must have exactly inputs, inputDigest, sensorFingerprint, measuredPaths`;
+    if (keys.length !== 5 || !['inputs', 'packageRootRel', 'inputDigest', 'sensorFingerprint', 'measuredPaths'].every((k) => k in m)) {
+        return `measurement for ${name} must have exactly inputs, packageRootRel, inputDigest, sensorFingerprint, measuredPaths`;
     }
     if (!Array.isArray(m.inputs) || m.inputs.length === 0 || m.inputs.some((g) => typeof g !== 'string' || g.length === 0 || !isSingleLine(g))) {
         return `measurement inputs for ${name} must be a nonempty array of single-line strings`;
     }
+    if (!isPackageRootRel(m.packageRootRel)) return `measurement packageRootRel for ${name} must be '' or a safe repo-root POSIX path`;
     if (!isSha256Digest(m.inputDigest)) return `measurement inputDigest for ${name} must be sha256:<hex>`;
     if (!isSha256Digest(m.sensorFingerprint)) return `measurement sensorFingerprint for ${name} must be sha256:<hex>`;
     if (!Array.isArray(m.measuredPaths) || m.measuredPaths.length > MAX_MEASURED_PATHS) {
@@ -142,10 +152,20 @@ function isRuntimeStatePath(rel: string): boolean {
     return RUNTIME_STATE_EXCLUDES.some((ex) => rel === ex || rel.startsWith(`${ex}/`));
 }
 
+/** True when a late path is measured: frozen set OR rematch against any measurement's inputs (RF-4.5). */
+function latePathIsMeasured(repoRel: string, receipt: SensorReceiptV2, frozen: Set<string>): boolean {
+    if (frozen.has(repoRel)) return true;
+    for (const m of Object.values(receipt.measurements)) {
+        if (repoPathMatchesInputGlobs(repoRel, m.packageRootRel, m.inputs)) return true;
+    }
+    return false;
+}
+
 /**
  * Filter late files for Change Record validate (RF-4.5/4.6). Schema 1 and incomplete
  * schema 2 keep today's strict rule (only `docs/changes/` carved out). Complete schema 2
- * keeps only paths inside the measured ∪ always-measured union (runtime-state never counts).
+ * keeps paths in the frozen measured ∪ always-measured union OR matching authored inputs
+ * globs (so new matching sources after verify are not a false green). Runtime-state never counts.
  */
 export function filterLateFilesForReceipt(
     files: string[],
@@ -157,7 +177,7 @@ export function filterLateFilesForReceipt(
         return outsideRecords;
     }
     const measured = measuredPathSet(receipt);
-    return outsideRecords.filter((f) => !isRuntimeStatePath(f) && measured.has(f));
+    return outsideRecords.filter((f) => !isRuntimeStatePath(f) && latePathIsMeasured(f, receipt, measured));
 }
 
 /**
@@ -184,6 +204,7 @@ export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): strin
     const measurements = Object.fromEntries(
         Object.entries(v2.measurements).sort(([a], [b]) => byName(a, b)).map(([name, m]) => [name, {
             inputs: m.inputs,
+            packageRootRel: m.packageRootRel,
             inputDigest: m.inputDigest,
             sensorFingerprint: m.sensorFingerprint,
             measuredPaths: m.measuredPaths,
@@ -250,10 +271,12 @@ function extractMeasurements(sensors: SensorResult[]): Record<string, SensorRece
         const m = sensor.measurement;
         if (!m || typeof m !== 'object') continue;
         if (!Array.isArray(m.inputs) || m.inputs.length === 0) continue;
+        if (!isPackageRootRel(m.packageRootRel)) continue;
         if (!isSha256Digest(m.inputDigest) || !isSha256Digest(m.sensorFingerprint)) continue;
         if (!Array.isArray(m.measuredPaths) || m.measuredPaths.some((p) => typeof p !== 'string' || !isSafeRepoRel(p))) continue;
         out[sensor.name] = {
             inputs: [...m.inputs],
+            packageRootRel: m.packageRootRel,
             inputDigest: m.inputDigest,
             sensorFingerprint: m.sensorFingerprint,
             measuredPaths: sortedStrings(m.measuredPaths),
