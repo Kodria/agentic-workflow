@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { writeFileAtomic } from '../../core/atomic-file';
-import { esc } from '../../core/changes/text-safety';
+import { esc, isSingleLine } from '../../core/changes/text-safety';
 import type { SensorError, SensorResult } from './types';
 
 const MAX_CACHE_BYTES = 1024 * 1024;
@@ -74,14 +74,18 @@ export function cacheFileName(lookup: ResultCacheLookup): string {
     return `cache-${cacheKeyHash(lookup)}.json`;
 }
 
-/** RF-2.4: store only pass, or fail+findings with errors.length > 0 (and not incomplete). */
+/** RF-2.4: store only clean pass, or fail+findings with errors.length > 0 (and not incomplete). */
 export function canCacheRawResult(result: SensorResult): boolean {
     if (!result || typeof result !== 'object') return false;
     if (result.incomplete) return false;
-    if (result.status === 'pass') return true;
+    if (!Array.isArray(result.errors)) return false;
+    if (result.status === 'pass') {
+        // Planted pass+errors / pass+failureKind must never cache (or read as a hit).
+        return result.errors.length === 0 && result.failureKind === undefined;
+    }
     if (result.status !== 'fail') return false;
     if (result.failureKind !== 'findings') return false;
-    return Array.isArray(result.errors) && result.errors.length > 0;
+    return result.errors.length > 0;
 }
 
 export function computeSensorFingerprint(parts: {
@@ -92,20 +96,22 @@ export function computeSensorFingerprint(parts: {
     inputs: string[];
     toolVersion: string | null | undefined;
     runtimeVersion: string | null | undefined;
-}): string | null {
+}, opts?: { allowMissingLiveVersions?: boolean }): string | null {
     if (!parts || typeof parts !== 'object') throw new Error('fingerprint parts must be an object');
     if (typeof parts.cliVersion !== 'string' || parts.cliVersion.length === 0) throw new Error('cliVersion must be a nonempty string');
     if (!Array.isArray(parts.inputs) || parts.inputs.some((g) => typeof g !== 'string')) throw new Error('inputs must be string[]');
-    if (typeof parts.toolVersion !== 'string' || parts.toolVersion.length === 0) return null;
-    if (typeof parts.runtimeVersion !== 'string' || parts.runtimeVersion.length === 0) return null;
+    const allowMissing = opts?.allowMissingLiveVersions === true;
+    const toolOk = typeof parts.toolVersion === 'string' && parts.toolVersion.length > 0;
+    const runtimeOk = typeof parts.runtimeVersion === 'string' && parts.runtimeVersion.length > 0;
+    if (!allowMissing && (!toolOk || !runtimeOk)) return null;
     const canonical = JSON.stringify({
         variantId: parts.variantId,
         command: parts.command,
         changedCommand: parts.changedCommand ?? null,
         cliVersion: parts.cliVersion,
         inputs: [...parts.inputs].sort(),
-        toolVersion: parts.toolVersion,
-        runtimeVersion: parts.runtimeVersion,
+        toolVersion: toolOk ? parts.toolVersion : null,
+        runtimeVersion: runtimeOk ? parts.runtimeVersion : null,
     });
     return `sha256:${crypto.createHash('sha256').update(canonical).digest('hex')}`;
 }
@@ -113,8 +119,8 @@ export function computeSensorFingerprint(parts: {
 function isSensorError(value: unknown): value is SensorError {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
     const e = value as Record<string, unknown>;
-    if (typeof e.message !== 'string') return false;
-    if (e.file !== undefined && typeof e.file !== 'string') return false;
+    if (typeof e.message !== 'string' || !isSingleLine(e.message)) return false;
+    if (e.file !== undefined && (typeof e.file !== 'string' || !isSingleLine(e.file))) return false;
     if (e.line !== undefined && (!Number.isSafeInteger(e.line) || (e.line as number) < 0)) return false;
     if (e.column !== undefined && (!Number.isSafeInteger(e.column) || (e.column as number) < 0)) return false;
     if (e.rule !== undefined && typeof e.rule !== 'string') return false;
@@ -131,6 +137,10 @@ function validateRaw(raw: unknown): string | null {
         && r.failureKind !== 'findings'
         && r.failureKind !== 'missing-binary'
         && r.failureKind !== 'exit-code') return 'raw.failureKind invalid';
+    if (r.status === 'pass') {
+        if (r.errors.length !== 0) return 'raw.pass must have errors.length===0';
+        if (r.failureKind !== undefined) return 'raw.pass must not carry failureKind';
+    }
     if (r.incomplete !== undefined && typeof r.incomplete !== 'string') return 'raw.incomplete invalid';
     if (r.skipReason !== undefined && typeof r.skipReason !== 'string') return 'raw.skipReason invalid';
     if (r.certification !== undefined
@@ -178,6 +188,9 @@ export function writeResultCache(gitRoot: string, record: ResultCacheRecord): st
     if (typeof gitRoot !== 'string' || gitRoot.length === 0) throw new Error('cache root must be a nonempty string');
     const problem = cacheProblem(record);
     if (problem !== null) throw new Error(`invalid result cache: ${problem}`);
+    if (record.raw.name !== record.sensorId) {
+        throw new Error('refusing to write result cache: raw.name must match sensorId');
+    }
     const asResult: SensorResult = {
         name: record.raw.name,
         status: record.raw.status,
@@ -232,6 +245,7 @@ export function readResultCache(gitRoot: string, lookup: ResultCacheLookup): Res
         || record.projectKey !== lookup.projectKey
         || record.sensorFingerprint !== lookup.sensorFingerprint
         || record.inputDigest !== lookup.inputDigest) return null;
+    if (record.raw.name !== record.sensorId || record.raw.name !== lookup.sensorId) return null;
     // RF-2.15/2.4: structural validity is not enough — reject uncacheable raw payloads.
     const asResult: SensorResult = {
         name: record.raw.name,

@@ -1162,8 +1162,8 @@ Failures (all exit `2`, with a `remedy:` line when there is one):
 | `not-a-git-repo` | Run inside a git repository. |
 | `base-unresolved` | No base found; pass `--base <ref>`. |
 | `no-commits`, `no-conventional-commits` | No commit outside `docs/changes/`, or none with a `type(scope): subject` subject; a type is never invented. |
-| `tree-dirty` | Uncommitted changes outside `docs/changes/`; commit, then run `awm sensors run`. |
-| `receipt-missing`, `receipt-invalid` | No valid receipt for HEAD; commit your work, then run `awm sensors run`. |
+| `tree-dirty` | Uncommitted changes outside `docs/changes/`; commit your work, then run full-gate `awm sensors run` (cache may reuse unchanged sensors). |
+| `receipt-missing`, `receipt-invalid` | No valid receipt for HEAD; commit your work, then run full-gate `awm sensors run` (cache may reuse unchanged sensors). |
 | `record-exists` | A record for that slug exists under any date; use `--refresh`. |
 | `record-missing`, `record-ambiguous`, `record-invalid`, `record-changed` | `--refresh` found no record, several, an unparseable one, or the file changed while it was being refreshed (run again). |
 | `record-too-large` | The record would exceed 65 536 bytes; the remedy names the cause, a change touching too many directories (split it) or a sensor list too large (reduce it). |

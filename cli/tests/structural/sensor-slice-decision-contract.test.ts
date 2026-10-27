@@ -45,8 +45,10 @@ describe('sensor slice decision contract (CMD-DECISION / RF-D.1)', () => {
 
         expect(body).toMatch(/--slice/);
         expect(body).toMatch(/closureOnly/);
+        // DONE of a slice requires `awm sensors run --slice` + overall pass — not a loose
+        // "slice…DONE" / "DONE…--slice" alternation that surviving prose elsewhere could satisfy.
         expect(body).toMatch(
-            /slice[\s\S]{0,200}DONE|DONE[\s\S]{0,120}--slice|task[\s\S]{0,80}--slice|--slice[\s\S]{0,120}(?:task|slice)/i,
+            /(?:Task\s*\/\s*slice|slice)\s+DONE:\s*`awm sensors run --slice`[\s\S]{0,80}overall:\s*`?pass`?/i,
         );
         expect(body).toMatch(
             /(?:full[- ]gate|full run|no --slice)[\s\S]{0,200}(?:QA|docs|finish|Change Record)|(?:QA|docs|finish|Change Record)[\s\S]{0,200}(?:full[- ]gate|full run)/i,

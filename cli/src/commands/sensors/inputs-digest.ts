@@ -271,7 +271,10 @@ export function computeCacheInputDigest(opts: {
     }
     for (const always of opts.alwaysMeasuredRepoRels) {
         const norm = always.split(path.sep).join('/');
-        if (!isSafeRepoRel(norm) || isExcludedFromCacheDigest(norm)) continue;
+        if (!isSafeRepoRel(norm)) {
+            throw new Error(`alwaysMeasuredRepoRels entry must be a safe relative path (no ., .., absolute, or escape): ${norm}`);
+        }
+        if (isExcludedFromCacheDigest(norm)) continue;
         matched.add(norm);
     }
 

@@ -86,6 +86,124 @@ describe('result cache helpers (RF-2.4, RF-2.10, RF-2.15)', () => {
         expect(canCacheRawResult(interpretResult(prepared(), ok()))).toBe(true);
     });
 
+    it('canCacheRawResult / planted pass+errors or pass+failureKind is a miss (not cacheable)', () => {
+        expect(canCacheRawResult(sampleRaw({
+            status: 'pass',
+            errors: [{ message: 'planted finding' }],
+        }))).toBe(false);
+        expect(canCacheRawResult(sampleRaw({
+            status: 'pass',
+            failureKind: 'findings',
+            errors: [],
+        }))).toBe(false);
+        expect(canCacheRawResult(sampleRaw({
+            status: 'pass',
+            failureKind: 'exit-code',
+            errors: [{ message: 'x' }],
+        }))).toBe(false);
+
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcache-pass-errors-'));
+        roots.push(root);
+        const base = {
+            schema: 1 as const,
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: 'sha256:' + 'a'.repeat(64),
+            inputDigest: 'sha256:' + 'b'.repeat(64),
+            originCommit: 'c'.repeat(40),
+            originDirty: false,
+        };
+        const lookup = {
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: base.sensorFingerprint,
+            inputDigest: base.inputDigest,
+        };
+        const { cacheFileName } = require('../../../src/commands/sensors/result-cache') as typeof import('../../../src/commands/sensors/result-cache');
+        const dir = path.join(root, '.awm', 'sensors', 'runs');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, cacheFileName(lookup)),
+            JSON.stringify({
+                ...base,
+                raw: { name: 'lint', status: 'pass', errors: [{ message: 'planted' }] },
+            }, null, 2) + '\n',
+        );
+        expect(readResultCache(root, lookup)).toBeNull();
+        expect(() => writeResultCache(root, {
+            ...base,
+            raw: { name: 'lint', status: 'pass', errors: [{ message: 'planted' }] },
+        })).toThrow(/cacheable|refuse|uncacheable|RF-2\.4|errors|failureKind/i);
+    });
+
+    it('binds raw.name to sensorId on write and read; mismatch refuses write / misses on read', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcache-name-bind-'));
+        roots.push(root);
+        const base = {
+            schema: 1 as const,
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: 'sha256:' + 'a'.repeat(64),
+            inputDigest: 'sha256:' + 'b'.repeat(64),
+            originCommit: 'c'.repeat(40),
+            originDirty: false,
+        };
+        expect(() => writeResultCache(root, {
+            ...base,
+            raw: { name: 'typecheck', status: 'pass', errors: [] },
+        })).toThrow(/name|sensorId|mismatch|bind/i);
+
+        writeResultCache(root, {
+            ...base,
+            raw: { name: 'lint', status: 'pass', errors: [] },
+        });
+        const lookup = {
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: base.sensorFingerprint,
+            inputDigest: base.inputDigest,
+        };
+        const { cacheFileName } = require('../../../src/commands/sensors/result-cache') as typeof import('../../../src/commands/sensors/result-cache');
+        const dir = path.join(root, '.awm', 'sensors', 'runs');
+        const cachePath = path.join(dir, cacheFileName(lookup));
+        const record = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        record.raw.name = 'typecheck';
+        fs.writeFileSync(cachePath, JSON.stringify(record, null, 2) + '\n');
+        expect(readResultCache(root, lookup)).toBeNull();
+    });
+
+    it('constrains cached SensorError message/file to single-line strings', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rcache-error-line-'));
+        roots.push(root);
+        const base = {
+            schema: 1 as const,
+            sensorId: 'lint',
+            projectKey: 'proj',
+            sensorFingerprint: 'sha256:' + 'a'.repeat(64),
+            inputDigest: 'sha256:' + 'b'.repeat(64),
+            originCommit: 'c'.repeat(40),
+            originDirty: false,
+        };
+        expect(() => writeResultCache(root, {
+            ...base,
+            raw: {
+                name: 'lint',
+                status: 'fail',
+                failureKind: 'findings',
+                errors: [{ message: 'bad\nline', file: 'a.ts' }],
+            },
+        })).toThrow(/single.?line|message|errors/i);
+        expect(() => writeResultCache(root, {
+            ...base,
+            raw: {
+                name: 'lint',
+                status: 'fail',
+                failureKind: 'findings',
+                errors: [{ message: 'ok', file: 'a\nts' }],
+            },
+        })).toThrow(/single.?line|file|errors/i);
+    });
+
     it('computeSensorFingerprint returns null without live tool/runtime versions (RF-2.10)', () => {
         expect(computeSensorFingerprint({
             variantId: 'eslint-10',

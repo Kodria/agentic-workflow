@@ -195,6 +195,41 @@ describe('runSensors result cache (RF-2.*, RF-6.*, RF-E.1/E.3)', () => {
         expect(mockRunStructuredCommand).toHaveBeenCalled();
     });
 
+    it('attaches receipt measurements for project-declared sensors with inputs even when cache is disabled (RF-4.6 / RF-2.10)', async () => {
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: null,
+            sensors: {
+                custom: {
+                    source: 'project',
+                    enabled: true,
+                    fast: true,
+                    command: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(0)'] },
+                    formatter: 'exit-code',
+                    inputs: ['src/**/*.ts'],
+                },
+            },
+        }));
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = load();
+        const out = await runSensors({ cwd: project, useCache: true });
+        expect(out.sensors[0]).toMatchObject({
+            name: 'custom',
+            status: 'pass',
+            measurement: expect.objectContaining({
+                inputs: ['src/**/*.ts'],
+                inputDigest: expect.stringMatching(/^sha256:/),
+                sensorFingerprint: expect.stringMatching(/^sha256:/),
+                measuredPaths: expect.arrayContaining(['src/a.ts']),
+            }),
+        });
+        expect(out.sensors[0].cached).toBeUndefined();
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        const cacheFiles = fs.existsSync(runs) ? fs.readdirSync(runs).filter((n) => n.startsWith('cache-')) : [];
+        expect(cacheFiles).toEqual([]);
+    });
+
     it('misses when live tool version changes (RF-2.10 liveState fingerprint)', async () => {
         const { runSensors } = load();
         await runSensors({ cwd: project, useCache: true });
@@ -312,5 +347,130 @@ describe('runSensors result cache (RF-2.*, RF-6.*, RF-E.1/E.3)', () => {
         expect(mockRunStructuredCommand).toHaveBeenCalled();
         expect(miss.sensors[0]).toMatchObject({ status: 'pass' });
         expect(miss.sensors[0].cached).toBeUndefined();
+    });
+
+    it('RF-1.4: sensor without authored inputs never reads or writes cache', async () => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        delete manifest.sensors.lint.inputs;
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+        const pack = JSON.parse(fs.readFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
+        delete pack.sensors.lint.variants[0].inputs;
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify(pack));
+
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        const cacheFiles = fs.existsSync(runs) ? fs.readdirSync(runs).filter((n) => n.startsWith('cache-')) : [];
+        expect(cacheFiles).toEqual([]);
+
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const second = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+        expect(second.sensors[0].cached).toBeUndefined();
+        expect(second.sensors[0].measurement).toBeUndefined();
+    });
+
+    it('RF-1.6: changing the inputs list produces a fingerprint miss and re-executes', async () => {
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        manifest.sensors.lint.inputs = ['src/**/*.ts', 'lib/**/*.ts'];
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+        const pack = JSON.parse(fs.readFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
+        pack.sensors.lint.variants[0].inputs = ['src/**/*.ts', 'lib/**/*.ts'];
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify(pack));
+
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const miss = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+        expect(miss.sensors[0].cached).toBeUndefined();
+    });
+
+    it('RF-E.3: cache hit pass + executed fail → overall is not pass', async () => {
+        const pack = JSON.parse(fs.readFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
+        pack.sensors.typecheck = {
+            fast: true,
+            applicability: { allFiles: ['package.json'] },
+            variants: [{
+                id: 'tsc', priority: 1, certifiedRange: '>=0',
+                requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                assets: ['eslint.config.awm.mjs'], formatter: 'exit-code',
+                probe: { kind: 'package-script-present', script: 'lint' },
+                command: { executable: 'live-tsc', resolution: 'node-modules-bin', args: ['.'] },
+                inputs: ['src/**/*.ts'],
+            }],
+        };
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify(pack));
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        manifest.sensors.typecheck = {
+            enabled: true, fast: true, variantId: 'tsc',
+            command: { executable: 'stale-tsc', resolution: 'node-modules-bin', args: ['.'] },
+            assets: ['eslint.config.awm.mjs'],
+            inputs: ['src/**/*.ts'],
+            initializedCompatibility: {
+                state: 'certified', reason: 'range-and-probe', variantId: 'tsc',
+                toolVersion: version, runtimeVersion: process.versions.node, certifiedRange: '>=0', evidence: [],
+            },
+        };
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(2);
+
+        // Drop only the typecheck cache entry so lint can hit while typecheck re-executes.
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        for (const f of fs.readdirSync(runs).filter((n) => n.startsWith('cache-'))) {
+            const p = path.join(runs, f);
+            const rec = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (rec.sensorId === 'typecheck') fs.unlinkSync(p);
+        }
+
+        mockRunStructuredCommand.mockReset();
+        mockRunStructuredCommand.mockImplementation(async (cmd: { executable?: string }) => {
+            const exe = cmd?.executable ?? '';
+            if (String(exe).includes('tsc')) return exited(1, 'tsc fail');
+            return ok();
+        });
+        const mixed = await runSensors({ cwd: project, useCache: true });
+        const lint = mixed.sensors.find((s: { name: string }) => s.name === 'lint');
+        const typecheck = mixed.sensors.find((s: { name: string }) => s.name === 'typecheck');
+        expect(lint).toMatchObject({ status: 'pass', cached: true });
+        expect(typecheck).toMatchObject({ status: 'fail' });
+        expect(typecheck?.cached).toBeUndefined();
+        expect(mixed.overall).not.toBe('pass');
+    });
+
+    it('inter-run measured-file edit → cache miss and re-exec', async () => {
+        const { runSensors } = load();
+        await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+
+        fs.writeFileSync(path.join(project, 'src', 'a.ts'), 'export const a = 42;\n');
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const miss = await runSensors({ cwd: project, useCache: true });
+        expect(mockRunStructuredCommand).toHaveBeenCalledTimes(1);
+        expect(miss.sensors[0].cached).toBeUndefined();
+    });
+
+    it('does not write cache for exit-code fail (not only missing-binary)', async () => {
+        const pack = JSON.parse(fs.readFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
+        pack.sensors.lint.variants[0].formatter = 'exit-code';
+        fs.writeFileSync(path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify(pack));
+
+        mockRunStructuredCommand.mockResolvedValue(exited(1, 'policy drift'));
+        const { runSensors } = load();
+        const out = await runSensors({ cwd: project, useCache: true });
+        expect(out.sensors[0]).toMatchObject({ status: 'fail', failureKind: 'exit-code' });
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        const cacheFiles = fs.existsSync(runs) ? fs.readdirSync(runs).filter((n) => n.startsWith('cache-')) : [];
+        expect(cacheFiles).toEqual([]);
     });
 });

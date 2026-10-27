@@ -96,6 +96,11 @@ type CachePlan = {
     measuredPaths: string[];
     /** Validate always-measured (cache set ∪ baseline.json), repo-root POSIX. */
     validateAlwaysMeasuredRepoRels: string[];
+    /**
+     * False when live tool/runtime versions are unavailable (RF-2.10): digests still
+     * attach for schema-2 receipts (RF-4.6) but cache read/write stay disabled.
+     */
+    cacheable: boolean;
 };
 
 type PreparedSlot = {
@@ -154,27 +159,38 @@ function buildCachePlan(args: {
     variant: SensorVariant | undefined;
     liveState: CompatibilityEvidence | undefined;
     assets: string[] | undefined;
+    /** Project-declared command when no pack variant exists. */
+    command?: StructuredCommand;
 }): CachePlan | null {
     const toolVersion = args.liveState?.toolVersion;
     const runtimeVersion = args.liveState?.runtimeVersion;
-    const fingerprint = computeSensorFingerprint({
+    const command = args.variant?.command ?? args.command ?? null;
+    const fingerprintParts = {
         variantId: args.liveState?.variantId ?? args.variant?.id ?? null,
-        command: args.variant?.command ?? null,
+        command,
         changedCommand: args.variant?.changedCommand,
         cliVersion: cliVersion(),
         inputs: args.inputGlobs,
         toolVersion,
         runtimeVersion,
-    });
+    };
+    // Cache requires live versions (RF-2.10). Receipt measurements still need a fingerprint
+    // when versions are absent so project-declared sensors with inputs do not demote RF-4.6.
+    const cacheFingerprint = computeSensorFingerprint(fingerprintParts);
+    const fingerprint = cacheFingerprint
+        ?? computeSensorFingerprint(fingerprintParts, { allowMissingLiveVersions: true });
     if (fingerprint === null) return null;
 
     const packageRootRel = posixJoinRel(args.gitRoot, args.packageRoot);
     const sensorsJsonRel = posixJoinRel(args.gitRoot, args.manifestPath);
+    const includePackageJson = args.variant
+        ? includePackageJsonForVariant(args.variant)
+        : Boolean(args.command?.packageManager);
     const alwaysMeasuredRepoRels = buildAlwaysMeasuredPaths({
         sensorsJsonRel,
         assetRels: args.assets ?? args.variant?.assets ?? [],
         configFileRels: args.variant?.requirements.configFiles ?? [],
-        includePackageJson: includePackageJsonForVariant(args.variant),
+        includePackageJson,
         packageRootRel: packageRootRel === '' ? '' : packageRootRel,
     });
     const digest = computeCacheInputDigest({
@@ -207,6 +223,7 @@ function buildCachePlan(args: {
         alwaysMeasuredRepoRels,
         measuredPaths: digest.matchedPaths,
         validateAlwaysMeasuredRepoRels,
+        cacheable: cacheFingerprint !== null,
     };
 }
 
@@ -232,7 +249,8 @@ async function runPreparedSlot(
     // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
     // be overridden by a prior cache hit.
     const synthetic = execution.syntheticStatus !== undefined;
-    if (cacheEnabled && cachePlan && !synthetic) {
+    // RF-2.10: cacheable is false without live versions — still attach measurements below.
+    if (cacheEnabled && cachePlan?.cacheable && !synthetic) {
         const cached = readResultCache(cachePlan.gitRoot, {
             sensorId: execution.name,
             projectKey: cachePlan.projectKey,
@@ -268,7 +286,7 @@ async function runPreparedSlot(
     }
 
     const raw = await executePrepared(execution, projectCwd);
-    if (cacheEnabled && writeCache && cachePlan && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
+    if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
         const after = computeCacheInputDigest({
             gitRoot: cachePlan.gitRoot,
             packageRoot: projectCwd,
@@ -525,8 +543,24 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             const disabled = projectEntry.enabled === false
                 ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
                 : execution;
-            // Project-declared sensors have no live tool/runtime versions → never cache (RF-2.10).
-            prepared.push({ execution: disabled, cachePlan: null });
+            // Project-declared sensors have no live tool/runtime versions → never cache (RF-2.10),
+            // but still attach digests/measurements when authored inputs exist (RF-4.6).
+            let projectPlan: CachePlan | null = null;
+            const projectInputs = effectiveInputs(projectEntry.inputs, undefined);
+            if (projectInputs) {
+                projectPlan = buildCachePlan({
+                    gitRoot,
+                    packageRoot: projectCwd,
+                    manifestPath: configured.manifestPath,
+                    sensorId: name,
+                    inputGlobs: projectInputs,
+                    variant: undefined,
+                    liveState: undefined,
+                    assets: projectEntry.assets,
+                    command: projectEntry.command,
+                });
+            }
+            prepared.push({ execution: disabled, cachePlan: projectPlan });
             continue;
         }
 

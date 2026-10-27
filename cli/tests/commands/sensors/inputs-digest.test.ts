@@ -293,6 +293,28 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         })).toThrow(/relative|contain|safe|escape|\.\./i);
     });
 
+    it('rejects unsafe alwaysMeasuredRepoRels loudly in computeCacheInputDigest', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.writeFileSync(path.join(root, 'a.ts'), 'x');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: ['../escape'],
+        })).toThrow(/alwaysMeasured|safe|relative|escape|\.\./i);
+
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: ['a/../b.ts'],
+        })).toThrow(/alwaysMeasured|safe|relative|escape|\.\./i);
+    });
+
     it('caps hashed file size and fail-closes oversized inputs (QA-6)', () => {
         const root = initRepo();
         roots.push(root);

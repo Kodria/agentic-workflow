@@ -9,6 +9,7 @@ import { MAX_SENSOR_NAME, isCommitId, isOverall, isSensorName, isSensorStatus, t
 import { esc, isCanonicalIso, isSingleLine } from './text-safety';
 import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from './worktree';
 import { CACHE_DIGEST_BASELINE_REL, isSafeRepoRel, repoPathMatchesInputGlobs } from '../../commands/sensors/inputs-digest';
+import { parseSensorInputs } from '../../commands/sensors/compatibility/contract';
 
 /** Per-sensor measurement recorded on a schema-2 receipt (RF-4.3). */
 export interface SensorReceiptMeasurement {
@@ -103,8 +104,14 @@ function measurementProblem(name: string, value: unknown): string | null {
     if (keys.length !== 5 || !['inputs', 'packageRootRel', 'inputDigest', 'sensorFingerprint', 'measuredPaths'].every((k) => k in m)) {
         return `measurement for ${name} must have exactly inputs, packageRootRel, inputDigest, sensorFingerprint, measuredPaths`;
     }
-    if (!Array.isArray(m.inputs) || m.inputs.length === 0 || m.inputs.some((g) => typeof g !== 'string' || g.length === 0 || !isSingleLine(g))) {
+    if (!Array.isArray(m.inputs) || m.inputs.length === 0) {
         return `measurement inputs for ${name} must be a nonempty array of single-line strings`;
+    }
+    try {
+        // RF-1.5: reuse the same glob grammar as authored sensor inputs (reject .., !, braces, extglobs).
+        parseSensorInputs(m.inputs, 'receipt', `measurement[${name}].inputs`);
+    } catch {
+        return `measurement inputs for ${name} must obey RF-1.5 sensor input glob rules`;
     }
     if (!isPackageRootRel(m.packageRootRel)) return `measurement packageRootRel for ${name} must be '' or a safe repo-root POSIX path`;
     if (!isSha256Digest(m.inputDigest)) return `measurement inputDigest for ${name} must be sha256:<hex>`;

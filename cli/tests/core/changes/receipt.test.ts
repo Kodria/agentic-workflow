@@ -1049,4 +1049,78 @@ describe('RF-4.3 receipt schema 2', () => {
             digest: 'sha256:' + '0'.repeat(64),
         })).toBe(false);
     });
+
+    test('readReceipt rejects schema-2 measurements with unsorted measuredPaths or malformed measurement shapes', () => {
+        const head = g('rev-parse', 'HEAD');
+        const baseMeasurement = {
+            inputs: ['src/**/*.ts'],
+            packageRootRel: '',
+            inputDigest: `sha256:${'1'.repeat(64)}`,
+            sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+            measuredPaths: ['a.ts', 'b.ts'],
+        };
+        const writeV2 = (measurements: unknown, alwaysMeasuredPaths: string[] = ['.awm/sensors.baseline.json']) => {
+            const body = {
+                schema: 2 as const,
+                commit: head,
+                ranAt: '2026-10-17T10:00:00.000Z',
+                cliVersion: '9.21.0',
+                overall: 'pass' as const,
+                sensors: { lint: 'pass' as const },
+                measurements,
+                alwaysMeasuredPaths,
+            };
+            const receipt = { ...body, digest: computeReceiptDigest(body as never) };
+            const dir = path.join(root, '.awm', 'sensors', 'runs');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `${head}.json`), JSON.stringify(receipt) + '\n');
+        };
+
+        writeV2({ lint: { ...baseMeasurement, measuredPaths: ['b.ts', 'a.ts'] } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, measuredPaths: 'a.ts' } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, inputs: [] } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, packageRootRel: '../escape' } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+    });
+
+    test('measurement.inputs on schema-2 parse reuse RF-1.5 glob rules (reject .., !, braces, extglobs)', () => {
+        const head = g('rev-parse', 'HEAD');
+        const mk = (inputs: string[]) => {
+            const body = {
+                schema: 2 as const,
+                commit: head,
+                ranAt: '2026-10-17T10:00:00.000Z',
+                cliVersion: '9.21.0',
+                overall: 'pass' as const,
+                sensors: { lint: 'pass' as const },
+                measurements: {
+                    lint: {
+                        inputs,
+                        packageRootRel: '',
+                        inputDigest: `sha256:${'1'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                        measuredPaths: ['src/a.ts'],
+                    },
+                },
+                alwaysMeasuredPaths: ['.awm/sensors.baseline.json'],
+            };
+            const receipt = { ...body, digest: computeReceiptDigest(body as never) };
+            const dir = path.join(root, '.awm', 'sensors', 'runs');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `${head}.json`), JSON.stringify(receipt) + '\n');
+            return readReceipt(root, head);
+        };
+
+        expect(mk(['src/**/*.ts'])).toMatchObject({ ok: true });
+        expect(mk(['../secret/**'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['!src/**'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['src/{a,b}.ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['src/@(a|b).ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
+    });
 });

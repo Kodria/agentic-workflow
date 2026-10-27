@@ -107,4 +107,18 @@ describe('sensor execution optimization docs contract (CMD-CLI-DOCS / RF-3.3)', 
         expect(receipt).toMatch(/docs-only|documentation-only|docs only/i);
         expect(receipt).toMatch(/project override/i);
     });
+
+    it('documents RF-4.7 change new remedy honesty (full-gate + cache reuse)', () => {
+        const text = readCliReference();
+        const start = text.indexOf('### `awm change new <slug>`');
+        expect(start).toBeGreaterThanOrEqual(0);
+        const rest = text.slice(start);
+        const nextH3 = rest.search(/\n### /);
+        const section = nextH3 === -1 ? rest : rest.slice(0, nextH3);
+        // Must match REMEDY_RECEIPT honesty — not a bare `awm sensors run` that implies every binary re-execs.
+        expect(section).toMatch(
+            /receipt-missing[\s\S]{0,200}full-gate[\s\S]{0,80}awm sensors run[\s\S]{0,120}cache may reuse/i,
+        );
+        expect(section.toLowerCase()).not.toMatch(/every tool|must re-exec|reexecute every/);
+    });
 });
