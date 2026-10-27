@@ -20,7 +20,7 @@
 - `--slice` skips sensor-level `closureOnly`; rejects `--slice`+`--all`/`--slow`; RF-D.1 / D-0xx in `docs/decisions.md`
 - This plan's tests pass in CI without a sibling `../awm-baseline-registry` checkout
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 **Modo de despacho:** proveedor-nativo
 
