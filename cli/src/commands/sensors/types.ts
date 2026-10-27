@@ -211,6 +211,12 @@ export type SensorCheck = {
     certification?: 'project-declared';
 };
 
+/** Non-blocking RF-3.4 note: enabled sensor has no effective `inputs`, so it is not cacheable. */
+export type SensorStatusWarning = {
+    sensor: string;
+    detail: string;
+};
+
 export type SensorAuthority = {
     mode: 'project-sensors' | 'legacy-v1' | 'native-gate' | 'opt-out' | 'missing' | 'invalid' | 'source-unavailable' | 'source-ambiguous';
     reason: string;
@@ -243,4 +249,9 @@ export type SensorStatusResult = {
      * gate-policy decision, not a reporting one. See #172.
      */
     uninitialized?: Record<string, { state: string; reason: string }>;
+    /**
+     * Enabled configured sensors that lack effective `inputs` and therefore are not
+     * cacheable (RF-3.4). Present only when non-empty. Does not feed `overall`.
+     */
+    warnings?: SensorStatusWarning[];
 } & Partial<SensorAuthority>;

@@ -37,7 +37,7 @@ import { evaluateAwmGitignorePolicy } from '../../core/awm-gitignore';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness' | 'routing-setup' | 'awm-gitignore';
+    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-inputs' | 'sensors-execution' | 'compatibility' | 'currentness' | 'routing-setup' | 'awm-gitignore';
     ok: boolean;
     /** Informational warning: rendered prominently, but does not degrade the harness. */
     advisory?: boolean;
@@ -387,6 +387,24 @@ function checkSensorsBaseline(cwd: string, status: SensorStatusResult): Prefligh
 }
 
 /**
+ * RF-3.4 — advisory only: enabled sensors without effective `inputs` are not cacheable.
+ * Sourced from `computeSensorStatus().warnings` so status and preflight stay aligned.
+ * Omitted when there is nothing to warn about (including opt-out / native-gate).
+ */
+function checkSensorsInputs(status: SensorStatusResult): PreflightCheck | null {
+    const warnings = status.warnings ?? [];
+    if (warnings.length === 0) return null;
+    const names = warnings.map(entry => entry.sensor).join(', ');
+    return {
+        id: 'sensors-inputs',
+        ok: false,
+        advisory: true,
+        detail: `${names} lack effective inputs and are not cacheable`,
+        remedy: 'declare inputs on those sensors (project override or pack variant) so results can be reused',
+    };
+}
+
+/**
  * Empirical diagnostics intentionally name only stable execution facts. Sensor output
  * can include source, environment values, or tool-specific unbounded text; preflight
  * is a phase gate, not a log transport, so none of that crosses this boundary.
@@ -591,6 +609,9 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
     }
     const sensorStatus = await computeSensorStatus(cwd);
     const manifestExists = sensorStatus.mode !== 'missing';
+    // RF-3.4: advisory inputs/cacheability warning (status.warnings is empty for
+    // opt-out / native-gate / missing, so this stays quiet there).
+    const sensorsInputs = checkSensorsInputs(sensorStatus);
 
     const contextKernel = checkContextKernel(cwd);
     const checks: PreflightCheck[] = [
@@ -605,6 +626,7 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
                 ...(sensorStatus.mode !== 'invalid' ? [await checkTools(cwd, sensorStatus), checkPack(cwd, sensorStatus)] : []),
                 checkSensorsBaseline(cwd, sensorStatus),
             ] : []),
+        ...(sensorsInputs ? [sensorsInputs] : []),
         // The empirical mode is intentionally opt-in: ordinary preflight remains a
         // quick static inspection and must not dispatch project software.
         ...(opts.verifySensors === true ? [await checkSensorExecution(cwd)] : []),
