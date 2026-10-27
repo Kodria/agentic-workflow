@@ -955,8 +955,10 @@ Coverage inspection is portable across native Windows, macOS, and Linux. It open
 Run the sensors in the manifest. With no flag, runs **all** sensors (the full completion gate). Selection flags scope the run; `--slice` is the per-slice DONE gate (see [D-025](decisions.md#d-025)):
 
 ```
-awm sensors run [--fast | --slow | --all | --slice] [--changed] [--base <ref>] [--no-cache] [--json]
+awm sensors run [--fast | --slow | --all | --slice] [--changed] [--base <ref>] [--no-cache]
 ```
+
+Stdout is always a JSON verdict object (there is no `--json` flag on this command).
 
 | Flag | Description |
 |---|---|
@@ -966,7 +968,6 @@ awm sensors run [--fast | --slow | --all | --slice] [--changed] [--base <ref>] [
 | `--slice` | Every selected enabled applicable sensor whose effective `closureOnly` is not true; skips `closureOnly` sensors with a synthetic `skipped` reason. Makes `isFullSelection` false — **no Change Record receipt**. Combined with `--fast` means the intersection (fast ∧ not closureOnly). `--slice` cannot be combined with `--all` or `--slow` (the CLI refuses those invocations). |
 | `--changed` | Argv-scope opted-in sensors to files changed vs `--base` (not the digest cache). |
 | `--no-cache` | Ignore fingerprint result-cache hits and execute every selected sensor that would otherwise run. Alone, does not make the selection partial for receipt purposes. |
-| `--json` | Machine-readable output. |
 
 > The completion gate for QA, docs, finishing, and Change Record is the **full** run (no `--slice` / `--fast` xor `--slow` / `--changed`). Do not use `--slow` or `--slice` as that gate — `--slow` skips lint/typecheck; `--slice` skips `closureOnly` sensors and never writes a receipt.
 
@@ -1220,7 +1221,7 @@ What is checked, in this order (the checks that read record fields run only once
 | `pending-content` | A `<!-- awm:pending -->` marker is left. |
 | `derived-mismatch` | `type`, `scope`, `semver`, `breaking` or `modules` differ from what git derives now; one diagnostic per field, showing both values. |
 | `verification-commit-foreign` | `verification.commit` is neither HEAD nor an ancestor of it. |
-| `code-changed-after-verification` | Files outside `docs/changes/` changed after `verification.commit` (up to 20 listed); run `awm sensors run`, then `awm change new <slug> --refresh`. |
+| `code-changed-after-verification` | Paths that still count as code after `verification.commit` (up to 20 listed). With schema-1 receipts, or schema-2 receipts where any sensor lacked authored `inputs`, that means anything outside `docs/changes/` (plus runtime-state exclusions). With a complete schema-2 receipt (every sensor had authored `inputs`), only unmeasured paths count — see [RF-4.6](#sensor-receipt). Remedy: full-gate `awm sensors run`, then `awm change new <slug> --refresh`. |
 | `receipt-missing`, `receipt-invalid`, `verification-mismatch`, `verification-not-passing` | `--strict` only: no valid receipt for `verification.commit`, the receipt differs from the record's `verification`, or its verdict is not `pass`. |
 | `too-many-records`, `diagnostics-truncated` | Output bounds: 50 records per run, 20 diagnostics per record. |
 

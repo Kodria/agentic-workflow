@@ -231,6 +231,33 @@ a complete manifest to copy:
 }
 ```
 
+Projects may also override `inputs` (nonempty relative globs naming what the
+sensor measures) and `closureOnly` (boolean on the sensor object, not a
+variant). Effective `inputs` come only from the pack variant or an explicit
+project override — the CLI never invents them. Without effective `inputs`, a
+sensor always executes and is never a cache hit; `awm sensors status` and
+`awm preflight` warn that it is not cacheable. Schema-2 Change Record late-path
+relaxation ([RF-4.6](cli-reference.md#sensor-receipt)) applies only when every
+sensor on the receipt had authored `inputs`. `closureOnly: true` sensors are
+skipped by `awm sensors run --slice` and must still pass on the full gate.
+Command flags, cache, and receipt shape: [CLI reference](cli-reference.md#awm-sensors-run).
+
+```json
+{
+  "schemaVersion": 3,
+  "pack": "js-ts",
+  "sensors": {
+    "lint": {
+      "enabled": true,
+      "fast": true,
+      "variantId": "eslint-10",
+      "inputs": ["src/**/*.ts", "eslint.config.awm.mjs"]
+    },
+    "mutation": { "enabled": true, "fast": false, "closureOnly": true }
+  }
+}
+```
+
 Run output adds `execution.timeoutMs`, `timeoutSource`, `elapsedMs`,
 `requestedScope`, and `effectiveScope`; scoped work can also expose `files` or
 `scopeReason`. Packs may declare a shell-free structured `changedCommand`.

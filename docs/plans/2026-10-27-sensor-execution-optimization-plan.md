@@ -1,5 +1,6 @@
 # Sensor execution optimization — CLI plan (#236)
 
+<!-- awm-docs-complete: 2026-10-27 -->
 <!-- awm-qa-complete: 2026-10-27 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`

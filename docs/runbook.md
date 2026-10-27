@@ -37,8 +37,14 @@ loop is:
 5. Record recurring findings through the ledger/retrospective flow when the
    process calls for it.
 
-`awm sensors run` is the full completion gate. `--fast` and `--slow` are useful
-iteration slices, not substitutes for the full run.
+`awm sensors run` with no selection flag is the full completion gate (QA, docs,
+finishing, Change Record). `--slice` is the per-slice DONE gate: it skips
+`closureOnly` sensors and never writes a receipt ([D-025](decisions.md#d-025)).
+`--fast` and `--slow` are useful iteration filters. None of `--slice`, `--fast`,
+`--slow` alone, or `--changed` substitutes for the full run. Stock packs often
+leave sensors without authored `inputs`, so a docs-only HEAD advance still needs
+a new full-gate run unless the project overrides `inputs` on every sensor
+([RF-4.6](cli-reference.md#sensor-receipt)).
 
 Before the retrospective archives a branch ledger, run coverage feedback
 manually while active and archived evidence remains bounded and attributable:
