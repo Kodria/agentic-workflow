@@ -6,7 +6,7 @@
 
 **Goal:** Implement CLI-side inputs digest cache, `--slice`/`closureOnly` selection, receipt schema 2, and D-0xx — without depending on sibling-registry jest paths that break CI.
 
-**Architecture:** Additive parse + picomatch digests + opt-in `useCache` + raw pre-baseline cache (including findings-bearing fail) + schema 2 validate. Pack/skill/rollout content is a **separate registry plan** after this CLI publishes (design RF-7 / audit [B]). Contract: `docs/plans/2026-10-27-sensor-execution-optimization-design.md` (amended audit r2).
+**Architecture:** Additive parse + picomatch digests + opt-in `useCache` + raw pre-baseline cache (`pass` or `failureKind===findings`) + schema 2 validate. Pack/skill/rollout content is a **separate registry plan** after this CLI publishes (design RF-7 / audit [B]). Contract: `docs/plans/2026-10-27-sensor-execution-optimization-design.md` (amended audit r3).
 
 **Tech Stack:** TypeScript CLI (`cli/`), Jest, pinned `picomatch`.
 
@@ -15,16 +15,16 @@
 **Criterios de aceptación:**
 - Full-gate run with project overrides giving every sensor `inputs` can, after a docs-only commit, reuse cacheable sensors and rewrite a schema 2 receipt on a clean tree
 - Without those overrides (stock RF-1.9), `change validate` stays on schema-1 late-path rules (RF-4.6) — documented honestly
-- Fingerprint uses live tool/runtime versions; `--changed` does not write cache; baseline/readOnly/verify-sensors do not use cache
-- Raw fail+findings caches so baseline debt still hits; changing baseline flips post-baseline status without re-exec; baseline file not in cache digest
-- `--slice` skips sensor-level `closureOnly`; rejects `--slice`+`--all`/`--slow`; D-0xx recorded in `docs/decisions.md`
+- Fingerprint uses live tool/runtime versions; no live version ⇒ no cache; `--changed` does not write cache; baseline/readOnly/verify-sensors do not use cache
+- Only `pass` and `fail`+`failureKind=findings` cache; exit-code and missing-binary fails never cache; baseline re-apply without re-exec; baseline file not in cache digest
+- `--slice` skips sensor-level `closureOnly`; rejects `--slice`+`--all`/`--slow`; RF-D.1 / D-0xx in `docs/decisions.md`
 - This plan's tests pass in CI without a sibling `../awm-baseline-registry` checkout
 
 **Modo de ejecución:** interactivo
 
 **Modo de despacho:** proveedor-nativo
 
-**Origen:** design + PR #237 audits r1/r2. Companion: `awm-baseline-registry` plan `docs/plans/2026-10-27-sensor-execution-optimization-registry-plan.md` (starts after CLI npm publish).
+**Origen:** design + PR #237 audits r1–r3. Companion: `awm-baseline-registry` plan (content slices after CLI npm publish).
 
 **File map:** `compatibility/{manifest,contract}.ts`; `inputs-digest.ts`; `result-cache.ts`; `run.ts`/`index.ts`/`types.ts`; `receipt.ts`; `change/index.ts`; `status.ts`; `preflight/checks.ts`; `docs/cli-reference.md`; `docs/decisions.md`.
 
@@ -48,7 +48,7 @@
       "id": "SRC-DESIGN",
       "path": "docs/plans/2026-10-27-sensor-execution-optimization-design.md",
       "locator": "## Requirements",
-      "fact": "Design amended audit r2: split plans, raw fail cache, baseline not in cache digest, liveState fingerprint, RF-4.6 schema-1 when any sensor lacks inputs, picomatch dot, closureOnly sensor-level, git-root cache, readlink+ABSENT."
+      "fact": "Design amended audit r3: failureKind for RF-2.4, RF-D.1, no-live-version no-cache, RF-1.9 extension-bound defaults, RF-7.1 re-cert / RF-7.4 mirror validator, single normative source for registry IDs."
     },
     {
       "id": "SRC-MANIFEST",
@@ -259,17 +259,18 @@ Public-contract amend RF-1.5 if needed.
 Own RF-1.4, 1.6, RF-2.*, RF-5.10, RF-6.*, RF-E.1/E.3. New modules + run/index/types; pin picomatch. Cache under **git-root** `.awm/sensors/runs/`. Grouping: runtime.
 
 #### Implementation
-1. RED (choose and document RF-2.10 project-declared policy: no-cache when live versions missing OR only cache node-modules-bin):
+1. RED (RF-2.10 fixed policy: no live tool/runtime version ⇒ neither read nor write cache for that sensor):
    - Digest: git enum + picomatch `{dot:true,posix:true}`; readlink hash; ABSENT marker; configFiles/package.json/lockfiles in cache digest; baseline.json NOT in cache digest.
-   - Raw fail+findings stored; baseline re-apply: hit→pass then remove baseline entry→hit→fail without re-exec; `awm sensors baseline` / ignoreBaseline / readOnly / no useCache → no cache IO.
-   - liveState in fingerprint; change PATH tool version → miss.
+   - `failureKind` on raw fail; store only `pass` or `fail`+`findings` with `errors.length > 0`; RED: exit-code fail and missing-binary fail never written; findings fail may be.
+   - Baseline re-apply: findings-fail hit→pass then remove baseline entry→hit→fail without re-exec; `awm sensors baseline` / ignoreBaseline / readOnly / no useCache → no cache IO.
+   - liveState in fingerprint; change PATH tool version → miss; project-declared without live version → never cache.
    - `--changed` no write; `--no-cache` forces exec; `--slice` skips closureOnly; `--slice --all` and `--slice --slow` throw; `--slice --fast` = intersection; `isFullSelection({slice:true})===false`.
    - Cache files beside receipts at git root; originDirty; tamper→miss; post-exec digest change→no write.
 2. Implement; wire flags.
 3. GREEN — CMD-CACHE + CMD-TYPECHECK.
 
 #### Edge cases
-Never cache inconclusive/timeout fails. Multiplatform path/CRLF tests in digest suite.
+Never cache inconclusive/timeout/`exit-code`/`missing-binary` fails. Multiplatform path/CRLF tests in digest suite.
 
 #### Evidence
 CMD-CACHE, CMD-TYPECHECK.
@@ -355,3 +356,4 @@ Public docs.
 ## Amendment log
 
 - **2026-10-27 r2:** Split off registry work ([B]); absorbed [C][C2][D][E][F][G][H][I][J]; D-0xx moved to S5 as RF-D.1; removed CMD-REGISTRY from CLI closure.
+- **2026-10-27 r3:** `failureKind` ([N1]); RF-D.1 defined in design ([N2]); no-live ⇒ no-cache ([N3]); RF-1.9 extension note owned by design (registry executes).
