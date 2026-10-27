@@ -97,7 +97,10 @@ describe('sensor execution optimization docs contract (CMD-CLI-DOCS / RF-3.3)', 
         expect(receipt).toMatch(/"schema"\s*:\s*2|schema\s*`?2`?/);
         expect(receipt).toMatch(/measurements/);
         expect(receipt).toMatch(/alwaysMeasuredPaths|always-measured/i);
-        expect(receipt).toMatch(/RF-4\.6|schema-1 late|late-path/i);
+        // RF-4.6 honesty only — "legacy late-path rules" elsewhere must not satisfy this.
+        expect(receipt).toMatch(
+            /RF-4\.6[\s\S]{0,80}honesty[\s\S]{0,400}schema-1 late-path|schema-1 late-path[\s\S]{0,400}RF-4\.6[\s\S]{0,80}honesty/i,
+        );
         expect(receipt).toMatch(
             /(?:any|every)[\s\S]{0,80}(?:without|no|lacks)[\s\S]{0,60}inputs[\s\S]{0,160}schema[\s\S]{0,40}1|schema[\s\S]{0,40}1[\s\S]{0,160}(?:without|no|lacks)[\s\S]{0,60}inputs/i,
         );
