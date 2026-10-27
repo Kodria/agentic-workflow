@@ -49,6 +49,8 @@ export type SensorVariant = {
     policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
     changedCommand?: StructuredCommand;
+    /** Optional cache/digest input globs relative to packageRoot (RF-1.1). */
+    inputs?: string[];
 };
 
 export type SemgrepPolicy = {
@@ -71,6 +73,8 @@ export type SensorPackSensor = {
     variants: SensorVariant[];
     fast?: boolean;
     timeout?: number;
+    /** When true, sensor runs only on full/closure gates — skipped by `--slice` (RF-5.10). */
+    closureOnly?: boolean;
 };
 
 export type SensorPackV2 = {

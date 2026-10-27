@@ -324,4 +324,64 @@ describe('sensor pack v2 contract', () => {
     ])('rejects malformed pack %j', (input, message) => {
         expect(() => parseSensorPack(input, 'pack.json')).toThrow(message);
     });
+
+    describe('inputs and sensor-level closureOnly (RF-1.1, RF-1.2, RF-1.5, RF-1.7)', () => {
+        it('accepts inputs on variants and closureOnly on the sensor (RF-1.2 pack defaults)', () => {
+            const pack = validPack();
+            (pack.sensors.lint as Record<string, unknown>).closureOnly = true;
+            (pack.sensors.lint.variants[0] as Record<string, unknown>).inputs = ['**/*.ts', '**/*.[cm]js'];
+            expect(parseSensorPack(pack, 'pack.json')).toMatchObject({
+                kind: 'v2',
+                pack: {
+                    sensors: {
+                        lint: {
+                            closureOnly: true,
+                            variants: [{ inputs: ['**/*.ts', '**/*.[cm]js'] }],
+                        },
+                    },
+                },
+            });
+        });
+
+        it('treats omitted sensor closureOnly as false and does not invent variant inputs', () => {
+            const parsed = parseSensorPack(validPack(), 'pack.json');
+            expect(parsed).toMatchObject({ kind: 'v2' });
+            if (parsed.kind !== 'v2') throw new Error('expected v2 pack');
+            const lint = parsed.pack.sensors.lint as { closureOnly?: boolean; variants: Array<{ inputs?: string[] }> };
+            expect(lint.closureOnly ?? false).toBe(false);
+            expect('inputs' in lint.variants[0]).toBe(false);
+        });
+
+        it('rejects closureOnly on a variant (RF-1.7 sensor-level only)', () => {
+            const pack = validPack();
+            (pack.sensors.lint.variants[0] as Record<string, unknown>).closureOnly = true;
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "closureOnly"|closureOnly/);
+        });
+
+        it('rejects inputs on the sensor object (inputs belong on variants)', () => {
+            const pack = validPack();
+            (pack.sensors.lint as Record<string, unknown>).inputs = ['**/*.ts'];
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/unknown field "inputs"|inputs/);
+        });
+
+        it.each([
+            [[''], 'empty|inputs'],
+            [['/abs'], 'absolute|inputs'],
+            [['has\u0000nul'], 'NUL|control|nonempty|single-line|inputs'],
+            [['../escape'], 'escape|contained|relative|\\.\\.|inputs'],
+            [['src/{a,b}.ts'], '\\{|brace|invalid|inputs'],
+            [['!negated.ts'], '!|negation|invalid|inputs'],
+            [[], 'nonempty array|inputs'],
+        ])('rejects invalid variant inputs %j', (inputs, reason) => {
+            const pack = validPack();
+            (pack.sensors.lint.variants[0] as Record<string, unknown>).inputs = inputs;
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(new RegExp(reason, 'i'));
+        });
+
+        it('rejects non-boolean sensor closureOnly', () => {
+            const pack = validPack();
+            (pack.sensors.lint as Record<string, unknown>).closureOnly = 1;
+            expect(() => parseSensorPack(pack, 'pack.json')).toThrow(/closureOnly/);
+        });
+    });
 });

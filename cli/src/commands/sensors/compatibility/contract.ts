@@ -88,6 +88,39 @@ function assetArray(value: unknown, source: unknown, location: string, allowEmpt
     return value.map((item, index) => asset(item, source, `${location}[${index}]`));
 }
 
+/**
+ * Validate authored sensor `inputs` globs (RF-1.5).
+ * Matching (later digests) uses pinned picomatch with options `{ dot: true, posix: true }`
+ * and without `nocase` (paths come from `git ls-files`, already normalized).
+ * Supported patterns: `*`, `**`, `?`, character classes. Brace expansion and `!` negation
+ * are rejected here so authors never depend on unsupported syntax.
+ */
+export function parseSensorInputs(value: unknown, source: unknown, location: string): string[] {
+    if (!Array.isArray(value) || value.length === 0) invalid(source, `${location} must be a nonempty array`);
+    return value.map((item, index) => inputGlob(item, source, `${location}[${index}]`));
+}
+
+function inputGlob(value: unknown, source: unknown, location: string): string {
+    if (typeof value !== 'string' || value.trim().length === 0 || /[\0-\x1f\x7f]/.test(value)) {
+        invalid(source, `${location} must be a nonempty single-line string without NUL or control characters`);
+    }
+    const parsed = value;
+    if (parsed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(parsed) || parsed.startsWith('\\\\')) {
+        invalid(source, `${location} must be a relative glob (absolute paths are invalid)`);
+    }
+    if (parsed.includes('\\')) invalid(source, `${location} must use POSIX separators`);
+    if (parsed.includes('{') || parsed.includes('}')) {
+        invalid(source, `${location} must not use brace expansion`);
+    }
+    if (parsed.includes('!')) {
+        invalid(source, `${location} must not use negation (!)`);
+    }
+    if (parsed.split('/').some(part => part === '' || part === '.' || part === '..')) {
+        invalid(source, `${location} must be a contained relative glob (no empty, ., or .. segments)`);
+    }
+    return parsed;
+}
+
 const SEMGREP_POLICY_REF = 'shared/semgrep-policy.json' as const;
 const MAX_POLICY_BYTES = 64 * 1024;
 
@@ -195,7 +228,7 @@ export function parseStructuredCommand(input: unknown, source: unknown, location
 
 function parseVariant(input: unknown, source: unknown, location: string): SensorVariant {
     const value = record(input, source, location);
-    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'changedCommand', 'assets', 'formatter', 'probe', 'policyRef'], source, location);
+    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'changedCommand', 'assets', 'formatter', 'probe', 'policyRef', 'inputs'], source, location);
     const certifiedRange = text(value.certifiedRange, source, `${location}.certifiedRange`);
     if (semver.validRange(certifiedRange) === null) invalid(source, `${location}.certifiedRange must be a valid semver range`);
     if (typeof value.priority !== 'number' || !Number.isSafeInteger(value.priority)) invalid(source, `${location}.priority must be a safe integer`);
@@ -223,6 +256,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     }
     const changedCommand = 'changedCommand' in value ? parseStructuredCommand(value.changedCommand, source) : undefined;
     if (changedCommand && !changedCommand.fileInput) invalid(source, `${location}.changedCommand must declare fileInput`);
+    const inputs = 'inputs' in value ? parseSensorInputs(value.inputs, source, `${location}.inputs`) : undefined;
     return {
         id: id(value.id, source, `${location}.id`),
         priority: value.priority,
@@ -236,6 +270,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
         ...(changedCommand ? { changedCommand } : {}),
+        ...(inputs ? { inputs } : {}),
     };
 }
 
@@ -273,7 +308,7 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
 
 function parseSensor(input: unknown, source: unknown, location: string, variantIds: Set<string>): SensorPackSensor {
     const value = record(input, source, location);
-    fields(value, ['applicability', 'variants', 'fast', 'timeout'], source, location);
+    fields(value, ['applicability', 'variants', 'fast', 'timeout', 'closureOnly'], source, location);
     if (!Array.isArray(value.variants) || value.variants.length === 0) invalid(source, `${location}.variants must be a nonempty array`);
     const variants = value.variants.map((variant, index) => parseVariant(variant, source, `${location}.variants[${index}]`));
     for (const variant of variants) {
@@ -297,12 +332,19 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     }
     if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
     if ('fast' in value && typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
+    if ('closureOnly' in value && typeof value.closureOnly !== 'boolean') invalid(source, `${location}.closureOnly must be a boolean`);
     let timeout: number | undefined;
     if ('timeout' in value) {
         try { timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
         catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
     }
-    return { applicability, variants, ...('fast' in value ? { fast: value.fast as boolean } : {}), ...(timeout !== undefined ? { timeout } : {}) };
+    return {
+        applicability,
+        variants,
+        ...('fast' in value ? { fast: value.fast as boolean } : {}),
+        ...('closureOnly' in value ? { closureOnly: value.closureOnly as boolean } : {}),
+        ...(timeout !== undefined ? { timeout } : {}),
+    };
 }
 
 function legacyCompatibility(): CompatibilityEvidence {

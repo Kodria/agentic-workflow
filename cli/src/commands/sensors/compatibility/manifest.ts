@@ -1,6 +1,6 @@
 import type { SensorConfig, SensorManifest } from '../types';
 import type { CompatibilityEvidence, SensorPackSensor, StructuredCommand } from './types';
-import { parseStructuredCommand } from './contract';
+import { parseSensorInputs, parseStructuredCommand } from './contract';
 import { positiveTimeout } from './timeout';
 import semver from 'semver';
 import path from 'path';
@@ -20,7 +20,20 @@ export type SensorManifestV2 = {
      *  manifest lives at the repo root but the real package lives in a
      *  subdirectory (e.g. "cli"). */
     packageRoot?: string;
-    sensors: Record<string, { enabled: boolean; fast?: boolean; timeout?: number; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
+    sensors: Record<string, {
+        enabled: boolean;
+        fast?: boolean;
+        timeout?: number;
+        variantId: string;
+        command: StructuredCommand;
+        assets?: string[];
+        policyRef?: 'shared/semgrep-policy.json';
+        initializedCompatibility: CompatibilityEvidence;
+        /** Project override of pack-variant inputs (RF-1.3); globs relative to packageRoot. */
+        inputs?: string[];
+        /** Sensor-level closure gate flag (RF-5.10); omitted means false. */
+        closureOnly?: boolean;
+    }>;
     concurrency?: number;
 };
 
@@ -41,6 +54,10 @@ export type ProjectDeclaredSensor = {
     assets?: string[];
     applicability?: SensorPackSensor['applicability'];
     description?: string;
+    /** Authored inputs for caching (RF-1.1); globs relative to packageRoot. */
+    inputs?: string[];
+    /** Sensor-level closure gate flag (RF-5.10); omitted means false. */
+    closureOnly?: boolean;
 };
 
 export type V3ManifestSensor = PackBoundManifestSensor | ProjectDeclaredSensor;
@@ -245,7 +262,7 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
     const value = record(input, source, location);
     if ('variantId' in value) invalid(source, `${location}.variantId is forbidden on source:"project" entries`);
     if ('initializedCompatibility' in value) invalid(source, `${location}.initializedCompatibility is forbidden on source:"project" entries`);
-    fields(value, ['source', 'enabled', 'command', 'formatter', 'fast', 'timeout', 'assets', 'applicability', 'description'], source, location);
+    fields(value, ['source', 'enabled', 'command', 'formatter', 'fast', 'timeout', 'assets', 'applicability', 'description', 'inputs', 'closureOnly'], source, location);
     if (value.source !== 'project') invalid(source, `${location}.source must be "project"`);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: ProjectDeclaredSensor = {
@@ -269,6 +286,11 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;
     }
+    if ('closureOnly' in value) {
+        if (typeof value.closureOnly !== 'boolean') invalid(source, `${location}.closureOnly must be a boolean`);
+        sensor.closureOnly = value.closureOnly;
+    }
+    if ('inputs' in value) sensor.inputs = parseSensorInputs(value.inputs, source, `${location}.inputs`);
     if ('timeout' in value) {
         try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
         catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
@@ -291,7 +313,7 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if (value.source === 'project') {
         invalid(source, `${location}.source "project" requires schemaVersion 3; migrate-to-v3`);
     }
-    fields(value, ['enabled', 'fast', 'timeout', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
+    fields(value, ['enabled', 'fast', 'timeout', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility', 'inputs', 'closureOnly'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
@@ -311,6 +333,11 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;
     }
+    if ('closureOnly' in value) {
+        if (typeof value.closureOnly !== 'boolean') invalid(source, `${location}.closureOnly must be a boolean`);
+        sensor.closureOnly = value.closureOnly;
+    }
+    if ('inputs' in value) sensor.inputs = parseSensorInputs(value.inputs, source, `${location}.inputs`);
     if ('timeout' in value) {
         try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
         catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
