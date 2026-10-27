@@ -31,7 +31,7 @@
 - **RF-2.6 — Selection filters unchanged:** WHEN `--fast`, `--slow`, and/or `--all` are set, THE CLI SHALL apply the existing `shouldRun` selection first; cache decisions apply only to sensors that remain selected.
 - **RF-2.7 — `--changed` remains argv scope:** WHEN `--changed` is set, THE CLI SHALL keep today's meaning (optional `changedCommand` / file argv scoping) and SHALL NOT treat `--changed` as the input-digest cache mechanism. Cache hits MAY still apply to selected sensors under RF-2.2 when digests match.
 - **RF-2.8 — Machine-readable provenance:** WHEN emitting the stdout JSON of `awm sensors run`, THE CLI SHALL include, for each cached sensor, fields that identify `cached: true` and provenance sufficient to audit the hit (origin and input digest), without removing existing sensor result fields required by current consumers.
-- **RF-2.9 — Force execute:** WHEN the operator passes an explicit force-execute flag defined in the plan (name fixed at planning), THE CLI SHALL ignore cache hits and execute every selected sensor that would otherwise run.
+- **RF-2.9 — Force execute:** WHEN the operator passes `--no-cache` on `awm sensors run`, THE CLI SHALL ignore cache hits and execute every selected sensor that would otherwise run. `--no-cache` does not by itself make the selection partial for receipt purposes.
 
 ### RF-3 — Authoring and teaching (agent-facing)
 
