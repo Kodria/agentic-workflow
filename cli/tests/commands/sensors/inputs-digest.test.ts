@@ -5,11 +5,13 @@ import { execFileSync } from 'child_process';
 import picomatch from 'picomatch/posix';
 import {
     ABSENT_MARKER,
+    CACHE_DIGEST_BASELINE_REL,
     MAX_DIGEST_FILE_BYTES,
     PICOMATCH_DIGEST_OPTIONS,
     buildAlwaysMeasuredPaths,
     computeCacheInputDigest,
     isSafeRepoRel,
+    joinRepoRel,
     toSafeRepoRel,
 } from '../../../src/commands/sensors/inputs-digest';
 
@@ -47,6 +49,14 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-out-'));
         roots.push(outside);
         expect(() => toSafeRepoRel(root, outside, 'escape')).toThrow(/under gitRoot|safe relative/);
+    });
+
+    it('joinRepoRel builds baseline validate path without touching the filesystem (Windows-safe)', () => {
+        // Missing .awm/sensors.baseline.json must not go through toSafeRepoRel(abs) — on win32
+        // realpath fallback + path.relative yields a drive-absolute string.
+        expect(CACHE_DIGEST_BASELINE_REL).toBe('.awm/sensors.baseline.json');
+        expect(joinRepoRel('', CACHE_DIGEST_BASELINE_REL)).toBe('.awm/sensors.baseline.json');
+        expect(joinRepoRel('cli', CACHE_DIGEST_BASELINE_REL)).toBe('cli/.awm/sensors.baseline.json');
     });
 
     it('computeCacheInputDigest accepts non-canonical gitRoot/packageRoot (Windows-safe)', () => {

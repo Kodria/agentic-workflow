@@ -38,7 +38,13 @@ import {
     snapshotUnavailableRemedy,
     type ExclusionPolicy,
 } from './read-only-observation';
-import { buildAlwaysMeasuredPaths, CACHE_DIGEST_BASELINE_REL, computeCacheInputDigest, toSafeRepoRel } from './inputs-digest';
+import {
+    buildAlwaysMeasuredPaths,
+    CACHE_DIGEST_BASELINE_REL,
+    computeCacheInputDigest,
+    joinRepoRel,
+    toSafeRepoRel,
+} from './inputs-digest';
 import {
     canCacheRawResult,
     computeSensorFingerprint,
@@ -204,12 +210,11 @@ function buildCachePlan(args: {
     if (!digest.ok) return null;
     const projectKey = `sha256:${crypto.createHash('sha256').update(`${args.manifestPath}\0${args.packageRoot}`).digest('hex')}`;
     // Baseline is excluded from the cache digest but required for validate (RF-2.12 / RF-4.5).
-    // It lives next to the manifest: `<packageRoot>/.awm/sensors.baseline.json` as repo-root POSIX.
-    const validateBaselineRel = posixJoinRel(
-        args.gitRoot,
-        path.join(args.packageRoot, '.awm', 'sensors.baseline.json'),
-    );
-    const baselineForValidate = validateBaselineRel === '' ? CACHE_DIGEST_BASELINE_REL : validateBaselineRel;
+    // Derive from the already-safe packageRootRel — do NOT posixJoinRel an absolute path to a
+    // often-missing baseline file (realpath falls back → Windows path.relative goes absolute).
+    const baselineForValidate = packageRootRel === ''
+        ? CACHE_DIGEST_BASELINE_REL
+        : joinRepoRel(packageRootRel, CACHE_DIGEST_BASELINE_REL);
     const validateAlwaysMeasuredRepoRels = [...new Set([
         ...alwaysMeasuredRepoRels,
         baselineForValidate,
