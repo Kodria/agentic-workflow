@@ -133,7 +133,8 @@ And run the deterministic parts yourself at each boundary:
 awm preflight        # before starting
 awm preflight --require-current # before a freshness-enforced unattended handoff
 awm plan validate PLAN_PATH # validate a compact plan without executing its commands
-awm sensors run      # before claiming any task done
+awm sensors run --slice  # task / slice DONE (skips closureOnly; no receipt)
+awm sensors run      # full gate before QA, docs, finishing, Change Record
 awm ledger list      # before the retro
 ```
 

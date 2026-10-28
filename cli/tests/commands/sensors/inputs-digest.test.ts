@@ -1,0 +1,396 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFileSync } from 'child_process';
+import picomatch from 'picomatch/posix';
+import {
+    ABSENT_MARKER,
+    CACHE_DIGEST_BASELINE_REL,
+    MAX_DIGEST_FILE_BYTES,
+    PICOMATCH_DIGEST_OPTIONS,
+    buildAlwaysMeasuredPaths,
+    computeCacheInputDigest,
+    isSafeRepoRel,
+    joinRepoRel,
+    toSafeRepoRel,
+} from '../../../src/commands/sensors/inputs-digest';
+
+function git(cwd: string, args: string[]): string {
+    return execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+}
+
+function initRepo(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-'));
+    git(root, ['init', '-q', '-b', 'main']);
+    return root;
+}
+
+describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
+    const roots: string[] = [];
+    afterEach(() => {
+        for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it('toSafeRepoRel realpaths both sides so nested .awm/sensors.json stays relative (Windows-safe)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        const manifest = path.join(root, '.awm', 'sensors.json');
+        fs.writeFileSync(manifest, '{}');
+        // Non-canonical roots (trailing `.`, resolve vs join) must still yield a POSIX repo-rel —
+        // this is the class of git-toplevel vs Node path mismatch that broke win32 CI.
+        expect(toSafeRepoRel(root, manifest, 'sensorsJsonRel')).toBe('.awm/sensors.json');
+        expect(toSafeRepoRel(path.join(root, '.'), path.resolve(root, '.awm', 'sensors.json'), 'sensorsJsonRel')).toBe('.awm/sensors.json');
+        expect(toSafeRepoRel(root, root, 'packageRoot')).toBe('');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-out-'));
+        roots.push(outside);
+        expect(() => toSafeRepoRel(root, outside, 'escape')).toThrow(/under gitRoot|safe relative/);
+    });
+
+    it('joinRepoRel builds baseline validate path without touching the filesystem (Windows-safe)', () => {
+        // Missing .awm/sensors.baseline.json must not go through toSafeRepoRel(abs) — on win32
+        // realpath fallback + path.relative yields a drive-absolute string.
+        expect(CACHE_DIGEST_BASELINE_REL).toBe('.awm/sensors.baseline.json');
+        expect(joinRepoRel('', CACHE_DIGEST_BASELINE_REL)).toBe('.awm/sensors.baseline.json');
+        expect(joinRepoRel('cli', CACHE_DIGEST_BASELINE_REL)).toBe('cli/.awm/sensors.baseline.json');
+    });
+
+    it('computeCacheInputDigest accepts non-canonical gitRoot/packageRoot (Windows-safe)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.writeFileSync(path.join(root, 'src.ts'), 'export {}\n');
+        git(root, ['add', 'src.ts']);
+        git(root, ['commit', '-q', '-m', 'init']);
+        // Same physical tree via join(root, '.') — mirrors mismatched forms that made
+        // bare path.relative + path.isAbsolute reject packageRoot on win32.
+        const messyRoot = path.join(root, '.');
+        const digest = computeCacheInputDigest({
+            gitRoot: messyRoot,
+            packageRoot: path.resolve(root),
+            inputGlobs: ['*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(digest.matchedPaths).toContain('src.ts');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-pkg-out-'));
+        roots.push(outside);
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: outside,
+            inputGlobs: ['*.ts'],
+            alwaysMeasuredRepoRels: [],
+        })).toThrow(/packageRoot must be inside gitRoot/);
+    });
+
+    it('uses picomatch options that match dotfiles and stay case-sensitive (RF-1.5/1.6)', () => {
+        const withOpts = picomatch('*', { ...PICOMATCH_DIGEST_OPTIONS });
+        expect(withOpts('.env')).toBe(true);
+        expect(withOpts('Env')).toBe(true);
+        // Without dot:true, leading-dot files would not match `*`.
+        expect(picomatch('*', { posix: true, dot: false })('.env')).toBe(false);
+        // Without nocase, Abc and abc are distinct under a case-sensitive pattern.
+        const caseSensitive = picomatch('Abc', { ...PICOMATCH_DIGEST_OPTIONS });
+        expect(caseSensitive('Abc')).toBe(true);
+        expect(caseSensitive('abc')).toBe(false);
+        expect(PICOMATCH_DIGEST_OPTIONS).toEqual({ dot: true, posix: true });
+    });
+
+    it('enumerates via git ls-files, matches globs with dotfiles, hashes symlink readlink, and marks ABSENT (RF-2.1)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.writeFileSync(path.join(root, 'src.ts'), 'a');
+        fs.writeFileSync(path.join(root, '.hidden.ts'), 'h');
+        fs.writeFileSync(path.join(root, 'ignored.ts'), 'i');
+        fs.writeFileSync(path.join(root, '.gitignore'), 'ignored.ts\n');
+        fs.symlinkSync('src.ts', path.join(root, 'link.ts'));
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+        // Deleted but still listed if we force a stale index entry via ls-files after delete without refresh:
+        // Prefer: path in globs that is untracked absent — RF says ENOENT on lstat of listed path.
+        fs.writeFileSync(path.join(root, 'gone.ts'), 'g');
+        git(root, ['add', 'gone.ts']);
+        git(root, ['commit', '-qm', 'gone']);
+        fs.unlinkSync(path.join(root, 'gone.ts'));
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(digest.matchedPaths).toEqual(expect.arrayContaining(['src.ts', '.hidden.ts', 'link.ts', 'gone.ts']));
+        expect(digest.matchedPaths).not.toContain('ignored.ts');
+        expect(digest.contributions.find((c) => c.path === 'link.ts')).toMatchObject({ kind: 'symlink' });
+        expect(digest.contributions.find((c) => c.path === 'gone.ts')).toMatchObject({ kind: 'absent', marker: ABSENT_MARKER });
+        expect(digest.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    });
+
+    it('includes always-measured sensors.json, assets, configFiles, package.json, lockfiles — not baseline.json (RF-2.12)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{"pack":"js-ts"}');
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":[]}');
+        fs.writeFileSync(path.join(root, 'package.json'), '{"name":"x"}');
+        fs.writeFileSync(path.join(root, 'package-lock.json'), '{}');
+        fs.writeFileSync(path.join(root, 'eslint.config.awm.mjs'), 'export default []');
+        fs.writeFileSync(path.join(root, 'tsconfig.json'), '{}');
+        fs.writeFileSync(path.join(root, 'src.ts'), 'x');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        const always = buildAlwaysMeasuredPaths({
+            sensorsJsonRel: '.awm/sensors.json',
+            assetRels: ['eslint.config.awm.mjs'],
+            configFileRels: ['tsconfig.json'],
+            includePackageJson: true,
+            packageRootRel: '',
+        });
+        expect(always).toEqual(expect.arrayContaining([
+            '.awm/sensors.json',
+            'eslint.config.awm.mjs',
+            'tsconfig.json',
+            'package.json',
+            'package-lock.json',
+        ]));
+        expect(always).not.toContain('.awm/sensors.baseline.json');
+
+        const withBaselinePoison = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: always,
+        });
+        expect(withBaselinePoison.ok).toBe(true);
+        if (!withBaselinePoison.ok) return;
+
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":["changed"]}');
+        const afterBaseline = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: always,
+        });
+        expect(afterBaseline.ok).toBe(true);
+        if (!afterBaseline.ok) return;
+        expect(afterBaseline.digest).toBe(withBaselinePoison.digest);
+
+        fs.writeFileSync(path.join(root, 'package.json'), '{"name":"y"}');
+        const afterPkg = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: always,
+        });
+        expect(afterPkg.ok).toBe(true);
+        if (!afterPkg.ok) return;
+        expect(afterPkg.digest).not.toBe(withBaselinePoison.digest);
+    });
+
+    it('hard-excludes .awm/sensors.baseline.json from cache digest even when globs match it (RF-2.12/2.13)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), '{"pack":"js-ts"}');
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":["old"]}');
+        fs.writeFileSync(path.join(root, 'other.json'), '{"x":1}');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        const before = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(before.ok).toBe(true);
+        if (!before.ok) return;
+        expect(before.matchedPaths).not.toContain('.awm/sensors.baseline.json');
+        expect(before.matchedPaths).toEqual(expect.arrayContaining(['.awm/sensors.json', 'other.json']));
+
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.baseline.json'), '{"lint":["new-fingerprint"]}');
+        const afterBaselineEdit = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(afterBaselineEdit.ok).toBe(true);
+        if (!afterBaselineEdit.ok) return;
+        expect(afterBaselineEdit.digest).toBe(before.digest);
+
+        fs.writeFileSync(path.join(root, 'other.json'), '{"x":2}');
+        const afterOther = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.json'],
+            alwaysMeasuredRepoRels: ['.awm/sensors.json'],
+        });
+        expect(afterOther.ok).toBe(true);
+        if (!afterOther.ok) return;
+        expect(afterOther.digest).not.toBe(before.digest);
+    });
+
+    it('never follows symlinks when hashing file contents (RF-2.1 security)', () => {
+        const root = initRepo();
+        roots.push(root);
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-out-'));
+        roots.push(outside);
+        fs.writeFileSync(path.join(outside, 'secret'), 'SECRET');
+        fs.symlinkSync(path.join(outside, 'secret'), path.join(root, 'trap.ts'));
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        const trap = digest.contributions.find((c) => c.path === 'trap.ts');
+        expect(trap?.kind).toBe('symlink');
+        expect(JSON.stringify(digest)).not.toContain('SECRET');
+    });
+
+    it('fails closed when git cannot list files (RF-E.2)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-nogit-'));
+        roots.push(root);
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest).toEqual({ ok: false, reason: 'git-failed' });
+    });
+
+    it('matches globs relative to packageRoot in a monorepo layout', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, 'cli', 'src'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'cli', 'src', 'a.ts'), 'a');
+        fs.writeFileSync(path.join(root, 'other.ts'), 'o');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: path.join(root, 'cli'),
+            inputGlobs: ['src/**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(digest.matchedPaths).toContain('cli/src/a.ts');
+        expect(digest.matchedPaths).not.toContain('other.ts');
+    });
+
+    it('treats intermediate directory symlink escapes as ABSENT and never reads outside secrets (QA-1)', () => {
+        const root = initRepo();
+        roots.push(root);
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-parent-esc-'));
+        roots.push(outside);
+        fs.writeFileSync(path.join(outside, 'secret.ts'), 'OUTSIDE_SECRET_CONTENT');
+        fs.mkdirSync(path.join(root, 'nested'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'nested', 'ok.ts'), 'inside');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+        // Replace parent dir with a symlink that redirects into OUTSIDE.
+        fs.rmSync(path.join(root, 'nested'), { recursive: true, force: true });
+        fs.symlinkSync(outside, path.join(root, 'nested'));
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['nested/**/*.ts'],
+            alwaysMeasuredRepoRels: ['nested/ok.ts'],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(JSON.stringify(digest)).not.toContain('OUTSIDE_SECRET_CONTENT');
+        for (const c of digest.contributions.filter((x) => x.path.startsWith('nested/'))) {
+            expect(c.kind).toBe('absent');
+            expect(c.marker).toBe(ABSENT_MARKER);
+        }
+    });
+
+    it('rejects unsafe repoRel shapes before join (QA-2)', () => {
+        expect(isSafeRepoRel('src/a.ts')).toBe(true);
+        expect(isSafeRepoRel('')).toBe(false);
+        expect(isSafeRepoRel('.')).toBe(false);
+        expect(isSafeRepoRel('..')).toBe(false);
+        expect(isSafeRepoRel('../x')).toBe(false);
+        expect(isSafeRepoRel('/abs')).toBe(false);
+        expect(isSafeRepoRel('a/../b')).toBe(false);
+        expect(isSafeRepoRel('a/./b')).toBe(false);
+        expect(() => buildAlwaysMeasuredPaths({
+            sensorsJsonRel: '../escape/sensors.json',
+            assetRels: [],
+            configFileRels: [],
+            includePackageJson: false,
+            packageRootRel: '',
+        })).toThrow(/relative|contain|safe|escape|\.\./i);
+        expect(() => buildAlwaysMeasuredPaths({
+            sensorsJsonRel: '.awm/sensors.json',
+            assetRels: ['../evil'],
+            configFileRels: [],
+            includePackageJson: false,
+            packageRootRel: 'cli',
+        })).toThrow(/relative|contain|safe|escape|\.\./i);
+    });
+
+    it('rejects unsafe alwaysMeasuredRepoRels loudly in computeCacheInputDigest', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.writeFileSync(path.join(root, 'a.ts'), 'x');
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'init']);
+
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: ['../escape'],
+        })).toThrow(/alwaysMeasured|safe|relative|escape|\.\./i);
+
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: ['a/../b.ts'],
+        })).toThrow(/alwaysMeasured|safe|relative|escape|\.\./i);
+    });
+
+    it('caps hashed file size and fail-closes oversized inputs (QA-6)', () => {
+        const root = initRepo();
+        roots.push(root);
+        const big = path.join(root, 'big.ts');
+        const fd = fs.openSync(big, 'w');
+        fs.writeSync(fd, Buffer.alloc(1, 0x61));
+        fs.ftruncateSync(fd, MAX_DIGEST_FILE_BYTES + 1);
+        fs.closeSync(fd);
+        git(root, ['add', '-A']);
+        git(root, ['commit', '-qm', 'big']);
+
+        const digest = computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: root,
+            inputGlobs: ['**/*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        const contrib = digest.contributions.find((c) => c.path === 'big.ts');
+        expect(contrib?.kind).toBe('absent');
+        expect(contrib?.marker).toBe(ABSENT_MARKER);
+    });
+});

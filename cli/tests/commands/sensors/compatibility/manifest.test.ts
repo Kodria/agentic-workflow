@@ -450,4 +450,109 @@ describe('sensor manifest contract', () => {
             expect(soft.invalidEntries.some(entry => /not valid JSON|valid JSON/i.test(entry.reason))).toBe(false);
         });
     });
+
+    describe('inputs and sensor-level closureOnly (RF-1.1, RF-1.3, RF-1.5, RF-1.7, RF-1.8)', () => {
+        it('accepts inputs and closureOnly on pack-bound and project-declared entries', () => {
+            const packBound = {
+                ...validV2Manifest().sensors.lint,
+                inputs: ['**/*.ts', 'src/**/?est.ts'],
+                closureOnly: true,
+            };
+            const project = projectSensor({
+                inputs: ['lib/**/*.js'],
+                closureOnly: false,
+            });
+            const parsed = parseSensorManifest({
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                pack: 'js-ts',
+                source: { registry: 'baseline' },
+                sensors: { lint: packBound, custom: project },
+            }, 'sensors.json');
+            expect(parsed).toMatchObject({
+                kind: 'v3',
+                pack: {
+                    sensors: {
+                        lint: { inputs: ['**/*.ts', 'src/**/?est.ts'], closureOnly: true },
+                        custom: { inputs: ['lib/**/*.js'], closureOnly: false },
+                    },
+                },
+            });
+        });
+
+        it('accepts inputs and closureOnly on v2 pack-bound sensors', () => {
+            const manifest = validV2Manifest();
+            (manifest.sensors.lint as Record<string, unknown>).inputs = ['**/*.[jt]s'];
+            (manifest.sensors.lint as Record<string, unknown>).closureOnly = true;
+            expect(parseSensorManifest(manifest, 'sensors.json')).toMatchObject({
+                kind: 'v2',
+                pack: { sensors: { lint: { inputs: ['**/*.[jt]s'], closureOnly: true } } },
+            });
+        });
+
+        it('treats omitted closureOnly as false and does not invent inputs (RF-1.8)', () => {
+            const parsed = parseSensorManifest(v3WithPackAndProject(), 'sensors.json');
+            expect(parsed).toMatchObject({ kind: 'v3' });
+            if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') throw new Error('expected v3 project-sensors');
+            const lint = parsed.pack.sensors.lint as { closureOnly?: boolean; inputs?: string[] };
+            const custom = parsed.pack.sensors.custom as { closureOnly?: boolean; inputs?: string[] };
+            expect(lint.closureOnly ?? false).toBe(false);
+            expect(custom.closureOnly ?? false).toBe(false);
+            expect('inputs' in lint).toBe(false);
+            expect('inputs' in custom).toBe(false);
+        });
+
+        it.each([
+            [[''], /sensors\.custom\.inputs\[0\] must be a nonempty single-line/],
+            [['/abs/path'], /sensors\.custom\.inputs\[0\].*absolute paths are invalid/],
+            [['C:/windows'], /sensors\.custom\.inputs\[0\].*absolute paths are invalid/],
+            [['has\u0000nul'], /sensors\.custom\.inputs\[0\].*NUL or control/],
+            [['../escape'], /sensors\.custom\.inputs\[0\].*contained relative glob/],
+            [['foo/../bar'], /sensors\.custom\.inputs\[0\].*contained relative glob/],
+            [['a{b,c}'], /sensors\.custom\.inputs\[0\].*brace expansion/],
+            [['!negated'], /sensors\.custom\.inputs\[0\].*negation/],
+            [['path/with!bang'], /sensors\.custom\.inputs\[0\].*negation/],
+            [[], /sensors\.custom\.inputs must be a nonempty array/],
+            [['@(a|b).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['+(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['*(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['?(a).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+            [['(a|b).ts'], /sensors\.custom\.inputs\[0\].*(?:extglob|parentheses)/],
+        ])('rejects invalid project inputs %j', (inputs, reason) => {
+            expect(() => parseSensorManifest(v3WithPackAndProject({ inputs }), 'sensors.json'))
+                .toThrow(reason);
+        });
+
+        it('soft-isolates a project entry with bad inputs while keeping siblings', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({ inputs: ['**/{a,b}.ts'] }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toEqual([
+                expect.objectContaining({
+                    name: 'custom',
+                    reason: expect.stringMatching(/sensors\.custom\.inputs\[0\].*brace expansion/),
+                }),
+            ]);
+            expect(soft.invalidEntries[0]?.reason).not.toMatch(/Invalid sensor pack/);
+            expect(soft).toMatchObject({
+                kind: 'v3',
+                pack: { sensors: { lint: { variantId: 'eslint-9' } } },
+            });
+            expect('custom' in (soft.pack as { sensors: Record<string, unknown> }).sensors).toBe(false);
+        });
+
+        it('rejects closureOnly on a non-boolean sensor field', () => {
+            const soft = parseSensorManifestWithIssues(
+                v3WithPackAndProject({ closureOnly: 'yes' }),
+                'sensors.json',
+            );
+            expect(soft.invalidEntries).toEqual([
+                expect.objectContaining({
+                    name: 'custom',
+                    reason: expect.stringMatching(/sensors\.custom\.closureOnly must be a boolean/),
+                }),
+            ]);
+        });
+    });
 });

@@ -46,14 +46,18 @@ export function registerSensorsCommand(program: Command): void {
         .option('--fast', 'run fast sensors only (tsc, lint)')
         .option('--slow', 'run slow sensors only (semgrep, mutation)')
         .option('--all', 'run all sensors regardless of speed')
+        .option('--slice', 'run every selected sensor except pack/project closureOnly (slice DONE gate)')
         .option('--changed', 'scope sensors that support it to the files changed vs --base')
         .option('--base <ref>', 'comparison point for --changed (default: HEAD, i.e. uncommitted work)')
+        .option('--no-cache', 'ignore fingerprint result cache and execute every selected sensor')
         .action(async (opts) => {
             // R2.2b: the receipt belongs to the manifest that runs (the one `runSensors` resolves from this cwd), not to the cwd.
             const pre = isFullSelection(opts) ? captureReceiptPrecondition(findManifestDir(process.cwd()) ?? process.cwd()) : null;
             const output = await runSensors({
-                fast: opts.fast, slow: opts.slow, all: opts.all,
+                fast: opts.fast, slow: opts.slow, all: opts.all, slice: opts.slice,
                 changed: opts.changed, base: opts.base,
+                // RF-2.11: only this CLI action enables the cache (unless --no-cache).
+                useCache: opts.cache !== false,
             });
             // Emit the verdict ALWAYS — an empty `sensors` with overall:'not_certified'
             // must be visible, never a silent exit-0 that reads as "clean".
@@ -167,6 +171,11 @@ export function registerSensorsCommand(program: Command): void {
             // the verdict; it is named so the gap is attributable. See #172.
             for (const [name, gap] of Object.entries(status.uninitialized ?? {})) {
                 console.log(`  ${pc.yellow('–')}  ${name.padEnd(12)} not initialized: ${gap.state}/${gap.reason}`);
+            }
+            // RF-3.4: enabled sensors without effective inputs are not cacheable.
+            // Non-blocking — same attribution pattern as uninitialized; does not exit.
+            for (const warning of status.warnings ?? []) {
+                console.log(`  ${pc.yellow('⚠')}  ${warning.sensor.padEnd(12)} ${warning.detail}`);
             }
             console.log('');
             if (status.overall !== 'READY') process.exit(1);

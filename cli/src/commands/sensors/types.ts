@@ -97,6 +97,34 @@ export type ExecutionEvidence = {
     scopeReason?: string;
 };
 
+export type SensorFailureKind = 'findings' | 'missing-binary' | 'exit-code';
+
+export type SensorCacheProvenance = {
+    originCommit?: string;
+    originDirty?: boolean;
+    inputDigest: string;
+    sensorFingerprint: string;
+};
+
+/** Measurement attached when a sensor had authored `inputs` (receipt schema 2 / RF-4.3). */
+export type SensorMeasurement = {
+    inputs: string[];
+    /**
+     * Repo-root-relative package root at certification (`''` for repository root).
+     * Required so late-path validate can rematch `inputs` globs against new files (RF-4.5).
+     */
+    packageRootRel: string;
+    inputDigest: string;
+    sensorFingerprint: string;
+    /** Repo-root POSIX paths hashed into `inputDigest` (inputs matches ∪ cache always-measured). */
+    measuredPaths: string[];
+    /**
+     * Validate always-measured paths for this sensor (RF-2.12 validate set), including
+     * baseline.json. Merged into the receipt's `alwaysMeasuredPaths`.
+     */
+    alwaysMeasuredPaths?: string[];
+};
+
 export type SensorResult = {
     name: string;
     /**
@@ -120,6 +148,16 @@ export type SensorResult = {
      */
     status: 'pass' | 'fail' | 'inconclusive' | 'skipped';
     errors: SensorError[];
+    /**
+     * Distinguishes fail modes for cache policy (RF-2.4). Present only when
+     * `status === 'fail'`.
+     */
+    failureKind?: SensorFailureKind;
+    /** Set when this status came from the fingerprint result cache (RF-2.2/2.8). */
+    cached?: true;
+    cacheProvenance?: SensorCacheProvenance;
+    /** Present when the sensor had authored inputs at run time (RF-4.3). */
+    measurement?: SensorMeasurement;
     skipReason?: string;
     /**
      * Which tool version produced this verdict: the registry's frozen one
@@ -194,6 +232,12 @@ export type SensorCheck = {
     certification?: 'project-declared';
 };
 
+/** Non-blocking RF-3.4 note: enabled sensor has no effective `inputs`, so it is not cacheable. */
+export type SensorStatusWarning = {
+    sensor: string;
+    detail: string;
+};
+
 export type SensorAuthority = {
     mode: 'project-sensors' | 'legacy-v1' | 'native-gate' | 'opt-out' | 'missing' | 'invalid' | 'source-unavailable' | 'source-ambiguous';
     reason: string;
@@ -226,4 +270,9 @@ export type SensorStatusResult = {
      * gate-policy decision, not a reporting one. See #172.
      */
     uninitialized?: Record<string, { state: string; reason: string }>;
+    /**
+     * Enabled configured sensors that lack effective `inputs` and therefore are not
+     * cacheable (RF-3.4). Present only when non-empty. Does not feed `overall`.
+     */
+    warnings?: SensorStatusWarning[];
 } & Partial<SensorAuthority>;

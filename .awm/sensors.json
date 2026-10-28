@@ -17,6 +17,8 @@
           "--config",
           "eslint.config.awm.mjs",
           "--cache",
+          "--cache-location",
+          "node_modules/.cache/eslint/",
           "--format",
           "json"
         ]

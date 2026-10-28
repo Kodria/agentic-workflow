@@ -1,6 +1,8 @@
+import crypto from 'crypto';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { SensorManifest, RunOutput, PreparedSensorExecution } from './types';
+import { SensorManifest, RunOutput, PreparedSensorExecution, SensorResult } from './types';
 import { readBaseline } from './baseline';
 import { applyBaseline, executePrepared } from './result';
 export { applyBaseline };
@@ -22,7 +24,7 @@ import {
     type V3ManifestSensor,
 } from './compatibility/manifest';
 import { discoverPresentMarkers } from './compatibility/discovery';
-import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
+import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
 import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
@@ -36,6 +38,24 @@ import {
     snapshotUnavailableRemedy,
     type ExclusionPolicy,
 } from './read-only-observation';
+import {
+    buildAlwaysMeasuredPaths,
+    CACHE_DIGEST_BASELINE_REL,
+    computeCacheInputDigest,
+    joinRepoRel,
+    toSafeRepoRel,
+} from './inputs-digest';
+import {
+    canCacheRawResult,
+    computeSensorFingerprint,
+    readResultCache,
+    toCacheRaw,
+    writeResultCache,
+} from './result-cache';
+import { cliVersion } from '../../core/cli-version';
+import { gitState } from '../../core/changes/worktree';
+import { repoRoot as resolveGitRoot } from '../../core/changes/git';
+import type { SensorMeasurement } from './types';
 
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
@@ -62,7 +82,249 @@ export type RunOptions = {
      * so a changed worktree makes their result unusable as read-only evidence.
      */
     readOnly?: boolean;
+    /** Skip `closureOnly` sensors (RF-5.10). Makes selection non-full for receipts. */
+    slice?: boolean;
+    /**
+     * Opt-in fingerprint result cache (RF-2.11). Only `awm sensors run` sets this
+     * true (unless `--no-cache`). ignoreBaseline / readOnly callers must leave it unset.
+     */
+    useCache?: boolean;
 };
+
+type CachePlan = {
+    gitRoot: string;
+    projectKey: string;
+    sensorFingerprint: string;
+    inputDigest: string;
+    inputGlobs: string[];
+    /** Repo-root-relative package root (`''` at repository root) for receipt rematch. */
+    packageRootRel: string;
+    alwaysMeasuredRepoRels: string[];
+    measuredPaths: string[];
+    /** Validate always-measured (cache set ∪ baseline.json), repo-root POSIX. */
+    validateAlwaysMeasuredRepoRels: string[];
+    /**
+     * False when live tool/runtime versions are unavailable (RF-2.10): digests still
+     * attach for schema-2 receipts (RF-4.6) but cache read/write stay disabled.
+     */
+    cacheable: boolean;
+};
+
+type PreparedSlot = {
+    execution: PreparedSensorExecution;
+    cachePlan: CachePlan | null;
+};
+
+/** Relative POSIX under gitRoot; realpath both sides (Windows-safe). Empty when same path. */
+function posixJoinRel(root: string, abs: string): string {
+    return toSafeRepoRel(root, abs);
+}
+
+function effectiveClosureOnly(
+    projectOrPack: { closureOnly?: boolean } | null | undefined,
+    liveSensor: SensorPackSensor | undefined,
+): boolean {
+    if (projectOrPack && projectOrPack.closureOnly !== undefined) return projectOrPack.closureOnly;
+    if (liveSensor && liveSensor.closureOnly !== undefined) return liveSensor.closureOnly;
+    return false;
+}
+
+function effectiveInputs(
+    manifestInputs: string[] | undefined,
+    variant: SensorVariant | undefined,
+): string[] | undefined {
+    if (manifestInputs && manifestInputs.length > 0) return manifestInputs;
+    if (variant?.inputs && variant.inputs.length > 0) return variant.inputs;
+    return undefined;
+}
+
+function includePackageJsonForVariant(variant: SensorVariant | undefined): boolean {
+    if (!variant) return false;
+    if (variant.command.packageManager) return true;
+    if (variant.requirements.packageJsonFields && variant.requirements.packageJsonFields.length > 0) return true;
+    if (variant.probe.kind === 'package-script-present') return true;
+    return false;
+}
+
+function sliceSkipExecution(name: string, requestedScope: PreparedSensorExecution['requestedScope']): PreparedSensorExecution {
+    return {
+        name,
+        timeoutMs: 1,
+        timeoutSource: 'fallback',
+        requestedScope,
+        effectiveScope: 'full',
+        syntheticStatus: 'skipped',
+        syntheticReason: 'closureOnly: skipped by --slice',
+    };
+}
+
+function buildCachePlan(args: {
+    gitRoot: string;
+    packageRoot: string;
+    manifestPath: string;
+    sensorId: string;
+    inputGlobs: string[];
+    variant: SensorVariant | undefined;
+    liveState: CompatibilityEvidence | undefined;
+    assets: string[] | undefined;
+    /** Project-declared command when no pack variant exists. */
+    command?: StructuredCommand;
+}): CachePlan | null {
+    const toolVersion = args.liveState?.toolVersion;
+    const runtimeVersion = args.liveState?.runtimeVersion;
+    const command = args.variant?.command ?? args.command ?? null;
+    const fingerprintParts = {
+        variantId: args.liveState?.variantId ?? args.variant?.id ?? null,
+        command,
+        changedCommand: args.variant?.changedCommand,
+        cliVersion: cliVersion(),
+        inputs: args.inputGlobs,
+        toolVersion,
+        runtimeVersion,
+    };
+    // Cache requires live versions (RF-2.10). Receipt measurements still need a fingerprint
+    // when versions are absent so project-declared sensors with inputs do not demote RF-4.6.
+    const cacheFingerprint = computeSensorFingerprint(fingerprintParts);
+    const fingerprint = cacheFingerprint
+        ?? computeSensorFingerprint(fingerprintParts, { allowMissingLiveVersions: true });
+    if (fingerprint === null) return null;
+
+    const packageRootRel = posixJoinRel(args.gitRoot, args.packageRoot);
+    const sensorsJsonRel = posixJoinRel(args.gitRoot, args.manifestPath);
+    const includePackageJson = args.variant
+        ? includePackageJsonForVariant(args.variant)
+        : Boolean(args.command?.packageManager);
+    const alwaysMeasuredRepoRels = buildAlwaysMeasuredPaths({
+        sensorsJsonRel,
+        assetRels: args.assets ?? args.variant?.assets ?? [],
+        configFileRels: args.variant?.requirements.configFiles ?? [],
+        includePackageJson,
+        packageRootRel: packageRootRel === '' ? '' : packageRootRel,
+    });
+    const digest = computeCacheInputDigest({
+        gitRoot: args.gitRoot,
+        packageRoot: args.packageRoot,
+        inputGlobs: args.inputGlobs,
+        alwaysMeasuredRepoRels,
+    });
+    if (!digest.ok) return null;
+    const projectKey = `sha256:${crypto.createHash('sha256').update(`${args.manifestPath}\0${args.packageRoot}`).digest('hex')}`;
+    // Baseline is excluded from the cache digest but required for validate (RF-2.12 / RF-4.5).
+    // Derive from the already-safe packageRootRel — do NOT posixJoinRel an absolute path to a
+    // often-missing baseline file (realpath falls back → Windows path.relative goes absolute).
+    const baselineForValidate = packageRootRel === ''
+        ? CACHE_DIGEST_BASELINE_REL
+        : joinRepoRel(packageRootRel, CACHE_DIGEST_BASELINE_REL);
+    const validateAlwaysMeasuredRepoRels = [...new Set([
+        ...alwaysMeasuredRepoRels,
+        baselineForValidate,
+    ])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const rootRel = packageRootRel === '' ? '' : packageRootRel;
+    return {
+        gitRoot: args.gitRoot,
+        projectKey,
+        sensorFingerprint: fingerprint,
+        inputDigest: digest.digest,
+        inputGlobs: args.inputGlobs,
+        packageRootRel: rootRel,
+        alwaysMeasuredRepoRels,
+        measuredPaths: digest.matchedPaths,
+        validateAlwaysMeasuredRepoRels,
+        cacheable: cacheFingerprint !== null,
+    };
+}
+
+function measurementFromPlan(plan: CachePlan): SensorMeasurement {
+    return {
+        inputs: [...plan.inputGlobs],
+        packageRootRel: plan.packageRootRel,
+        inputDigest: plan.inputDigest,
+        sensorFingerprint: plan.sensorFingerprint,
+        measuredPaths: [...plan.measuredPaths],
+        alwaysMeasuredPaths: [...plan.validateAlwaysMeasuredRepoRels],
+    };
+}
+
+async function runPreparedSlot(
+    slot: PreparedSlot,
+    projectCwd: string,
+    baseline: ReturnType<typeof readBaseline>,
+    cacheEnabled: boolean,
+    writeCache: boolean,
+): Promise<SensorResult> {
+    const { execution, cachePlan } = slot;
+    // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
+    // be overridden by a prior cache hit.
+    const synthetic = execution.syntheticStatus !== undefined;
+    // RF-2.10: cacheable is false without live versions — still attach measurements below.
+    if (cacheEnabled && cachePlan?.cacheable && !synthetic) {
+        const cached = readResultCache(cachePlan.gitRoot, {
+            sensorId: execution.name,
+            projectKey: cachePlan.projectKey,
+            sensorFingerprint: cachePlan.sensorFingerprint,
+            inputDigest: cachePlan.inputDigest,
+        });
+        if (cached) {
+            const raw: SensorResult = {
+                name: cached.raw.name,
+                status: cached.raw.status,
+                errors: cached.raw.errors,
+                ...(cached.raw.failureKind ? { failureKind: cached.raw.failureKind } : {}),
+                ...(cached.raw.certification ? { certification: cached.raw.certification } : {}),
+                ...(cached.raw.skipReason ? { skipReason: cached.raw.skipReason } : {}),
+                cached: true,
+                cacheProvenance: {
+                    ...(cached.originCommit ? { originCommit: cached.originCommit } : {}),
+                    originDirty: cached.originDirty,
+                    inputDigest: cached.inputDigest,
+                    sensorFingerprint: cached.sensorFingerprint,
+                },
+                measurement: measurementFromPlan(cachePlan),
+                execution: {
+                    timeoutMs: execution.timeoutMs,
+                    timeoutSource: execution.timeoutSource,
+                    elapsedMs: 0,
+                    requestedScope: execution.requestedScope,
+                    effectiveScope: execution.effectiveScope,
+                },
+            };
+            return baseline ? applyBaseline(raw, baseline[execution.name]) : raw;
+        }
+    }
+
+    const raw = await executePrepared(execution, projectCwd);
+    if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
+        const after = computeCacheInputDigest({
+            gitRoot: cachePlan.gitRoot,
+            packageRoot: projectCwd,
+            inputGlobs: cachePlan.inputGlobs,
+            alwaysMeasuredRepoRels: cachePlan.alwaysMeasuredRepoRels,
+        });
+        if (after.ok && after.digest === cachePlan.inputDigest) {
+            const state = gitState(cachePlan.gitRoot, true);
+            const originCommit = state.kind === 'ok' ? state.commit : null;
+            const originDirty = state.kind === 'ok' ? state.dirty : true;
+            try {
+                writeResultCache(cachePlan.gitRoot, {
+                    schema: 1,
+                    sensorId: execution.name,
+                    projectKey: cachePlan.projectKey,
+                    sensorFingerprint: cachePlan.sensorFingerprint,
+                    inputDigest: cachePlan.inputDigest,
+                    originCommit,
+                    originDirty,
+                    raw: toCacheRaw(raw),
+                });
+            } catch {
+                // Cache write is best-effort beside the verdict; never fail the run.
+            }
+        }
+    }
+    const withMeasurement: SensorResult = cachePlan
+        ? { ...raw, measurement: measurementFromPlan(cachePlan) }
+        : raw;
+    return baseline ? applyBaseline(withMeasurement, baseline[execution.name]) : withMeasurement;
+}
 
 async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveParsedPackCompatibility>> | null> {
     try {
@@ -237,7 +499,21 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         : null;
     const drift = parsed.kind === 'legacy' ? detectPackDrift(manifestDir, parsed.pack) : undefined;
     const requestedScope = opts.changed ? 'changed' as const : 'full' as const;
-    const prepared: PreparedSensorExecution[] = [];
+    const prepared: PreparedSlot[] = [];
+    const cacheEnabled = opts.useCache === true && !opts.ignoreBaseline && !opts.readOnly;
+    const writeCache = cacheEnabled && requestedScope === 'full';
+    // Realpath so Windows git toplevel / Node path forms agree before cache digests.
+    const gitRootRaw = resolveGitRoot(manifestDir) ?? manifestDir;
+    let gitRoot = gitRootRaw;
+    try {
+        gitRoot = fs.realpathSync.native(path.resolve(gitRootRaw));
+    } catch {
+        try {
+            gitRoot = fs.realpathSync(path.resolve(gitRootRaw));
+        } catch {
+            gitRoot = path.resolve(gitRootRaw);
+        }
+    }
 
     const activeManifest = parsed.pack as unknown as SensorManifest;
     const sensorsMap = activeManifest.sensors ?? {};
@@ -263,6 +539,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         } else if (projectEntry !== null) {
             const fast = projectEntry.fast ?? false;
             if (!shouldRun(fast, opts)) continue;
+            if (opts.slice && effectiveClosureOnly(projectEntry, undefined)) {
+                prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+                continue;
+            }
             const markers = [
                 ...(projectEntry.applicability?.allFiles ?? []),
                 ...(projectEntry.applicability?.anyFiles ?? []),
@@ -278,9 +558,27 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 projectTimeout: projectEntry.timeout,
                 applicabilityPaths,
             });
-            prepared.push(projectEntry.enabled === false
-                ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
-                : execution);
+            const disabled = projectEntry.enabled === false
+                ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
+                : execution;
+            // Project-declared sensors have no live tool/runtime versions → never cache (RF-2.10),
+            // but still attach digests/measurements when authored inputs exist (RF-4.6).
+            let projectPlan: CachePlan | null = null;
+            const projectInputs = effectiveInputs(projectEntry.inputs, undefined);
+            if (projectInputs) {
+                projectPlan = buildCachePlan({
+                    gitRoot,
+                    packageRoot: projectCwd,
+                    manifestPath: configured.manifestPath,
+                    sensorId: name,
+                    inputGlobs: projectInputs,
+                    variant: undefined,
+                    liveState: undefined,
+                    assets: projectEntry.assets,
+                    command: projectEntry.command,
+                });
+            }
+            prepared.push({ execution: disabled, cachePlan: projectPlan });
             continue;
         }
 
@@ -318,6 +616,11 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             : (entry as { fast?: boolean }).fast ?? false;
         if (!shouldRun(fast, opts)) continue;
 
+        if (opts.slice && effectiveClosureOnly(packBoundSensor as { closureOnly?: boolean }, liveSensor)) {
+            prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+            continue;
+        }
+
         const execution = parsed.kind !== 'legacy'
             ? prepareV2Sensor({
                 name,
@@ -333,15 +636,41 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 requestedScope,
                 changed: changed ?? undefined,
             });
-        prepared.push((packBoundSensor as { enabled?: boolean }).enabled === false
-            ? { ...execution, command: undefined, syntheticStatus: 'skipped', syntheticReason: 'disabled' }
-            : execution);
+        const ready = (packBoundSensor as { enabled?: boolean }).enabled === false
+            ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
+            : execution;
+
+        // Measurement (and optional cache) when the sensor has authored inputs — even under
+        // `--no-cache`, so schema-2 receipts still carry digests (RF-4.3 / RF-2.9).
+        let cachePlan: CachePlan | null = null;
+        if (parsed.kind !== 'legacy') {
+            const variantId = (packBoundSensor as PackBoundManifestSensor).variantId;
+            const variant = liveSensor?.variants.find((candidate) => candidate.id === variantId)
+                ?? liveSensor?.variants.find((candidate) => candidate.id === liveState?.variantId);
+            const inputs = effectiveInputs((packBoundSensor as PackBoundManifestSensor).inputs, variant);
+            if (inputs) {
+                cachePlan = buildCachePlan({
+                    gitRoot,
+                    packageRoot: projectCwd,
+                    manifestPath: configured.manifestPath,
+                    sensorId: name,
+                    inputGlobs: inputs,
+                    variant,
+                    liveState,
+                    assets: (packBoundSensor as PackBoundManifestSensor).assets ?? variant?.assets,
+                });
+            }
+        }
+        prepared.push({ execution: ready, cachePlan });
     }
 
-    const results = await pooled(prepared.map(entry => async () => {
-        const result = await executePrepared(entry, projectCwd);
-        return baseline ? applyBaseline(result, baseline[entry.name]) : result;
-    }), resolveConcurrency(activeManifest, prepared.length));
+    const results = await pooled(prepared.map(slot => async () => runPreparedSlot(
+        slot,
+        projectCwd,
+        baseline,
+        cacheEnabled,
+        writeCache,
+    )), resolveConcurrency(activeManifest, prepared.length));
 
     let overall = reduceVerdict(results);
     // Legacy commands retain operational compatibility but their shell-backed

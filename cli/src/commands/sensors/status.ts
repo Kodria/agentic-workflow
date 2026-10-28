@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { resolveOnPath } from '../../core/paths';
-import { SensorCheck, SensorStatusResult } from './types';
+import { SensorCheck, SensorStatusResult, SensorStatusWarning } from './types';
 import { parseSensorPack } from './compatibility/contract';
 import { discoverProjectEvidence } from './compatibility/discovery';
 import { bindContainedRuntimeCommands } from './compatibility/live';
@@ -10,7 +10,7 @@ import { resolveProjectCompatibility, resolveSensorCompatibility } from './compa
 import { resolveSensorProject, softRecoverInvalidProject } from './project';
 import { resolveSensorSource, type SensorSourceResolution } from './compatibility/source';
 import { listRegistries } from '../../core/registries';
-import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
+import type { CompatibilityEvidence, SensorPackV2, StructuredCommand } from './compatibility/types';
 import {
     isProjectDeclaredSensor,
     type ProjectDeclaredSensor,
@@ -18,6 +18,79 @@ import {
     type SensorManifestV3ProjectSensors,
     type V3ManifestSensor,
 } from './compatibility/manifest';
+
+const UNCACHEABLE_DETAIL = 'not cacheable: no effective inputs';
+
+function hasAuthoredInputs(inputs: string[] | undefined): boolean {
+    return Array.isArray(inputs) && inputs.length > 0;
+}
+
+/** RF-1 effective inputs: project override ?? pack-variant inputs. */
+function hasEffectiveInputs(
+    manifestInputs: string[] | undefined,
+    variantInputs: string[] | undefined,
+): boolean {
+    return hasAuthoredInputs(manifestInputs) || hasAuthoredInputs(variantInputs);
+}
+
+function uncacheableWarning(sensor: string): SensorStatusWarning {
+    return { sensor, detail: UNCACHEABLE_DETAIL };
+}
+
+function withWarnings<T extends SensorStatusResult>(result: T, warnings: SensorStatusWarning[]): T {
+    return warnings.length === 0 ? result : { ...result, warnings };
+}
+
+function variantInputsFromPack(
+    pack: SensorPackV2 | null,
+    sensorName: string,
+    variantId: string | undefined,
+): string[] | undefined {
+    if (!pack || !variantId) return undefined;
+    const sensor = pack.sensors[sensorName];
+    const variant = sensor?.variants.find(candidate => candidate.id === variantId);
+    return variant?.inputs;
+}
+
+function parsePackForInputs(source: PackSource): SensorPackV2 | null {
+    try {
+        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+        return parsed.kind === 'v2' ? parsed.pack : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Enabled v2/v3 sensors without effective inputs → RF-3.4 warnings (never blocks overall). */
+function collectConfiguredInputsWarnings(
+    sensors: Record<string, V3ManifestSensor | SensorManifestV2['sensors'][string]>,
+    pack: SensorPackV2 | null = null,
+): SensorStatusWarning[] {
+    const warnings: SensorStatusWarning[] = [];
+    for (const [name, raw] of Object.entries(sensors)) {
+        if ((raw as { enabled?: boolean }).enabled === false) continue;
+        if (isProjectDeclaredSensor(raw as V3ManifestSensor)) {
+            if (!hasAuthoredInputs((raw as ProjectDeclaredSensor).inputs)) {
+                warnings.push(uncacheableWarning(name));
+            }
+            continue;
+        }
+        const packBound = raw as SensorManifestV2['sensors'][string];
+        if (!hasEffectiveInputs(packBound.inputs, variantInputsFromPack(pack, name, packBound.variantId))) {
+            warnings.push(uncacheableWarning(name));
+        }
+    }
+    return warnings;
+}
+
+/** Legacy v1 sensors never author `inputs` — every enabled entry is uncacheable. */
+function collectLegacyInputsWarnings(
+    sensors: Record<string, { enabled?: boolean }>,
+): SensorStatusWarning[] {
+    return Object.entries(sensors)
+        .filter(([, config]) => config?.enabled !== false)
+        .map(([name]) => uncacheableWarning(name));
+}
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
 function npxTool(parts: string[]): string | undefined {
@@ -381,12 +454,12 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
                 checks[name] = { ok: false, detail: 'pack-bound sensor requires a nonempty pack' };
             }
         }
-        return {
+        return withWarnings({
             overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
             pack: null,
             checks,
             ...projectMetadata(project, 'project-sensors', 'project-declared-only'),
-        };
+        }, collectConfiguredInputsWarnings(parsed.pack.sensors));
     }
 
     if (parsed.kind === 'v2' || parsed.kind === 'v3') {
@@ -402,6 +475,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         if (!('source' in resolution)) return sourceFailure(project, packId ?? 'unknown', resolution);
         const sourceMeta = resolvedSourceMetadata(resolution);
         const liveIds = livePackSensorIds(resolution.source);
+        const packForInputs = parsePackForInputs(resolution.source);
         const packManifest = packBoundOnly(parsedPack);
         const checks: Record<string, SensorCheck> = {};
         let compatibility: Record<string, CompatibilityEvidence>;
@@ -420,7 +494,10 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
                         : { ok: false, detail };
                 }
             }
-            return { overall: 'DEGRADED', pack: packId, checks, ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }) };
+            return withWarnings({
+                overall: 'DEGRADED', pack: packId, checks,
+                ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
+            }, collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs));
         }
         for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
             if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
@@ -434,12 +511,12 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
                 : staticCompatibilityCheck(packSensor, compatibility[name]) ?? checkStructuredCommand(packSensor.command, packageRoot, packSensor.assets);
         }
         const uninitialized = uninitializedSensors(packManifest, compatibility);
-        return {
+        return withWarnings({
             overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
             pack: packId, checks,
             ...(uninitialized ? { uninitialized } : {}),
             ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
-        };
+        }, collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs));
     }
 
     const manifest = parsed.pack;
@@ -449,8 +526,8 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         if (!config.cmd) { checks[name] = { ok: false, detail: 'no cmd configured' }; continue; }
         checks[name] = checkCmd(config.cmd, packageRoot);
     }
-    return {
+    return withWarnings({
         overall: Object.keys(manifest.sensors ?? {}).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
         pack: manifest.pack, checks, ...projectMetadata(project, 'project-sensors', 'legacy-v1'),
-    };
+    }, collectLegacyInputsWarnings(manifest.sensors ?? {}));
 }

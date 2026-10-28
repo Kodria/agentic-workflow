@@ -11,7 +11,7 @@ import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
-import { buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, sensorPairs, writeReceipt } from '../../../src/core/changes/receipt';
+import { allowsUnmeasuredRelaxation, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, sensorPairs, writeReceipt, type SensorReceiptV2 } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
 import { resolveSensorProject } from '../../../src/commands/sensors/project';
@@ -99,7 +99,7 @@ describe('receipt', () => {
     test('R2.3 the receipt carries schema, commit, ranAt, cliVersion and overall from the run', () => {
         const head = g('rev-parse', 'HEAD');
         const r = buildReceipt({ commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', output: { overall: 'fail', sensors: [{ name: 'lint', status: 'fail', errors: [] }] } as never });
-        expect(r).toMatchObject({ schema: 1, commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', overall: 'fail', sensors: { lint: 'fail' } });
+        expect(r).toMatchObject({ schema: 2, commit: head, ranAt: '2026-10-17T10:00:00.000Z', cliVersion: '9.20.0', overall: 'fail', sensors: { lint: 'fail' } });
     });
     posixOnly('R2.1 a receipt replacing an existing 0666 file ends with mode 0600', () => {
         const head = g('rev-parse', 'HEAD');
@@ -570,7 +570,7 @@ describe('receipt', () => {
         ['unknown sensor status', (r: Record<string, unknown>) => { (r.sensors as Record<string, string>).lint = 'ok'; }],
         ['array sensors', (r: Record<string, unknown>) => { r.sensors = []; }],
         ['null sensors', (r: Record<string, unknown>) => { r.sensors = null; }],
-        ['schema 2', (r: Record<string, unknown>) => { r.schema = 2; }],
+        ['schema 3', (r: Record<string, unknown>) => { r.schema = 3; }],
         ['non-string cliVersion', (r: Record<string, unknown>) => { r.cliVersion = 1; }],
         ['multi-line cliVersion', (r: Record<string, unknown>) => { r.cliVersion = '1.0\n2.0'; }],
         ['multi-line sensor name', (r: Record<string, unknown>) => { (r.sensors as Record<string, string>)['bad\nname'] = 'pass'; }],
@@ -852,5 +852,275 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
             expect(written(stderr)).toMatch(/^no sensor receipt written: the manifest that ran is not the repository root's/);
             expect(fs.existsSync(receiptsDir())).toBe(false);
         });
+    });
+
+    test('RF-4.2/4.4: all-cached clean full gate still writes a HEAD receipt (digest is authority)', async () => {
+        (runSensors as jest.Mock).mockResolvedValue({
+            overall: 'pass',
+            sensors: [
+                {
+                    name: 'lint',
+                    status: 'pass',
+                    errors: [],
+                    cached: true,
+                    cacheProvenance: {
+                        originCommit: 'c'.repeat(40),
+                        originDirty: false,
+                        inputDigest: `sha256:${'d'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'e'.repeat(64)}`,
+                    },
+                    measurement: {
+                        inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
+                        inputDigest: `sha256:${'d'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'e'.repeat(64)}`,
+                        measuredPaths: ['a.txt', '.awm/sensors.json'],
+                    },
+                },
+                {
+                    name: 'a-typecheck',
+                    status: 'pass',
+                    errors: [],
+                    cached: true,
+                    cacheProvenance: {
+                        inputDigest: `sha256:${'f'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'e'.repeat(64)}`,
+                    },
+                    measurement: {
+                        inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
+                        inputDigest: `sha256:${'f'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'e'.repeat(64)}`,
+                        measuredPaths: ['a.txt', '.awm/sensors.json'],
+                    },
+                },
+            ],
+            manifestPath: rootManifest(),
+        });
+        await runCli();
+        expect(written(stderr)).toBe('');
+        expect(process.exitCode).toBe(0);
+        const head = g('rev-parse', 'HEAD');
+        const read = readReceipt(root, head);
+        expect(read.ok).toBe(true);
+        if (!read.ok) return;
+        expect(read.receipt.schema).toBe(2);
+        expect(read.receipt.sensors).toEqual({ 'a-typecheck': 'pass', lint: 'pass' });
+    });
+});
+
+describe('RF-4.3 receipt schema 2', () => {
+    test('buildReceipt writes schema 2 with measurements and alwaysMeasuredPaths including baseline', () => {
+        const head = g('rev-parse', 'HEAD');
+        const r = buildReceipt({
+            commit: head,
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '9.21.0',
+            output: {
+                overall: 'pass',
+                sensors: [{
+                    name: 'lint',
+                    status: 'pass',
+                    errors: [],
+                    measurement: {
+                        inputs: ['src/**/*.ts'],
+                        packageRootRel: '',
+                        inputDigest: `sha256:${'1'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                        measuredPaths: ['src/a.ts', '.awm/sensors.json', 'package-lock.json'],
+                    },
+                }],
+            } as never,
+            alwaysMeasuredPaths: ['.awm/sensors.json', '.awm/sensors.baseline.json', 'package-lock.json'],
+        });
+        expect(r.schema).toBe(2);
+        expect(r.sensors).toEqual({ lint: 'pass' });
+        const v2 = r as SensorReceiptV2;
+        expect(v2.measurements).toEqual({
+            lint: {
+                inputs: ['src/**/*.ts'],
+                packageRootRel: '',
+                inputDigest: `sha256:${'1'.repeat(64)}`,
+                sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                measuredPaths: ['.awm/sensors.json', 'package-lock.json', 'src/a.ts'],
+            },
+        });
+        expect(v2.alwaysMeasuredPaths).toEqual(['.awm/sensors.baseline.json', '.awm/sensors.json', 'package-lock.json']);
+        expect(v2.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+        expect(readReceipt(root, (() => { writeReceipt(root, r); return head; })()).ok).toBe(true);
+    });
+
+    test('schema 1 receipts remain readable', () => {
+        const head = g('rev-parse', 'HEAD');
+        const body = {
+            schema: 1 as const,
+            commit: head,
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '9.20.0',
+            overall: 'pass' as const,
+            sensors: { lint: 'pass' as const },
+        };
+        const receipt = { ...body, digest: computeReceiptDigest(body) };
+        writeReceipt(root, receipt);
+        const read = readReceipt(root, head);
+        expect(read).toEqual({ ok: true, receipt });
+    });
+
+    test('schema 2 digest covers measurements and alwaysMeasuredPaths', () => {
+        const base: Omit<SensorReceiptV2, 'digest'> = {
+            schema: 2,
+            commit: 'a'.repeat(40),
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '1.0.0',
+            overall: 'pass',
+            sensors: { lint: 'pass' },
+            measurements: {
+                lint: {
+                    inputs: ['src/**'],
+                    packageRootRel: '',
+                    inputDigest: `sha256:${'1'.repeat(64)}`,
+                    sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                    measuredPaths: ['src/a.ts'],
+                },
+            },
+            alwaysMeasuredPaths: ['.awm/sensors.baseline.json'],
+        };
+        const d = computeReceiptDigest(base);
+        const measuredChanged: Omit<SensorReceiptV2, 'digest'> = {
+            ...base,
+            measurements: {
+                lint: { ...base.measurements.lint, measuredPaths: ['src/b.ts'] },
+            },
+        };
+        const alwaysChanged: Omit<SensorReceiptV2, 'digest'> = {
+            ...base,
+            alwaysMeasuredPaths: ['.awm/sensors.json'],
+        };
+        expect(computeReceiptDigest(measuredChanged)).not.toBe(d);
+        expect(computeReceiptDigest(alwaysChanged)).not.toBe(d);
+    });
+
+    test('RF-4.6 helper: relaxation only when every recorded sensor has authored inputs', () => {
+        expect(allowsUnmeasuredRelaxation({
+            schema: 2,
+            commit: 'a'.repeat(40),
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '1',
+            overall: 'pass',
+            sensors: { lint: 'pass', test: 'pass' },
+            measurements: {
+                lint: {
+                    inputs: ['src/**'],
+                    packageRootRel: '',
+                    inputDigest: `sha256:${'1'.repeat(64)}`,
+                    sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                    measuredPaths: ['src/a.ts'],
+                },
+            },
+            alwaysMeasuredPaths: [],
+            digest: 'sha256:' + '0'.repeat(64),
+        })).toBe(false);
+        expect(allowsUnmeasuredRelaxation({
+            schema: 2,
+            commit: 'a'.repeat(40),
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '1',
+            overall: 'pass',
+            sensors: { lint: 'pass' },
+            measurements: {
+                lint: {
+                    inputs: ['src/**'],
+                    packageRootRel: '',
+                    inputDigest: `sha256:${'1'.repeat(64)}`,
+                    sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                    measuredPaths: ['src/a.ts'],
+                },
+            },
+            alwaysMeasuredPaths: ['.awm/sensors.baseline.json'],
+            digest: 'sha256:' + '0'.repeat(64),
+        })).toBe(true);
+        expect(allowsUnmeasuredRelaxation({
+            schema: 1,
+            commit: 'a'.repeat(40),
+            ranAt: '2026-10-17T10:00:00.000Z',
+            cliVersion: '1',
+            overall: 'pass',
+            sensors: { lint: 'pass' },
+            digest: 'sha256:' + '0'.repeat(64),
+        })).toBe(false);
+    });
+
+    test('readReceipt rejects schema-2 measurements with unsorted measuredPaths or malformed measurement shapes', () => {
+        const head = g('rev-parse', 'HEAD');
+        const baseMeasurement = {
+            inputs: ['src/**/*.ts'],
+            packageRootRel: '',
+            inputDigest: `sha256:${'1'.repeat(64)}`,
+            sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+            measuredPaths: ['a.ts', 'b.ts'],
+        };
+        const writeV2 = (measurements: unknown, alwaysMeasuredPaths: string[] = ['.awm/sensors.baseline.json']) => {
+            const body = {
+                schema: 2 as const,
+                commit: head,
+                ranAt: '2026-10-17T10:00:00.000Z',
+                cliVersion: '9.21.0',
+                overall: 'pass' as const,
+                sensors: { lint: 'pass' as const },
+                measurements,
+                alwaysMeasuredPaths,
+            };
+            const receipt = { ...body, digest: computeReceiptDigest(body as never) };
+            const dir = path.join(root, '.awm', 'sensors', 'runs');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `${head}.json`), JSON.stringify(receipt) + '\n');
+        };
+
+        writeV2({ lint: { ...baseMeasurement, measuredPaths: ['b.ts', 'a.ts'] } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, measuredPaths: 'a.ts' } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, inputs: [] } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+
+        writeV2({ lint: { ...baseMeasurement, packageRootRel: '../escape' } });
+        expect(readReceipt(root, head)).toEqual({ ok: false, code: 'receipt-invalid' });
+    });
+
+    test('measurement.inputs on schema-2 parse reuse RF-1.5 glob rules (reject .., !, braces, extglobs)', () => {
+        const head = g('rev-parse', 'HEAD');
+        const mk = (inputs: string[]) => {
+            const body = {
+                schema: 2 as const,
+                commit: head,
+                ranAt: '2026-10-17T10:00:00.000Z',
+                cliVersion: '9.21.0',
+                overall: 'pass' as const,
+                sensors: { lint: 'pass' as const },
+                measurements: {
+                    lint: {
+                        inputs,
+                        packageRootRel: '',
+                        inputDigest: `sha256:${'1'.repeat(64)}`,
+                        sensorFingerprint: `sha256:${'2'.repeat(64)}`,
+                        measuredPaths: ['src/a.ts'],
+                    },
+                },
+                alwaysMeasuredPaths: ['.awm/sensors.baseline.json'],
+            };
+            const receipt = { ...body, digest: computeReceiptDigest(body as never) };
+            const dir = path.join(root, '.awm', 'sensors', 'runs');
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, `${head}.json`), JSON.stringify(receipt) + '\n');
+            return readReceipt(root, head);
+        };
+
+        expect(mk(['src/**/*.ts'])).toMatchObject({ ok: true });
+        expect(mk(['../secret/**'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['!src/**'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['src/{a,b}.ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
+        expect(mk(['src/@(a|b).ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
     });
 });

@@ -4,13 +4,29 @@ import crypto from 'crypto';
 import { writeFileAtomic } from '../atomic-file';
 import { cliVersion } from '../cli-version';
 import { sameExistingPath } from '../paths';
-import type { RunOutput } from '../../commands/sensors/types';
+import type { RunOutput, SensorResult } from '../../commands/sensors/types';
 import { MAX_SENSOR_NAME, isCommitId, isOverall, isSensorName, isSensorStatus, type Overall, type SensorStatus } from './types';
 import { esc, isCanonicalIso, isSingleLine } from './text-safety';
-import { REASON_GIT_FAILED, REASON_NOT_REPO, gitState } from './worktree';
+import { REASON_GIT_FAILED, REASON_NOT_REPO, RUNTIME_STATE_EXCLUDES, gitState } from './worktree';
+import { CACHE_DIGEST_BASELINE_REL, isSafeRepoRel, repoPathMatchesInputGlobs } from '../../commands/sensors/inputs-digest';
+import { parseSensorInputs } from '../../commands/sensors/compatibility/contract';
 
-export interface SensorReceipt {
-    schema: 1;
+/** Per-sensor measurement recorded on a schema-2 receipt (RF-4.3). */
+export interface SensorReceiptMeasurement {
+    /** Effective authored input globs at certification (nonempty), relative to `packageRootRel`. */
+    inputs: string[];
+    /**
+     * Repo-root-relative package root at certification (`''` for repository root).
+     * Lets validate rematch `inputs` against late paths that were not yet on disk (RF-4.5).
+     */
+    packageRootRel: string;
+    inputDigest: string;
+    sensorFingerprint: string;
+    /** Repo-root POSIX paths that participated in the input digest. */
+    measuredPaths: string[];
+}
+
+interface SensorReceiptCommon {
     commit: string;
     ranAt: string;
     cliVersion: string;
@@ -19,14 +35,37 @@ export interface SensorReceipt {
     digest: string;
 }
 
-const RECEIPT_KEYS = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'];
-const MAX_RECEIPT_BYTES = 1024 * 1024;
-export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean }
+export interface SensorReceiptV1 extends SensorReceiptCommon {
+    schema: 1;
+}
 
-/** True when the run covers every sensor: `--changed` never does, `--all` always does, `--fast` xor `--slow` is partial. */
+export interface SensorReceiptV2 extends SensorReceiptCommon {
+    schema: 2;
+    /**
+     * Per sensor that had authored inputs at certification.
+     * A sensor listed in `sensors` but missing here had no authored inputs (RF-4.6).
+     */
+    measurements: Record<string, SensorReceiptMeasurement>;
+    /**
+     * Validate always-measured paths (RF-2.12 validate set), repo-root POSIX,
+     * including `.awm/sensors.baseline.json`.
+     */
+    alwaysMeasuredPaths: string[];
+}
+
+export type SensorReceipt = SensorReceiptV1 | SensorReceiptV2;
+
+const RECEIPT_KEYS_V1 = ['schema', 'commit', 'ranAt', 'cliVersion', 'overall', 'sensors', 'digest'] as const;
+const RECEIPT_KEYS_V2 = [...RECEIPT_KEYS_V1, 'measurements', 'alwaysMeasuredPaths'] as const;
+const MAX_RECEIPT_BYTES = 1024 * 1024;
+const MAX_MEASURED_PATHS = 50_000;
+export interface SelectionOpts { fast?: boolean; slow?: boolean; all?: boolean; changed?: boolean; slice?: boolean }
+
+/** True when the run covers every sensor: `--changed`/`--slice` never do, `--all` always does, `--fast` xor `--slow` is partial. */
 export function isFullSelection(opts: SelectionOpts): boolean {
     if (opts === null || typeof opts !== 'object') return false;
     if (opts.changed) return false;
+    if (opts.slice) return false;
     if (opts.all) return true;
     return Boolean(opts.fast) === Boolean(opts.slow);
 }
@@ -46,6 +85,108 @@ function sortedSensors(sensors: Record<string, SensorStatus>): Record<string, Se
     return Object.fromEntries(sensorPairs(sensors)) as Record<string, SensorStatus>;
 }
 
+function sortedStrings(values: string[]): string[] {
+    return [...values].sort(byName);
+}
+
+function isSha256Digest(v: unknown): v is string {
+    return typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v);
+}
+
+function isPackageRootRel(v: unknown): v is string {
+    return typeof v === 'string' && (v === '' || isSafeRepoRel(v));
+}
+
+function measurementProblem(name: string, value: unknown): string | null {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return `measurement for ${name} must be an object`;
+    const m = value as Record<string, unknown>;
+    const keys = Object.keys(m);
+    if (keys.length !== 5 || !['inputs', 'packageRootRel', 'inputDigest', 'sensorFingerprint', 'measuredPaths'].every((k) => k in m)) {
+        return `measurement for ${name} must have exactly inputs, packageRootRel, inputDigest, sensorFingerprint, measuredPaths`;
+    }
+    if (!Array.isArray(m.inputs) || m.inputs.length === 0) {
+        return `measurement inputs for ${name} must be a nonempty array of single-line strings`;
+    }
+    try {
+        // RF-1.5: reuse the same glob grammar as authored sensor inputs (reject .., !, braces, extglobs).
+        parseSensorInputs(m.inputs, 'receipt', `measurement[${name}].inputs`);
+    } catch {
+        return `measurement inputs for ${name} must obey RF-1.5 sensor input glob rules`;
+    }
+    if (!isPackageRootRel(m.packageRootRel)) return `measurement packageRootRel for ${name} must be '' or a safe repo-root POSIX path`;
+    if (!isSha256Digest(m.inputDigest)) return `measurement inputDigest for ${name} must be sha256:<hex>`;
+    if (!isSha256Digest(m.sensorFingerprint)) return `measurement sensorFingerprint for ${name} must be sha256:<hex>`;
+    if (!Array.isArray(m.measuredPaths) || m.measuredPaths.length > MAX_MEASURED_PATHS) {
+        return `measurement measuredPaths for ${name} must be an array within bounds`;
+    }
+    if (m.measuredPaths.some((p) => typeof p !== 'string' || !isSafeRepoRel(p))) {
+        return `measurement measuredPaths for ${name} must be safe repo-root POSIX paths`;
+    }
+    const sorted = sortedStrings(m.measuredPaths as string[]);
+    if (JSON.stringify(m.measuredPaths) !== JSON.stringify(sorted)) {
+        return `measurement measuredPaths for ${name} must be sorted`;
+    }
+    return null;
+}
+
+/**
+ * RF-4.6: schema-2 unmeasured-path relaxation applies only when every sensor on the
+ * receipt had effective authored inputs (a nonempty measurement.inputs entry).
+ */
+export function allowsUnmeasuredRelaxation(receipt: SensorReceipt): boolean {
+    if (receipt === null || typeof receipt !== 'object') return false;
+    if (receipt.schema !== 2) return false;
+    const names = Object.keys(receipt.sensors);
+    if (names.length === 0) return false;
+    for (const name of names) {
+        const m = receipt.measurements[name];
+        if (!m || !Array.isArray(m.inputs) || m.inputs.length === 0) return false;
+    }
+    return true;
+}
+
+/** Repo-root POSIX paths that count as measured for RF-4.5 late-path checks. */
+export function measuredPathSet(receipt: SensorReceiptV2): Set<string> {
+    const out = new Set<string>();
+    for (const p of receipt.alwaysMeasuredPaths) out.add(p);
+    for (const m of Object.values(receipt.measurements)) {
+        for (const p of m.measuredPaths) out.add(p);
+    }
+    return out;
+}
+
+function isRuntimeStatePath(rel: string): boolean {
+    return RUNTIME_STATE_EXCLUDES.some((ex) => rel === ex || rel.startsWith(`${ex}/`));
+}
+
+/** True when a late path is measured: frozen set OR rematch against any measurement's inputs (RF-4.5). */
+function latePathIsMeasured(repoRel: string, receipt: SensorReceiptV2, frozen: Set<string>): boolean {
+    if (frozen.has(repoRel)) return true;
+    for (const m of Object.values(receipt.measurements)) {
+        if (repoPathMatchesInputGlobs(repoRel, m.packageRootRel, m.inputs)) return true;
+    }
+    return false;
+}
+
+/**
+ * Filter late files for Change Record validate (RF-4.5/4.6). Schema 1 and incomplete
+ * schema 2 keep today's strict rule (only `docs/changes/` carved out). Complete schema 2
+ * keeps paths in the frozen measured ∪ always-measured union OR matching authored inputs
+ * globs (so new matching sources after verify are not a false green). Runtime-state never counts.
+ */
+export function filterLateFilesForReceipt(
+    files: string[],
+    receipt: SensorReceipt | null,
+    recordDirPrefix: string,
+): string[] {
+    const outsideRecords = files.filter((f) => !f.startsWith(`${recordDirPrefix}/`));
+    if (receipt === null || receipt.schema !== 2 || !allowsUnmeasuredRelaxation(receipt)) {
+        return outsideRecords;
+    }
+    const measured = measuredPathSet(receipt);
+    return outsideRecords.filter((f) => !isRuntimeStatePath(f) && latePathIsMeasured(f, receipt, measured));
+}
+
 /**
  * sha256 over the canonical JSON of the receipt without its digest, `sensors` being the name-sorted pairs of sensorPairs (R2.2c).
  * The digest is local (receipts are not versioned and are rewritten by every full run), so changing its canonical form only
@@ -54,9 +195,33 @@ function sortedSensors(sensors: Record<string, SensorStatus>): Record<string, Se
 export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): string {
     if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error(esc('invalid receipt: digest body must be an object'));
     if (body.sensors === null || typeof body.sensors !== 'object' || Array.isArray(body.sensors)) throw new Error(esc('invalid receipt: digest body sensors must be an object'));
+    if (body.schema === 1) {
+        const canonical = JSON.stringify({
+            schema: body.schema, commit: body.commit, ranAt: body.ranAt, cliVersion: body.cliVersion,
+            overall: body.overall, sensors: sensorPairs(body.sensors),
+        });
+        return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
+    }
+    if (body.schema !== 2) throw new Error(esc('invalid receipt: digest body schema must be 1 or 2'));
+    const v2 = body as Omit<SensorReceiptV2, 'digest'>;
+    if (v2.measurements === null || typeof v2.measurements !== 'object' || Array.isArray(v2.measurements)) {
+        throw new Error(esc('invalid receipt: digest body measurements must be an object'));
+    }
+    if (!Array.isArray(v2.alwaysMeasuredPaths)) throw new Error(esc('invalid receipt: digest body alwaysMeasuredPaths must be an array'));
+    const measurements = Object.fromEntries(
+        Object.entries(v2.measurements).sort(([a], [b]) => byName(a, b)).map(([name, m]) => [name, {
+            inputs: m.inputs,
+            packageRootRel: m.packageRootRel,
+            inputDigest: m.inputDigest,
+            sensorFingerprint: m.sensorFingerprint,
+            measuredPaths: m.measuredPaths,
+        }]),
+    );
     const canonical = JSON.stringify({
-        schema: body.schema, commit: body.commit, ranAt: body.ranAt, cliVersion: body.cliVersion,
-        overall: body.overall, sensors: sensorPairs(body.sensors),
+        schema: v2.schema, commit: v2.commit, ranAt: v2.ranAt, cliVersion: v2.cliVersion,
+        overall: v2.overall, sensors: sensorPairs(v2.sensors),
+        measurements,
+        alwaysMeasuredPaths: v2.alwaysMeasuredPaths,
     });
     return 'sha256:' + crypto.createHash('sha256').update(canonical).digest('hex');
 }
@@ -68,9 +233,10 @@ export function computeReceiptDigest(body: Omit<SensorReceipt, 'digest'>): strin
 function receiptProblem(x: unknown): string | null {
     if (x === null || typeof x !== 'object' || Array.isArray(x)) return 'receipt must be an object';
     const r = x as Record<string, unknown>;
+    if (r.schema !== 1 && r.schema !== 2) return 'schema must be 1 or 2';
+    const expectedKeys = r.schema === 1 ? RECEIPT_KEYS_V1 : RECEIPT_KEYS_V2;
     const keys = Object.keys(r);
-    if (keys.length !== RECEIPT_KEYS.length || !RECEIPT_KEYS.every((k) => k in r)) return 'receipt must have exactly the schema keys';
-    if (r.schema !== 1) return 'schema must be 1';
+    if (keys.length !== expectedKeys.length || !expectedKeys.every((k) => k in r)) return 'receipt must have exactly the schema keys';
     if (!isCommitId(r.commit)) return 'commit must be 40 or 64 lowercase hex characters';
     if (!isCanonicalIso(r.ranAt)) return 'ranAt must be a canonical ISO timestamp';
     if (!isSingleLine(r.cliVersion)) return 'cliVersion must be a single line';
@@ -81,21 +247,91 @@ function receiptProblem(x: unknown): string | null {
         if (!isSensorName(name)) return `sensor names must be a single line of 1 to ${MAX_SENSOR_NAME} characters`;
         if (!isSensorStatus(status)) return 'a sensor status is not a known status';
     }
+    if (r.schema === 2) {
+        const measurements = r.measurements;
+        if (measurements === null || typeof measurements !== 'object' || Array.isArray(measurements)) return 'measurements must be an object';
+        for (const [name, value] of Object.entries(measurements)) {
+            if (!isSensorName(name)) return `measurement sensor names must be a single line of 1 to ${MAX_SENSOR_NAME} characters`;
+            const problem = measurementProblem(name, value);
+            if (problem !== null) return problem;
+        }
+        if (!Array.isArray(r.alwaysMeasuredPaths) || r.alwaysMeasuredPaths.length > MAX_MEASURED_PATHS) {
+            return 'alwaysMeasuredPaths must be an array within bounds';
+        }
+        if (r.alwaysMeasuredPaths.some((p) => typeof p !== 'string' || !isSafeRepoRel(p))) {
+            return 'alwaysMeasuredPaths must be safe repo-root POSIX paths';
+        }
+        const sortedAlways = sortedStrings(r.alwaysMeasuredPaths as string[]);
+        if (JSON.stringify(r.alwaysMeasuredPaths) !== JSON.stringify(sortedAlways)) {
+            return 'alwaysMeasuredPaths must be sorted';
+        }
+    }
     if (typeof r.digest !== 'string') return 'digest must be a string';
     const { digest, ...body } = r as unknown as SensorReceipt;
     if (computeReceiptDigest(body) !== digest) return 'digest does not match the content';
     return null;
 }
 
-/** Builds a receipt and fails closed: throws an Error naming the problem when the result is not one `readReceipt` would accept. */
-export function buildReceipt(input: { commit: string; ranAt: string; cliVersion: string; output: Pick<RunOutput, 'overall' | 'sensors'> }): SensorReceipt {
+function extractMeasurements(sensors: SensorResult[]): Record<string, SensorReceiptMeasurement> {
+    const out: Record<string, SensorReceiptMeasurement> = {};
+    for (const sensor of sensors) {
+        const m = sensor.measurement;
+        if (!m || typeof m !== 'object') continue;
+        if (!Array.isArray(m.inputs) || m.inputs.length === 0) continue;
+        if (!isPackageRootRel(m.packageRootRel)) continue;
+        if (!isSha256Digest(m.inputDigest) || !isSha256Digest(m.sensorFingerprint)) continue;
+        if (!Array.isArray(m.measuredPaths) || m.measuredPaths.some((p) => typeof p !== 'string' || !isSafeRepoRel(p))) continue;
+        out[sensor.name] = {
+            inputs: [...m.inputs],
+            packageRootRel: m.packageRootRel,
+            inputDigest: m.inputDigest,
+            sensorFingerprint: m.sensorFingerprint,
+            measuredPaths: sortedStrings(m.measuredPaths),
+        };
+    }
+    return Object.fromEntries(Object.entries(out).sort(([a], [b]) => byName(a, b)));
+}
+
+/** Builds a schema-2 receipt (RF-4.3). Schema 1 remains readable via `readReceipt` / `writeReceipt`. */
+export function buildReceipt(input: {
+    commit: string;
+    ranAt: string;
+    cliVersion: string;
+    output: Pick<RunOutput, 'overall' | 'sensors'>;
+    alwaysMeasuredPaths?: string[];
+}): SensorReceipt {
     const out = input === null || typeof input !== 'object' ? undefined : input.output;
     if (out === null || typeof out !== 'object' || !Array.isArray(out.sensors) || out.sensors.some((s) => s === null || typeof s !== 'object')) {
         throw new Error('invalid receipt: run output must carry a sensors array');
     }
     const sensors = sortedSensors(Object.fromEntries(out.sensors.map((s) => [s.name, s.status])) as Record<string, SensorStatus>);
-    const body = { schema: 1 as const, commit: input.commit, ranAt: input.ranAt, cliVersion: input.cliVersion, overall: out.overall as Overall, sensors };
-    const receipt = { ...body, digest: computeReceiptDigest(body) };
+    const measurements = extractMeasurements(out.sensors);
+    const alwaysFromSensors = new Set<string>();
+    for (const sensor of out.sensors) {
+        const extras = sensor.measurement?.alwaysMeasuredPaths;
+        if (!Array.isArray(extras)) continue;
+        for (const p of extras) {
+            if (typeof p === 'string' && isSafeRepoRel(p)) alwaysFromSensors.add(p);
+        }
+    }
+    const provided = Array.isArray(input.alwaysMeasuredPaths) ? input.alwaysMeasuredPaths : [];
+    for (const p of provided) {
+        if (typeof p === 'string' && isSafeRepoRel(p)) alwaysFromSensors.add(p);
+    }
+    // Validate always-measured always includes baseline (RF-2.12 / RF-4.5), even when empty.
+    alwaysFromSensors.add(CACHE_DIGEST_BASELINE_REL);
+    const alwaysMeasuredPaths = sortedStrings([...alwaysFromSensors]);
+    const body: Omit<SensorReceiptV2, 'digest'> = {
+        schema: 2,
+        commit: input.commit,
+        ranAt: input.ranAt,
+        cliVersion: input.cliVersion,
+        overall: out.overall as Overall,
+        sensors,
+        measurements,
+        alwaysMeasuredPaths,
+    };
+    const receipt: SensorReceiptV2 = { ...body, digest: computeReceiptDigest(body) };
     const problem = receiptProblem(receipt);
     if (problem !== null) throw new Error(`invalid receipt: ${problem}`);
     return receipt;

@@ -18,6 +18,10 @@ export type PrepareRunOptions = {
     ignoreBaseline?: boolean;
     base?: string;
     readOnly?: boolean;
+    /** Operator `--slice` gate: skip `closureOnly` sensors (RF-5.10). */
+    slice?: boolean;
+    /** When true, read/write the fingerprint result cache (RF-2.11). */
+    useCache?: boolean;
 };
 
 type RequestedScope = PreparedSensorExecution['requestedScope'];
@@ -59,8 +63,16 @@ export function validateRunOptions(opts: PrepareRunOptions): void {
     if (opts.ignoreBaseline !== undefined && typeof opts.ignoreBaseline !== 'boolean') throw new Error('run option ignoreBaseline must be a boolean');
     if (opts.base !== undefined && (typeof opts.base !== 'string' || opts.base.trim() === '')) throw new Error('run option base must be a nonempty string');
     if (opts.readOnly !== undefined && typeof opts.readOnly !== 'boolean') throw new Error('run option readOnly must be a boolean');
+    if (opts.slice !== undefined && typeof opts.slice !== 'boolean') throw new Error('run option slice must be a boolean');
+    if (opts.useCache !== undefined && typeof opts.useCache !== 'boolean') throw new Error('run option useCache must be a boolean');
     if (opts.changed && opts.ignoreBaseline) {
         throw new Error('refusing to combine --changed with a baseline capture: a partial run cannot define the accepted set');
+    }
+    if (opts.slice && opts.all) {
+        throw new Error('refusing to combine --slice with --all: slice already selects the non-closureOnly set');
+    }
+    if (opts.slice && opts.slow) {
+        throw new Error('refusing to combine --slice with --slow: use a full gate for closureOnly/slow sensors');
     }
 }
 

@@ -8,7 +8,7 @@ import { parseTestOutput } from './formatters/test';
 import { parseMypyOutput } from './formatters/mypy';
 import { parseRuffOutput } from './formatters/ruff';
 import { parseShellcheckOutput } from './formatters/shellcheck';
-import type { PreparedSensorExecution, SensorError, SensorResult } from './types';
+import type { PreparedSensorExecution, SensorError, SensorFailureKind, SensorResult } from './types';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -71,6 +71,10 @@ function scoped(result: SensorResult, prepared: PreparedSensorExecution): Sensor
     };
 }
 
+function withFailureKind(result: Omit<SensorResult, 'execution'>, kind: SensorFailureKind): Omit<SensorResult, 'execution'> {
+    return result.status === 'fail' ? { ...result, failureKind: kind } : result;
+}
+
 /** Interpret one raw bounded process result without knowing its manifest format. */
 export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResult): SensorResult {
     validatePrepared(prepared);
@@ -84,11 +88,21 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
     });
     const format = formatterFor(prepared.name, prepared.formatter);
 
-    if (raw.spawnError) return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `sensor could not be started: ${raw.spawnError.message}` }] });
+    if (raw.spawnError) {
+        return withEvidence(withFailureKind(
+            { name: prepared.name, status: 'fail', errors: [{ message: `sensor could not be started: ${raw.spawnError.message}` }] },
+            'missing-binary',
+        ));
+    }
     if (raw.timedOut || raw.overflowed) {
         const reason = raw.timedOut ? `timeout after ${prepared.timeoutMs}ms` : `output exceeded ${MAX_BUFFER} bytes`;
         const errors = format(raw.stdout + raw.stderr);
-        if (errors.length > 0) return withEvidence({ name: prepared.name, status: 'fail', errors, incomplete: `${reason} — findings below are from partial output; the run did not finish` });
+        if (errors.length > 0) {
+            return withEvidence(withFailureKind(
+                { name: prepared.name, status: 'fail', errors, incomplete: `${reason} — findings below are from partial output; the run did not finish` },
+                'findings',
+            ));
+        }
         return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: reason });
     }
     if (raw.code === 0) {
@@ -96,25 +110,39 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
             return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
         }
         const errors = format(raw.stdout);
-        return withEvidence({ name: prepared.name, status: errors.length ? 'fail' : 'pass', errors });
+        if (errors.length === 0) return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
+        return withEvidence(withFailureKind({ name: prepared.name, status: 'fail', errors }, 'findings'));
     }
 
     const output = raw.stdout + raw.stderr;
     if (prepared.formatter === 'exit-code' || format === parseExitCodeOutput) {
         const combined = output.trim();
         const evidence = truncateEvidence(combined.length > 0 ? combined : `exit ${raw.code}`);
-        return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: evidence }] });
+        return withEvidence(withFailureKind(
+            { name: prepared.name, status: 'fail', errors: [{ message: evidence }] },
+            'exit-code',
+        ));
     }
     const errors = format(output);
-    if (errors.length > 0) return withEvidence({ name: prepared.name, status: 'fail', errors });
+    if (errors.length > 0) return withEvidence(withFailureKind({ name: prepared.name, status: 'fail', errors }, 'findings'));
     const lower = output.toLowerCase();
     const toolMissing = raw.code === 127
         || lower.includes('command not found')
         || lower.includes('is not recognized as an internal or external command')
         || lower.includes('enoent')
         || lower.includes('could not determine executable');
-    if (toolMissing) return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `sensor tool not available: ${truncateEvidence(output)}` }] });
-    if (prepared.name === 'test') return withEvidence({ name: prepared.name, status: 'fail', errors: [{ message: `SENSOR[${prepared.name}] failed (exit ${raw.code})` }] });
+    if (toolMissing) {
+        return withEvidence(withFailureKind(
+            { name: prepared.name, status: 'fail', errors: [{ message: `sensor tool not available: ${truncateEvidence(output)}` }] },
+            'missing-binary',
+        ));
+    }
+    if (prepared.name === 'test') {
+        return withEvidence(withFailureKind(
+            { name: prepared.name, status: 'fail', errors: [{ message: `SENSOR[${prepared.name}] failed (exit ${raw.code})` }] },
+            'exit-code',
+        ));
+    }
     return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: `exit ${raw.code}: ${truncateEvidence(output)}` });
 }
 
@@ -144,5 +172,15 @@ export function applyBaseline(result: SensorResult, accepted: string[] | undefin
     if (result.status === 'skipped' || result.status === 'inconclusive') return result;
     const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
     if (suppressed === 0) return result;
-    return { ...result, errors: newErrors, status: newErrors.length > 0 ? 'fail' : 'pass', newCount: newErrors.length, baselineCount: suppressed };
+    const status = newErrors.length > 0 ? 'fail' as const : 'pass' as const;
+    const { failureKind: _drop, ...rest } = result;
+    return {
+        ...rest,
+        errors: newErrors,
+        status,
+        // failureKind only applies to fail; a baseline-suppressed pass must not keep it (QA-4).
+        ...(status === 'fail' && result.failureKind ? { failureKind: result.failureKind } : {}),
+        newCount: newErrors.length,
+        baselineCount: suppressed,
+    };
 }

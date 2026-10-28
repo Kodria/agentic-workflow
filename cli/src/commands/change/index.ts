@@ -10,7 +10,7 @@ import { addedFilesUnder, changedFiles, isAncestor, isCommittedClean, isDirtyOut
 import { BASE_OPTION_HELP, headMovedFailure, recordDirProblem, resolveRange } from '../../core/changes/range';
 import { deriveFields, type Derived } from '../../core/changes/derive';
 import { hasOptOut } from '../../core/changes/trailers';
-import { readReceipt, sensorPairs } from '../../core/changes/receipt';
+import { filterLateFilesForReceipt, readReceipt, sensorPairs } from '../../core/changes/receipt';
 import { refreshDerived, renderSkeleton } from '../../core/changes/render';
 import { isRegularFileInside } from '../../core/changes/fs-safe';
 import { createExclusive, createRecordDir, inspectRecordDir, readRecord, recordsWithSlug, replaceRecord, unchangedSince, type RecordDir } from '../../core/changes/record-io';
@@ -21,7 +21,8 @@ import { validateRecordShape } from '../../core/changes/validate-shape';
 export interface ChangeDeps { now?: () => Date }
 export interface NewOpts { base?: string; plan?: string; issue?: string; model?: string; session?: string; refresh?: boolean }
 
-const REMEDY_RECEIPT = 'commit your work, then run awm sensors run';
+/** RF-4.7: full-gate run; cache may reuse when inputs unchanged — never claim every binary must re-exec. */
+const REMEDY_RECEIPT = 'commit your work, then run full-gate awm sensors run (cache may reuse unchanged sensors)';
 const REMEDY_SPLIT = 'split the change into smaller ones';
 const REMEDY_SENSORS = 'reduce the sensors listed in .awm/sensors.json (the sensor receipt makes the record too large)';
 
@@ -240,7 +241,7 @@ interface ValidateRun {
     dir: RecordDir;
     derived?: Derived;
     ancestors: Map<string, boolean>;
-    /** The files changed since a verification commit, outside docs/changes/: their number and the first MAX_LATE_PATHS (null: git failed). */
+    /** The files changed since a verification commit after RF-4.5/4.6 filtering: count and first MAX_LATE_PATHS (null: git failed). */
     late: Map<string, { count: number; first: string[] } | null>;
 }
 
@@ -248,8 +249,17 @@ const deriveOnce = (run: ValidateRun): Derived => (run.derived ??= deriveFields(
 
 function lateFiles(run: ValidateRun, commit: string): { count: number; first: string[] } | null {
     if (!run.late.has(commit)) {
-        const files = changedFiles(run.root, commit, run.head)?.filter((f) => !f.startsWith(`${RECORD_DIR}/`));
-        run.late.set(commit, files === undefined ? null : { count: files.length, first: files.slice(0, MAX_LATE_PATHS) });
+        const raw = changedFiles(run.root, commit, run.head);
+        if (raw === null) {
+            run.late.set(commit, null);
+        } else {
+            // RF-4.5/4.6: when a schema-2 receipt covers every sensor with authored inputs,
+            // measured ∪ always-measured ∪ inputs-glob rematch count; otherwise schema-1 rules.
+            const receiptRead = readReceipt(run.root, commit);
+            const receipt = receiptRead.ok ? receiptRead.receipt : null;
+            const files = filterLateFilesForReceipt(raw, receipt, RECORD_DIR);
+            run.late.set(commit, { count: files.length, first: files.slice(0, MAX_LATE_PATHS) });
+        }
     }
     return run.late.get(commit) ?? null;
 }
