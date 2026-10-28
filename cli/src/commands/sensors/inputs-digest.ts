@@ -1,3 +1,4 @@
+/// <reference path="../../types/picomatch-posix.d.ts" />
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';

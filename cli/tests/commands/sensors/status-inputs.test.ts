@@ -272,9 +272,7 @@ describe('awm sensors status CLI renders inputs warnings (RF-3.4)', () => {
     });
 
     it('prints warning text in human-readable status output without failing READY', async () => {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { Command } = require('commander');
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { registerSensorsCommand } = require('../../../src/commands/sensors/index');
         const program = new Command();
         program.exitOverride();
