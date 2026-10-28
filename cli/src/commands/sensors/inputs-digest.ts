@@ -275,25 +275,24 @@ export function computeCacheInputDigest(opts: {
         throw new Error('alwaysMeasuredRepoRels must be an array of strings');
     }
 
+    // Prefer realpathSync.native (same as toSafeRepoRel / run.ts). Mixing native vs
+    // non-native on Windows yields drive-absolute path.relative results and false
+    // "packageRoot must be inside gitRoot" after the sensorsJsonRel fix.
     let gitRootReal: string;
     try {
-        gitRootReal = fs.realpathSync(path.resolve(opts.gitRoot));
+        gitRootReal = fs.realpathSync.native(path.resolve(opts.gitRoot));
     } catch {
-        return { ok: false, reason: 'git-failed' };
+        try {
+            gitRootReal = fs.realpathSync(path.resolve(opts.gitRoot));
+        } catch {
+            return { ok: false, reason: 'git-failed' };
+        }
     }
-    const packageRoot = path.resolve(opts.packageRoot);
-    let packageRootReal: string;
+    let packageRootRel: string;
     try {
-        packageRootReal = fs.realpathSync(packageRoot);
+        packageRootRel = toSafeRepoRel(gitRootReal, opts.packageRoot, 'packageRoot');
     } catch {
-        packageRootReal = packageRoot;
-    }
-    const packageRootRel = posixRel(gitRootReal, packageRootReal);
-    if (packageRootRel.startsWith('..') || path.isAbsolute(packageRootRel)) {
         throw new Error('packageRoot must be inside gitRoot');
-    }
-    if (packageRootRel !== '' && !isSafeRepoRel(packageRootRel)) {
-        throw new Error('packageRoot must be a safe relative path under gitRoot');
     }
 
     const listed = listGitFiles(gitRootReal);

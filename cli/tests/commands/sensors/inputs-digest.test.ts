@@ -40,13 +40,41 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
         const manifest = path.join(root, '.awm', 'sensors.json');
         fs.writeFileSync(manifest, '{}');
         // Non-canonical roots (trailing `.`, resolve vs join) must still yield a POSIX repo-rel —
-        // this is the class of git-toplevel vs Node path mismatch that broke win32-arm CI.
+        // this is the class of git-toplevel vs Node path mismatch that broke win32 CI.
         expect(toSafeRepoRel(root, manifest, 'sensorsJsonRel')).toBe('.awm/sensors.json');
         expect(toSafeRepoRel(path.join(root, '.'), path.resolve(root, '.awm', 'sensors.json'), 'sensorsJsonRel')).toBe('.awm/sensors.json');
         expect(toSafeRepoRel(root, root, 'packageRoot')).toBe('');
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-out-'));
         roots.push(outside);
         expect(() => toSafeRepoRel(root, outside, 'escape')).toThrow(/under gitRoot|safe relative/);
+    });
+
+    it('computeCacheInputDigest accepts non-canonical gitRoot/packageRoot (Windows-safe)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.writeFileSync(path.join(root, 'src.ts'), 'export {}\n');
+        git(root, ['add', 'src.ts']);
+        git(root, ['commit', '-q', '-m', 'init']);
+        // Same physical tree via join(root, '.') — mirrors mismatched forms that made
+        // bare path.relative + path.isAbsolute reject packageRoot on win32.
+        const messyRoot = path.join(root, '.');
+        const digest = computeCacheInputDigest({
+            gitRoot: messyRoot,
+            packageRoot: path.resolve(root),
+            inputGlobs: ['*.ts'],
+            alwaysMeasuredRepoRels: [],
+        });
+        expect(digest.ok).toBe(true);
+        if (!digest.ok) return;
+        expect(digest.matchedPaths).toContain('src.ts');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-pkg-out-'));
+        roots.push(outside);
+        expect(() => computeCacheInputDigest({
+            gitRoot: root,
+            packageRoot: outside,
+            inputGlobs: ['*.ts'],
+            alwaysMeasuredRepoRels: [],
+        })).toThrow(/packageRoot must be inside gitRoot/);
     });
 
     it('uses picomatch options that match dotfiles and stay case-sensitive (RF-1.5/1.6)', () => {
