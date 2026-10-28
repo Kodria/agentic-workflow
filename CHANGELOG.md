@@ -1,3 +1,8 @@
+## v9.22.0 - 2026-10-28
+
+### Features
+- **sensors:** sensor execution optimization (#236) (#237)
+
 ## v9.21.0 - 2026-10-20
 
 ### Features
