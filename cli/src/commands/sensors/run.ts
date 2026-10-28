@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { SensorManifest, RunOutput, PreparedSensorExecution, SensorResult } from './types';
@@ -37,7 +38,7 @@ import {
     snapshotUnavailableRemedy,
     type ExclusionPolicy,
 } from './read-only-observation';
-import { buildAlwaysMeasuredPaths, CACHE_DIGEST_BASELINE_REL, computeCacheInputDigest } from './inputs-digest';
+import { buildAlwaysMeasuredPaths, CACHE_DIGEST_BASELINE_REL, computeCacheInputDigest, toSafeRepoRel } from './inputs-digest';
 import {
     canCacheRawResult,
     computeSensorFingerprint,
@@ -108,8 +109,9 @@ type PreparedSlot = {
     cachePlan: CachePlan | null;
 };
 
+/** Relative POSIX under gitRoot; realpath both sides (Windows-safe). Empty when same path. */
 function posixJoinRel(root: string, abs: string): string {
-    return path.relative(root, abs).split(path.sep).join('/');
+    return toSafeRepoRel(root, abs);
 }
 
 function effectiveClosureOnly(
@@ -495,7 +497,18 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const prepared: PreparedSlot[] = [];
     const cacheEnabled = opts.useCache === true && !opts.ignoreBaseline && !opts.readOnly;
     const writeCache = cacheEnabled && requestedScope === 'full';
-    const gitRoot = resolveGitRoot(manifestDir) ?? manifestDir;
+    // Realpath so Windows git toplevel / Node path forms agree before cache digests.
+    const gitRootRaw = resolveGitRoot(manifestDir) ?? manifestDir;
+    let gitRoot = gitRootRaw;
+    try {
+        gitRoot = fs.realpathSync.native(path.resolve(gitRootRaw));
+    } catch {
+        try {
+            gitRoot = fs.realpathSync(path.resolve(gitRootRaw));
+        } catch {
+            gitRoot = path.resolve(gitRootRaw);
+        }
+    }
 
     const activeManifest = parsed.pack as unknown as SensorManifest;
     const sensorsMap = activeManifest.sensors ?? {};

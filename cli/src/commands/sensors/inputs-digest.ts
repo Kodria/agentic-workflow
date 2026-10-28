@@ -80,8 +80,44 @@ function requireSafeRepoRel(repoRel: string, label: string): string {
     return norm;
 }
 
+function resolveRealPath(p: string): string {
+    const resolved = path.resolve(p);
+    try {
+        return fs.realpathSync.native(resolved);
+    } catch {
+        try {
+            return fs.realpathSync(resolved);
+        } catch {
+            return resolved;
+        }
+    }
+}
+
 function posixRel(from: string, to: string): string {
     return path.relative(from, to).split(path.sep).join('/');
+}
+
+/**
+ * Repo-root-relative POSIX path from an absolute (or cwd-relative) path.
+ * Realpaths both sides before `path.relative` so Windows drive-letter / casing /
+ * separator mismatches (git toplevel vs Node paths) cannot yield an absolute
+ * relative string that later fails `isSafeRepoRel`.
+ */
+export function toSafeRepoRel(gitRoot: string, absolutePath: string, label = 'path'): string {
+    if (typeof gitRoot !== 'string' || gitRoot.trim() === '') throw new Error('gitRoot must be a nonempty string');
+    if (typeof absolutePath !== 'string' || absolutePath.trim() === '') {
+        throw new Error(`${label} must be a nonempty string`);
+    }
+    const from = resolveRealPath(gitRoot);
+    const to = resolveRealPath(absolutePath);
+    const rel = posixRel(from, to);
+    // Empty means the same path; sensors.json / package roots used here are always nested or equal.
+    // Equal packageRoot → '' is allowed only when callers opt in via allowEmpty.
+    if (rel === '') return '';
+    if (path.win32.isAbsolute(rel) || path.posix.isAbsolute(rel) || rel.startsWith('..') || /^[A-Za-z]:/.test(rel)) {
+        throw new Error(`${label} must resolve under gitRoot`);
+    }
+    return requireSafeRepoRel(rel, label);
 }
 
 function staysUnderRoot(rootReal: string, candidate: string): boolean {

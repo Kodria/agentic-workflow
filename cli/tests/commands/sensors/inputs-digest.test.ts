@@ -10,6 +10,7 @@ import {
     buildAlwaysMeasuredPaths,
     computeCacheInputDigest,
     isSafeRepoRel,
+    toSafeRepoRel,
 } from '../../../src/commands/sensors/inputs-digest';
 
 function git(cwd: string, args: string[]): string {
@@ -30,6 +31,22 @@ describe('inputs digest (RF-2.1, RF-2.12, RF-1.6)', () => {
     const roots: string[] = [];
     afterEach(() => {
         for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it('toSafeRepoRel realpaths both sides so nested .awm/sensors.json stays relative (Windows-safe)', () => {
+        const root = initRepo();
+        roots.push(root);
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        const manifest = path.join(root, '.awm', 'sensors.json');
+        fs.writeFileSync(manifest, '{}');
+        // Non-canonical roots (trailing `.`, resolve vs join) must still yield a POSIX repo-rel —
+        // this is the class of git-toplevel vs Node path mismatch that broke win32-arm CI.
+        expect(toSafeRepoRel(root, manifest, 'sensorsJsonRel')).toBe('.awm/sensors.json');
+        expect(toSafeRepoRel(path.join(root, '.'), path.resolve(root, '.awm', 'sensors.json'), 'sensorsJsonRel')).toBe('.awm/sensors.json');
+        expect(toSafeRepoRel(root, root, 'packageRoot')).toBe('');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-digest-out-'));
+        roots.push(outside);
+        expect(() => toSafeRepoRel(root, outside, 'escape')).toThrow(/under gitRoot|safe relative/);
     });
 
     it('uses picomatch options that match dotfiles and stay case-sensitive (RF-1.5/1.6)', () => {
