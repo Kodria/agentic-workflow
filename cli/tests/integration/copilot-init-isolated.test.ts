@@ -28,10 +28,10 @@
 // as codex-provider-isolated.test.ts) — never against the real `~/.awm`
 // (CLAUDE.md's "never touch ~/.awm" rule; HOME/AWM_HOME are isolated
 // tmpdirs for the whole test).
-import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { commitSeededRegistry } from '../helpers/commit-seeded-registry';
 
 describe('copilot provider — isolated home E2E (devCore global-scope guard regression)', () => {
     let tmpHome: string;
@@ -86,11 +86,7 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
             dependsOn: [], skills: ['development-process'], workflows: [], agents: [],
         }));
 
-        execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['config', 'user.email', 'fixture@example.invalid'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['config', 'user.name', 'fixture'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root, stdio: 'ignore' });
+        commitSeededRegistry(root);
 
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(

@@ -34,11 +34,11 @@
 // common path) with real registry content would falsely throw "Claude Code
 // baseline changed during a non-Claude init" and exit 2. See
 // src/commands/init.ts's `beforeClaudeFacts` guard.
-import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AwmPreferences } from '../../src/utils/config';
+import { commitSeededRegistry } from '../helpers/commit-seeded-registry';
 
 describe('codex provider — isolated home E2E (Task 9)', () => {
     let tmpHome: string;
@@ -107,11 +107,7 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         }));
 
         // Local commit only — no origin. Present+.git makes stepCache skip sync.
-        execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['config', 'user.email', 'fixture@example.invalid'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['config', 'user.name', 'fixture'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
-        execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root, stdio: 'ignore' });
+        commitSeededRegistry(root);
 
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(

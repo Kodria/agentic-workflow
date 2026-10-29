@@ -24,6 +24,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { commitSeededRegistry } from '../../helpers/commit-seeded-registry';
 
 describe('gatherProviderChecks — realistic fully-healthy single-provider fixtures', () => {
     let tmpHome: string;
@@ -84,6 +85,9 @@ describe('gatherProviderChecks — realistic fully-healthy single-provider fixtu
             name: 'dev-core', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
             dependsOn: [], skills: ['development-process'], workflows: [], agents,
         }));
+
+        // Local commit so real `awm init` skips network sync under SG-7 (#238).
+        commitSeededRegistry(root);
 
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(
