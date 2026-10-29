@@ -747,28 +747,44 @@ describe('supervisor loop', () => {
     // subagent kept an idle leader while the work ran in processes outside its
     // process group, and the supervisor entered a false custody. Work in the
     // descendant tree is activity: observe, never custody, while it moves.
+    // The tree must move deterministically between the two ticks. A `while :; do
+    // sleep 0.02; done` loop leaves instants with no `sleep` child, so under CPU
+    // load two samples 150 ms apart could read identical (~1% of pairs) and the
+    // supervisor entered a real custody: a flaky red on linux-arm64. Each worker
+    // child lives 30 s, and the test itself makes the tree grow by one between ticks.
     itPosix('espera sana: lider ocioso + descendiente fuera del grupo trabajando => observa, no custodia (R4.2)', async () => {  // verifies R4.2b
         initUnattendedFixture(repo);
         beginGeneration(repo, 'main');
-        const worker = "require('child_process').spawn('sh', ['-c', 'while :; do sleep 0.02; done'], { detached: true, stdio: 'ignore' }).unref(); setTimeout(()=>{}, 20000)";
-        const { child, ref } = spawnStructured(['node', '-e', worker], process.cwd(), 'nWait');
+        const trigger = path.join(repo, 'grow-descendant');
+        const worker = [
+            "const { spawn } = require('child_process'); const fs = require('fs');",
+            "const grow = () => spawn('sleep', ['30'], { detached: true, stdio: 'ignore' }).unref();",
+            'grow();',
+            'const poll = setInterval(() => { if (fs.existsSync(process.argv[1])) { clearInterval(poll); grow(); } }, 10);',
+            'setTimeout(() => {}, 20000);',
+        ].join(' ');
+        const { child, ref } = spawnStructured(['node', '-e', worker, trigger], process.cwd(), 'nWait');
         try {
             let s = readJournal(repo, 'main').state!;
             activeGeneration(s)!.processRef = ref;
             s.controllerHeartbeatAt = new Date(Date.now() - 3600000).toISOString();   // heartbeat vencido: bloqueado en la espera
             writeJournal(repo, 'main', s);
-            await until(() => (activitySnapshot(ref)?.descendants ?? '0:none') !== '0:none');
+            const descendants = () => activitySnapshot(ref)?.descendants ?? '0:none';
+            await until(() => descendants().startsWith('1:'));
             const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', heartbeatTimeoutMs: 1, activityWindowMs: 50, tickMs: 20 };
             const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
             await sup.tick();
-            await new Promise((r) => setTimeout(r, 150));      // mas que la ventana, pero el arbol se movio
+            const firstTick = Date.now();
+            fs.writeFileSync(trigger, '');                          // el arbol crece: trabajo real fuera del grupo
+            await until(() => descendants().startsWith('2:'));
+            await new Promise((r) => setTimeout(r, Math.max(0, 150 - (Date.now() - firstTick))));   // mas que la ventana, pero el arbol se movio
             expect(await sup.tick()).not.toBe('custody');
             const after = readJournal(repo, 'main').state!;
             expect(after.cycle.status).toBe('IN_PROGRESS');
             expect(activeGeneration(after)!.state).toBe('controller-suspected-stall');   // observado, jamas matado
             expect(child.killed).toBe(false);
         } finally {
-            // The detached shell leads its own group: kill that group, never a pattern match.
+            // Each detached child leads its own group: kill that group, never a pattern match.
             let shells: number[] = [];
             try { shells = execFileSync('pgrep', ['-P', String(ref.pid)], { encoding: 'utf8' }).split('\n').filter(Boolean).map(Number); } catch { /* sin hijos */ }
             for (const pid of shells) { try { process.kill(-pid, 'SIGKILL'); } catch { /* ya ausente */ } }

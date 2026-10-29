@@ -6,6 +6,7 @@ import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/
 import { applyBaseline, executePrepared, interpretResult } from '../../../src/commands/sensors/result';
 import { fingerprint } from '../../../src/commands/sensors/baseline';
 import { expandFileInput } from '../../../src/commands/sensors/prepare';
+import { removeFixtureTree } from '../../helpers/fixture-cleanup';
 
 const sensor = (overrides: Record<string, unknown> = {}) => ({
     name: 'lint',
@@ -403,7 +404,8 @@ describe('runStructuredCommand — Windows local native binaries', () => {
     afterEach(() => {
         windows.mockRestore();
         if (savedPathExt === undefined) delete process.env.PATHEXT; else process.env.PATHEXT = savedPathExt;
-        fs.rmSync(dir, { recursive: true, force: true });
+        // Windows keeps a just-executed copy of node locked for a moment (EBUSY on unlink).
+        removeFixtureTree(dir);
     });
     it('executes a contained native executable with literal shell-sensitive argv', async () => {
         const executable = path.join(dir, 'node_modules', '.bin', 'fixture.exe');

@@ -468,9 +468,17 @@ describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
     });
 
     test('planReap reporta aliveWithIdentity: true para un proceso genuinamente vivo', () => {
-        const { spawnStructured } = require('../../../src/core/journal/process');
+        // Same full-spawn retry as process.test.ts: on windows-11-arm (and
+        // historically windows-latest) a freshly spawned `node -e` can die
+        // before OpenProcess/pidExistsNative sees it. Re-polling the same pid
+        // never helps; a fresh instance can. Three failures still fail loudly.
+        const { spawnStructured, refIsAlive } = require('../../../src/core/journal/process');
         const s = emptyState('r');
-        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nLive');
+        let { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nLive');
+        for (let attempt = 1; attempt < 3 && !refIsAlive(ref); attempt++) {
+            try { child.kill('SIGKILL'); } catch { /* already gone */ }
+            ({ child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nLive'));
+        }
         s.jobs['vivo'] = job({ id: 'vivo', executionState: 'running', processRef: ref });
         try {
             const plan = planReap(s);

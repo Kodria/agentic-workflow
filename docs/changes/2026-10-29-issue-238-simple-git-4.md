@@ -1,0 +1,70 @@
+---
+schema: awm.change-record/v1
+id: 2026-10-29-issue-238-simple-git-4
+title: Upgrade simple-git to 4.0.2 with honest non-interactive registry git
+summary_short: Pin simple-git 4.0.2 via a registry-git factory that forces non-interactive prompts, ignores ambient GIT_*, classifies sync failures, and redacts URL credentials.
+type: fix
+scope: changes
+semver: patch
+breaking: false
+modules:
+  - .
+  - .github/workflows
+  - cli
+  - cli/src
+  - cli/src/commands
+  - cli/src/core
+  - cli/tests/commands
+  - cli/tests/core
+  - cli/tests/helpers
+  - cli/tests/integration
+  - cli/tests/structural
+  - docs
+  - docs/plans
+links:
+  plan: docs/plans/2026-10-29-issue-238-simple-git-4-plan.md
+  issue: https://github.com/Kodria/agentic-workflow/issues/238
+verification:
+  commit: c9f62c6e3ae1c89e9bca6234dcacb3300dfcbcfb
+  overall: pass
+  sensors:
+    depcheck: pass
+    lint: pass
+    typecheck: pass
+  receipt_digest: sha256:7df5ec314252ed2bc6e507a5308d468fac59951e6668db6199b03c9e3fcfa3a8
+manual_validation:
+  - step: Tras publicar la CLI, escanear una imagen que instale agentic-workflow-manager
+    expected: Inspector/ECR ya no reporta CVE-2026-102826/102827/102828/102829 sobre simple-git / @simple-git/argv-parser
+  - step: Con GIT_SSL_CAINFO (u otra var de transporte/auth) en el entorno, correr awm update / sync
+    expected: Aviso one-shot con el nombre (sin valor) y remedio en git config; GIT_EDITOR no dispara aviso
+  - step: Probar remote inexistente/privado y awm add/list con sync fallido pero caché usable
+    expected: Fallo rápido sin hang; add/list anuncian versión en caché + causa; update/sync siguen reconciliando y salen ≠ 0; init/registry add salen ≠ 0 sin continuar
+risks:
+  - Ambientes que dependían de ambient GIT_SSH_COMMAND / GIT_ASKPASS / GIT_SSL_* para registries privados deben migrar a ~/.ssh/config, credential.helper o http.sslCAInfo
+  - simple-git timeout.block es idle (se reinicia con stdout/stderr), no un wall-clock hard cap; clones grandes sin progreso de TTY podrían cortarse (B4 aceptado)
+rollback: Revertir el merge del PR o pinear de nuevo simple-git@3.36.0 (reintroduce las CVEs). Consumidores vuelven a la CLI publicada anterior con npm i -g agentic-workflow-manager@<prev>.
+---
+
+## Qué se hizo
+
+- Pin de producción `simple-git@4.0.2` y fábrica única `cli/src/core/registry-git.ts` (named import, `GIT_TERMINAL_PROMPT=0`, timeout idle 60s, sin `allowUnsafe*`).
+- Avisos SG-5 de vars de transporte/auth ignoradas; clasificación SG-6 de fallos de sync/clone con remedios en git config; SG-7 soft en `awm add`/`list` y exit ≠ 0 en `init`/`update`/`sync`/`registry add` (update/sync completan pipeline sobre contenido usable).
+- Redacción de userinfo en remotes/fatal lines; runbook + lección en `AGENTS.md`.
+- Mitigación auditoría implementación (A1–B3): defer hard-fail en update/sync, docs alineadas, timeout solo `block timeout reached`, SG-5 acotado, constante única, soft esc/dedupe.
+
+## Qué se probó
+
+- Suites estructurales / factory / honesty / registries-sync / registry add / versioning (PASS).
+- `awm sensors run` overall `pass` en `c9f62c6e` (lint, typecheck, depcheck).
+- Reviews S1/S2 + Track A PASS; Track B B1 (credenciales en URL) corregido y re-verificado.
+- CI follow-up: helper `commitSeededRegistry` en fixtures de init reales (codex/copilot/provider-checks) para que SG-7 no hard-falle sync contra `example.invalid`; `gate-reconcile` reintenta spawn en Windows ARM; suite local completa 389/389 pass.
+- Post-audit: registry-git / honesty / update / pin estructurales PASS con aserciones A1/M1/M2/B1–B3.
+
+## Qué falta validar
+
+- Escaneo Inspector/ECR post-publish de una imagen con la CLI nueva.
+- Smoke en entorno Cencosud/corporativo con registry privado (HTTPS token o SSH via `~/.ssh/config`).
+
+## Riesgos y rollback
+
+Ver `risks` y `rollback` del frontmatter. No re-habilitar ambient `GIT_*` sin enmendar el diseño.

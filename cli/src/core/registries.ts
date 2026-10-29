@@ -1,8 +1,9 @@
 // src/core/registries.ts
 import fs from 'fs';
 import path from 'path';
-import simpleGit from 'simple-git';
 import { resolveBaseRemote } from './registry';
+import { createRegistryGit, warnIgnoredGitEnvOnce } from './registry-git';
+import { formatClassifiedRegistryFailure } from './registry-git-errors';
 import { resolveTargetRef, machineVersionOpts, compareSemver, currentVersion, normalizePin } from './versioning';
 import { cliVersion } from './cli-version';
 import { awmHome } from './paths';
@@ -233,8 +234,10 @@ export type RegistrySyncResult =
     | { name: string; action: 'error'; error: string };
 
 /** Sincroniza cada registry configurado al ref resuelto (pin > último tag > HEAD);
- *  re-clona si falta el dir. Errores por-registry NO fatales: se reportan en el resultado. */
+ *  re-clona si falta el dir. Errores por-registry se reportan en el resultado (clasificados SG-6);
+ *  si el llamador debe abortar lo decide la política SG-7 del comando. */
 export async function syncRegistries(): Promise<RegistrySyncResult[]> {
+    warnIgnoredGitEnvOnce();
     const results: RegistrySyncResult[] = [];
     for (const reg of listRegistries()) {
         try {
@@ -245,15 +248,15 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
             if (freshClone) {
                 fs.mkdirSync(registriesDir(), { recursive: true });
                 try {
-                    await simpleGit().clone(reg.remote, reg.contentRoot);
+                    await createRegistryGit().clone(reg.remote, reg.contentRoot);
                 } catch (e) {
                     fs.rmSync(reg.contentRoot, { recursive: true, force: true });
                     throw e;
                 }
             } else {
-                await simpleGit(reg.contentRoot).reset(['--hard']);
+                await createRegistryGit(reg.contentRoot).reset(['--hard']);
             }
-            const git = simpleGit(reg.contentRoot);
+            const git = createRegistryGit(reg.contentRoot);
             const previousVersion = freshClone ? null : await currentVersion(reg.contentRoot);
             const versionOpts = machineVersionOpts(reg.name);
             let resolved;
@@ -286,7 +289,11 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
                 ...(resolved.kind === 'tag' ? { availableVersion: `v${resolved.latestVersion}` } : {}),
             });
         } catch (e) {
-            results.push({ name: reg.name, action: 'error', error: e instanceof Error ? e.message : String(e) });
+            results.push({
+                name: reg.name,
+                action: 'error',
+                error: formatClassifiedRegistryFailure({ name: reg.name, remote: reg.remote, err: e }),
+            });
         }
     }
     return results;
@@ -310,15 +317,13 @@ export function describeRegistrySyncErrors(errors: { name: string; error: string
  * Registries that both errored during sync AND no longer have a usable content
  * layout afterwards — i.e. genuinely unusable, as opposed to merely stale.
  *
- * `syncRegistries()` deliberately reports per-registry failures as results
- * rather than throwing, so a flaky secondary registry never aborts a whole
- * run. Callers that go on to READ registry content (init) still need to know
- * whether what they are about to read remains usable: otherwise a missing,
- * empty, or unsafe registry
- * resurfaces much later as an unrelated step's failure, with its real cause
- * already discarded. Note that "usable" is deliberately about content on disk,
- * not about being a healthy git clone — a seeded content root with no `.git`
- * fails to sync every time and is still perfectly readable.
+ * `syncRegistries()` still reports per-registry failures as results rather than
+ * throwing (so callers can classify/format each one). Under SG-7, init / update /
+ * sync / registry add exit non-zero on ANY sync error; add / list may continue
+ * only when cached content remains usable — and this helper is what those soft
+ * paths consult. "Usable" is about content on disk, not a healthy git clone —
+ * a seeded content root with no `.git` fails to sync every time and is still
+ * readable.
  */
 export function unusableSyncedRegistries(
     results: RegistrySyncResult[],

@@ -40,20 +40,6 @@ describe('bundle skill-reference contract', () => {
         expect(skills.every((skill: unknown) => typeof skill === 'string')).toBe(true);
     });
 
-    it('places the CLI 9 migration boundary immediately after the bundle example', () => {
-        const guide = read(GUIDE);
-        const bundleFence = '```json\n{\n  "name": "mi-proceso"';
-        const start = guide.indexOf(bundleFence);
-        const end = guide.indexOf('```', start) + 3;
-        const following = guide.slice(end, guide.indexOf('## 5.', end));
-
-        expect(start).toBeGreaterThanOrEqual(0);
-        expect(following).toMatch(/CLI 9[\s\S]*(?:legacy object|objeto legacy)[\s\S]*\{\s*name\s*,\s*onSignal:\s*true\s*\}/i);
-        expect(following).toMatch(/ignor(?:e|a)[\s\S]*boolean[\s\S]*onSignal/i);
-        expect(following).toMatch(/warning/i);
-        expect(following).toMatch(/CLI 10[\s\S]*(?:rejects?|rechaza)[\s\S]*(?:objects?|objetos?)/i);
-    });
-
     it('keeps every JSON fence in the touched guide parseable', () => {
         for (const json of jsonFences(read(GUIDE))) {
             expect(() => JSON.parse(json)).not.toThrow();

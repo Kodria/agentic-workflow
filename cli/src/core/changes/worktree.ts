@@ -38,14 +38,24 @@ export function gitState(cwd: string, untracked: boolean, extraExcludes: readonl
     } catch (error) {
         return gitFailure(error);
     }
+    const dirty = treeDirty(root, untracked, extraExcludes);
+    return dirty === null ? { kind: 'failed' } : { kind: 'ok', root, commit, dirty };
+}
+
+/**
+ * Only the dirty measure of `gitState`, for a caller that already knows the repository root and does not need HEAD: one
+ * `status` instead of three git processes. Null when git fails or an exclusion is unsafe (the caller fails closed). Never throws.
+ */
+export function treeDirty(root: string, untracked: boolean, extraExcludes: readonly string[] = []): boolean | null {
+    if (typeof root !== 'string' || root.length === 0) return null;
+    if (!Array.isArray(extraExcludes) || extraExcludes.length > MAX_EXTRA_EXCLUDES || !extraExcludes.every(isSafeRelativePath)) return null;
     try {
         // Submodules are never hidden by config (`.gitmodules` ignore=all, diff.ignoreSubmodules). The pre-run measure counts everything
         // (`none`); the post-run recheck is about tracked files only, so it also ignores untracked content inside a submodule
         // (sensor build/coverage output) while still seeing a moved checkout or modified tracked content (`untracked`).
         const args = ['status', '--porcelain', untracked ? '--untracked-files=normal' : '--untracked-files=no', untracked ? '--ignore-submodules=none' : '--ignore-submodules=untracked', '--', '.', ...RUNTIME_STATE_EXCLUDES.map((p) => `:(exclude)${p}`), ...extraExcludes.map((p) => `:(exclude,literal)${p}`)];
-        const status = execGit(root, args, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT });
-        return { kind: 'ok', root, commit, dirty: status.trim().length > 0 };
+        return execGit(root, args, { stderr: 'ignore', maxBuffer: MAX_GIT_OUTPUT }).trim().length > 0;
     } catch {
-        return { kind: 'failed' };
+        return null;
     }
 }

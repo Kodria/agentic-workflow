@@ -49,6 +49,60 @@ function commitRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass', sensors: 
     repo.git('commit', '-q', '-m', `docs(changes): ${slug}`);
     return rel;
 }
+
+// Prebuilt states. Each is built once, lazily, in its own clone of the template (the git work of `change new` and the commits
+// happens there once); every test that starts from it gets a private file copy (no git process) that it may change freely.
+const fixtures = new Map<string, TestRepo>();
+afterAll(() => { for (const f of fixtures.values()) f.cleanup(); });
+/** The prebuilt state `key` (built by `build` on first use). */
+function built(key: string, build: () => void): TestRepo {
+    let state = fixtures.get(key);
+    if (state === undefined) {
+        const own = repo;
+        repo = cloneRepo(template);
+        try {
+            build();
+            state = repo;
+            fixtures.set(key, state);
+        } catch (error) {
+            repo.cleanup();
+            throw error;
+        } finally {
+            repo = own;
+        }
+    }
+    return state;
+}
+/** Starts the test from a private copy of the prebuilt state `key`. */
+function fixture(key: string, build: () => void): void {
+    const state = built(key, build);
+    repo.cleanup();
+    repo = cloneRepo(state);
+}
+const recordKey = (slug: string, overall: string, sensors: string[]): string => `record ${slug} ${overall} ${sensors.join(',')}`;
+/** The repository after `commitRecord(slug, overall, sensors)`, from a prebuilt state. Returns the record's path. */
+function withRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass', sensors: string[] = ['lint']): string {
+    fixture(recordKey(slug, overall, sensors), () => { commitRecord(slug, overall, sensors); });
+    return `docs/changes/2026-10-17-${slug}.md`;
+}
+const sharedRuns = new Map<string, CommandResult>();
+/**
+ * `runChangeValidate(root, target, opts)` on an untouched prebuilt state: `none` is the template (a branch with one commit and no
+ * record), `record` is the state of `withRecord()`. Validation is read-only (R4.6, asserted below), so each distinct run is made
+ * once and its result is shared by the tests that only read it.
+ */
+function untouched(state: 'none' | 'record', target: string | undefined, opts: ValidateOpts): CommandResult {
+    const key = JSON.stringify([state, target ?? null, opts]);
+    let r = sharedRuns.get(key);
+    if (r === undefined) {
+        const root = state === 'none' ? template.root : built(recordKey('rec', 'pass', ['lint']), () => { commitRecord(); }).root;
+        r = runChangeValidate(root, target, opts);
+        sharedRuns.set(key, r);
+    }
+    return r;
+}
+/** The repository after `commitRecord('aaa')` and `commitRecord('bbb')`, from a prebuilt state. */
+const withTwoRecords = (): void => fixture('records aaa bbb', () => { commitRecord('aaa'); commitRecord('bbb'); });
 /** Edits the working-tree copy of a record (nothing is committed). */
 function edit(rel: string, fn: (text: string) => string): void {
     const before = fs.readFileSync(abs(rel), 'utf8');
@@ -79,22 +133,20 @@ const rawUnsafe = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029]/;
 
 describe('R4.1 target selection', () => {
     test('without a path every record added in merge-base..HEAD is validated', () => {
-        commitRecord('aaa');
-        commitRecord('bbb');
+        withTwoRecords();
         const r = run();
         expect(report(r).records.map((x) => x.path)).toEqual(['docs/changes/2026-10-17-aaa.md', 'docs/changes/2026-10-17-bbb.md']);
         expect(r.code).toBe(0);
     });
     test('one invalid record among several makes the run invalid and is the one reported as such', () => {
-        commitRecord('aaa');
-        commitRecord('bbb');
+        withTwoRecords();
         fs.writeFileSync(abs('docs/changes/2026-10-17-bbb.md'), 'not a record');
         const out = report(run());
         expect(out.state).toBe('invalid');
         expect(out.records.map((x) => x.state)).toEqual(['valid', 'invalid']);
     });
     test('a record that already exists at the merge base and is only modified is not an added record', () => {
-        const rel = commitRecord();
+        const rel = withRecord();
         repo.git('branch', '-f', 'main', 'HEAD');
         repo.commit({ [rel]: fs.readFileSync(abs(rel), 'utf8') + '\nmore\n' }, 'docs: touch the record');
         expect(codesOf(run())).toEqual(['record-missing']);
@@ -104,27 +156,26 @@ describe('R4.1 target selection', () => {
         expect(codesOf(run())).toEqual(['record-missing']);
     });
     test('with a path only that file is validated', () => {
-        commitRecord('aaa');
-        commitRecord('bbb');
+        withTwoRecords();
         fs.writeFileSync(abs('docs/changes/2026-10-17-bbb.md'), 'not a record');
         const r = run('docs/changes/2026-10-17-aaa.md');
         expect(report(r).records.map((x) => x.path)).toEqual(['docs/changes/2026-10-17-aaa.md']);
         expect(r.code).toBe(0);
     });
     test('a path is read relative to the working directory, from a subdirectory', () => {
-        const rel = commitRecord();
+        const rel = withRecord();
         const r = runChangeValidate(path.join(repo.root, 'cli'), `..${path.sep}docs${path.sep}changes${path.sep}2026-10-17-rec.md`, { json: true });
         expect(report(r).records[0].path).toBe(rel);
         expect(r.code).toBe(0);
     });
     test('an absolute path inside the repository is accepted', () => {
-        const rel = commitRecord();
+        const rel = withRecord();
         const r = runChangeValidate(repo.root, abs(rel), { json: true });
         expect(report(r).records[0].path).toBe(rel);
         expect(r.code).toBe(0);
     });
     test('with a path the record is read even when the branch range holds no commit (derivation failure is reported for it)', () => {
-        const rel = commitRecord();
+        const rel = withRecord();
         repo.git('branch', '-f', 'main', 'HEAD');
         const r = run(rel);
         expect(r.code).toBe(2);
@@ -190,7 +241,7 @@ describe('target path safety', () => {
         diag(r, 'record-missing', undefined);
     });
     posixOnly('a record that is a symlink is record-missing and is never read', () => {
-        commitRecord();
+        withRecord();
         const outside = path.join(fs.mkdtempSync(path.join(repo.home, 'outside-')), 'outside.md');
         fs.writeFileSync(outside, fs.readFileSync(abs(REL)));
         fs.rmSync(abs(REL));
@@ -200,7 +251,7 @@ describe('target path safety', () => {
         diag(r, 'record-missing', undefined);
     });
     posixOnly('a symlinked docs/changes directory is unsafe-path for every record', () => {
-        commitRecord();
+        withRecord();
         const moved = path.join(fs.mkdtempSync(path.join(repo.home, 'moved-')), 'changes');
         fs.renameSync(path.join(repo.root, 'docs', 'changes'), moved);
         fs.symlinkSync(moved, path.join(repo.root, 'docs', 'changes'));
@@ -225,7 +276,7 @@ describe('target path safety', () => {
         expect(codesOf(run())).toEqual(['frontmatter-missing']);
     });
     test('a record that is not valid UTF-8 is record-invalid (not record-too-large)', () => {
-        commitRecord();
+        withRecord();
         fs.writeFileSync(abs(REL), Buffer.from([0x2d, 0x2d, 0x2d, 0xff, 0xfe, 0x0a]));
         expect(codesOf(run(REL))).toEqual(['record-invalid']);
     });
@@ -233,7 +284,7 @@ describe('target path safety', () => {
 
 describe('R4.2 missing record and the opt-out trailer', () => {
     test('no record and no trailer fails with record-missing, state invalid, exit 2', () => {
-        const r = run();
+        const r = untouched('none', undefined, { json: true });
         expect(r.code).toBe(2);
         expect(report(r).state).toBe('invalid');
         diag(r, 'record-missing', undefined);
@@ -294,7 +345,7 @@ describe('R4.2 missing record and the opt-out trailer', () => {
 
 describe('base resolution (R3.1, R3.2, R3.5)', () => {
     test('--base selects the base: a base at HEAD leaves no added record', () => {
-        commitRecord();
+        withRecord();
         repo.git('branch', 'tip', 'HEAD');
         expect(run().code).toBe(0);
         diag(run(undefined, { base: 'tip' }), 'record-missing', undefined);
@@ -327,13 +378,12 @@ describe('base resolution (R3.1, R3.2, R3.5)', () => {
 
 describe('R4.3 base checks', () => {
     test('a filled record that matches git passes', () => {
-        commitRecord();
-        const r = run();
+        const r = untouched('record', undefined, { json: true });
         expect(r.code).toBe(0);
         expect(report(r)).toMatchObject({ state: 'valid', records: [{ path: REL, state: 'valid', diagnostics: [] }] });
     });
     test('R1 shape errors are reported with their own code and field', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other'));
         diag(run(REL), 'field-invalid', 'schema');
     });
@@ -345,7 +395,7 @@ describe('R4.3 base checks', () => {
         diag(run(), 'pending-content', undefined);
     });
     test('a record that fails R1 is not checked against git (no record to compare)', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix').replace('schema: awm.change-record/v1', 'schema: other'));
         expect(codesOf(run(REL))).not.toContain('derived-mismatch');
     });
@@ -356,25 +406,25 @@ describe('R4.3 base checks', () => {
         ['scope', 'scope: changes', 'scope: other'],
         ['modules', '  - cli/src', '  - cli/src\n  - docs'],
     ])('derived-mismatch names the field %s', (field, from, to) => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(from, to));
         const r = run(REL);
         expect(r.code).toBe(2);
         expect(diagsOf(r).filter((d) => d.code === 'derived-mismatch').map((d) => d.field)).toEqual([field]);
     });
     test('every mismatching derived field gets its own diagnostic', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix').replace('semver: minor', 'semver: patch'));
         expect(diagsOf(run(REL)).filter((d) => d.code === 'derived-mismatch').map((d) => d.field).sort()).toEqual(['semver', 'type']);
     });
     test('a derived-mismatch message states the recorded and the derived value on one line', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix'));
         const d = diag(run(REL), 'derived-mismatch', 'type');
         expect(d.message).toBe('type is "fix" but git derives "feat"');
     });
     test('a git-derivation failure is reported once with the derive code (no-conventional-commits)', () => {
-        commitRecord();
+        withRecord();
         repo.git('reset', '-q', '--soft', 'main');
         repo.git('commit', '-q', '-m', 'work in progress');
         const r = run(REL);
@@ -382,12 +432,12 @@ describe('R4.3 base checks', () => {
         expect(codesOf(r)).not.toContain('derived-mismatch');
     });
     test('a verification commit that is not in the repository is verification-commit-foreign', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(/commit: [0-9a-f]{40}/, `commit: ${'e'.repeat(40)}`));
         diag(run(REL), 'verification-commit-foreign', 'verification.commit');
     });
     test('a verification commit on another branch is verification-commit-foreign', () => {
-        commitRecord();
+        withRecord();
         const other = (() => {
             repo.git('checkout', '-q', '-b', 'side', 'main');
             const sha = repo.commit({ 'side.ts': '1' }, 'feat: side');
@@ -398,50 +448,51 @@ describe('R4.3 base checks', () => {
         diag(run(REL), 'verification-commit-foreign', 'verification.commit');
     });
     test('a verification commit equal to HEAD is accepted', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(/commit: [0-9a-f]{40}/, `commit: ${repo.git('rev-parse', 'HEAD')}`));
         const codes = codesOf(run(REL));
         expect(codes).not.toContain('verification-commit-foreign');
         expect(codes).not.toContain('code-changed-after-verification');
     });
     test('a foreign verification commit does not also report code-changed-after-verification', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(/commit: [0-9a-f]{40}/, `commit: ${'e'.repeat(40)}`));
         expect(codesOf(run(REL))).not.toContain('code-changed-after-verification');
     });
     test('code changed after the verified commit is code-changed-after-verification', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late');
-        const d = diag(run(), 'code-changed-after-verification', undefined);
+        const r = run();
+        const d = diag(r, 'code-changed-after-verification', undefined);
         expect(d.message).toContain('cli/src/late.ts');
-        expect(codesOf(run())).not.toContain('derived-mismatch'); // same module, same type: only the late code is wrong
+        expect(codesOf(r)).not.toContain('derived-mismatch'); // same module, same type: only the late code is wrong
     });
     test('files under docs/changes changed after the verified commit are not code', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'docs/changes/notes.md': 'n' }, 'docs: notes');
         expect(codesOf(run())).not.toContain('code-changed-after-verification');
     });
     test('a path that merely starts like docs/changes is code', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'docs/changes-extra/x.md': 'n' }, 'chore: extra');
         expect(codesOf(run())).toContain('code-changed-after-verification');
     });
     test('late code and derived drift are both reported', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
         const c = codesOf(run());
         expect(c).toContain('code-changed-after-verification');
         expect(c).toContain('derived-mismatch');
     });
     test('one late file is reported as "1 file" and two as "2 files"', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/one.ts': '1' }, 'chore: one');
         expect(diag(run(), 'code-changed-after-verification', undefined).message).toMatch(/^1 file changed after [0-9a-f]{12}: cli\/src\/one\.ts$/);
         repo.commit({ 'cli/src/two.ts': '1' }, 'chore: two');
         expect(diag(run(), 'code-changed-after-verification', undefined).message).toMatch(/^2 files changed after [0-9a-f]{12}: cli\/src\/one\.ts, cli\/src\/two\.ts$/);
     });
     test('the late-file list names at most 20 paths and counts them all', () => {
-        commitRecord();
+        withRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`a${String(i).padStart(2, '0')}.ts`, '1'])), 'chore: late');
         const d = diag(run(), 'code-changed-after-verification', undefined);
         expect(d.message).toContain('25 files changed after');
@@ -450,20 +501,20 @@ describe('R4.3 base checks', () => {
         expect(d.message).not.toContain('a20.ts');
     });
     test('exactly 20 late files are all listed with no ellipsis', () => {
-        commitRecord();
+        withRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`a${String(i).padStart(2, '0')}.ts`, '1'])), 'chore: late');
         const d = diag(run(), 'code-changed-after-verification', undefined);
         expect(d.message.endsWith('a19.ts')).toBe(true);
     });
     test('a long late-file list stays one line of at most 300 units', () => {
-        commitRecord();
+        withRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`cli/src/late/${'d'.repeat(60)}${i}.ts`, '1'])), 'chore: late');
         const d = diag(run(), 'code-changed-after-verification', undefined);
         expect(d.message.length).toBeLessThanOrEqual(300);
         expect(d.message).not.toContain('\n');
     });
     posixOnly('a late file named with an escape sequence and a newline never reaches the output raw', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/\u001b[31mred\nline.ts': '1' }, 'chore: hostile');
         const text = runChangeValidate(repo.root, undefined, {});
         const json = run();
@@ -474,7 +525,7 @@ describe('R4.3 base checks', () => {
         expect(diag(json, 'code-changed-after-verification', undefined).message).toContain('\\u001b');
     });
     test('a git failure while listing the late files is reported, not thrown', () => {
-        commitRecord();
+        withRecord();
         const verified = repo.git('rev-parse', 'HEAD~1');
         const real = gitModule.changedFiles;
         // Only the late-file listing (which starts at the verified commit) fails; the derivation's own diff still works.
@@ -488,13 +539,13 @@ describe('R4.3 base checks', () => {
 
 describe('R4.4 strict checks', () => {
     test('strict passes with a matching, passing receipt', () => {
-        commitRecord();
+        withRecord();
         const r = run(undefined, { strict: true });
         expect(r.code).toBe(0);
         expect(report(r).state).toBe('valid');
     });
     test('R2.2c strict compares the sensors as sorted pairs: integer-like names and a record that lists them in another order still match', () => {
-        commitRecord('rec', 'pass', ['tsc', '9', '10']);
+        withRecord('rec', 'pass', ['tsc', '9', '10']);
         expect(run(undefined, { strict: true }).code).toBe(0);
         // The same sensors, listed in another order in the record's YAML: the verdict is the same.
         edit(REL, (t) => t.replace(/  sensors:[\s\S]*?(?=  receipt_digest)/, "  sensors: { tsc: pass, '10': pass, '9': pass }\n"));
@@ -504,82 +555,82 @@ describe('R4.4 strict checks', () => {
         expect(r.code).toBe(0);
     });
     test('base mode never reads the receipt', () => {
-        commitRecord();
+        withRecord();
         fs.rmSync(path.join(repo.root, '.awm', 'sensors', 'runs'), { recursive: true, force: true });
         expect(run().code).toBe(0);
     });
     test('strict: a missing receipt is receipt-missing', () => {
-        commitRecord();
+        withRecord();
         fs.rmSync(path.join(repo.root, '.awm', 'sensors', 'runs'), { recursive: true, force: true });
         diag(run(undefined, { strict: true }), 'receipt-missing', 'verification.commit');
     });
     test('strict: a receipt that is not valid JSON is receipt-invalid', () => {
-        commitRecord();
+        withRecord();
         const sha = /commit: ([0-9a-f]{40})/.exec(fs.readFileSync(abs(REL), 'utf8'))?.[1] as string;
         fs.writeFileSync(path.join(repo.root, '.awm', 'sensors', 'runs', `${sha}.json`), '{ nope');
         diag(run(undefined, { strict: true }), 'receipt-invalid', 'verification.commit');
     });
     test('strict: a receipt whose content was edited (digest broken) is receipt-invalid', () => {
-        commitRecord();
+        withRecord();
         const sha = /commit: ([0-9a-f]{40})/.exec(fs.readFileSync(abs(REL), 'utf8'))?.[1] as string;
         const file = path.join(repo.root, '.awm', 'sensors', 'runs', `${sha}.json`);
         fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('"pass"', '"fail"'));
         diag(run(undefined, { strict: true }), 'receipt-invalid', 'verification.commit');
     });
     test('without --strict a missing or failing receipt is not reported', () => {
-        commitRecord('rec', 'fail');
+        withRecord('rec', 'fail');
         expect(run().code).toBe(0);
     });
     test('strict: a failing verdict is verification-not-passing', () => {
-        commitRecord('rec', 'fail');
+        withRecord('rec', 'fail');
         const r = run(undefined, { strict: true });
         expect(r.code).toBe(2);
         diag(r, 'verification-not-passing', 'verification.overall');
         expect(codesOf(r)).not.toContain('verification-mismatch');
     });
     test('strict: a record digest that differs from the receipt is verification-mismatch on receipt_digest', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(/receipt_digest: sha256:[0-9a-f]{64}/, `receipt_digest: sha256:${'0'.repeat(64)}`));
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.receipt_digest']);
     });
     test('strict: a record verdict that differs from the receipt is verification-mismatch on overall', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('overall: pass', 'overall: fail'));
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.overall']);
     });
     test('strict: a record sensor status that differs from the receipt is verification-mismatch on sensors', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('lint: pass', 'lint: fail'));
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.sensors']);
     });
     test('strict: an extra sensor in the record is verification-mismatch on sensors', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('    lint: pass', '    lint: pass\n    extra: pass'));
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.sensors']);
     });
     test('strict: a sensor the record omits is verification-mismatch on sensors', () => {
-        commitRecord('rec', 'pass', ['lint', 'types']);
+        withRecord('rec', 'pass', ['lint', 'types']);
         expect(run(undefined, { strict: true }).code).toBe(0); // two sensors in the receipt and the record ...
         edit(REL, (t) => t.replace('    types: pass\n', '')); // ... and the record omits one
         const r = run(REL, { strict: true });
         expect(diagsOf(r).filter((d) => d.code === 'verification-mismatch').map((d) => d.field)).toEqual(['verification.sensors']);
     });
     test('strict: the sensor order in the record does not matter', () => {
-        commitRecord('rec', 'pass', ['lint', 'types']);
+        withRecord('rec', 'pass', ['lint', 'types']);
         edit(REL, (t) => t.replace('    lint: pass\n    types: pass\n', '    types: pass\n    lint: pass\n'));
         expect(run(REL, { strict: true }).code).toBe(0);
     });
     test('without --strict a mismatching verification block is not reported', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('lint: pass', 'lint: fail'));
         expect(run(REL).code).toBe(0);
     });
     test('strict with a foreign verification commit asks for no receipt of it', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace(/commit: [0-9a-f]{40}/, `commit: ${'e'.repeat(40)}`));
         const c = codesOf(run(REL, { strict: true }));
         expect(c).toContain('verification-commit-foreign');
@@ -589,7 +640,7 @@ describe('R4.4 strict checks', () => {
 
 describe('R4.5 output and exit codes', () => {
     test('text report: header, one line per record, one indented line per diagnostic', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix'));
         repo.git('commit', '-q', '-am', 'docs: edit the record');
         const r = runChangeValidate(repo.root, undefined, {});
@@ -598,7 +649,7 @@ describe('R4.5 output and exit codes', () => {
         expect(r.stdout).toBe(`Change Record validation: invalid\n- ${REL}: invalid\n  - derived-mismatch (type): type is "fix" but git derives "feat"\n`);
     });
     test('text report of a valid run', () => {
-        commitRecord();
+        withRecord();
         const r = runChangeValidate(repo.root, undefined, {});
         expect(r.code).toBe(0);
         expect(r.stdout).toBe(`Change Record validation: valid\n- ${REL}: valid\n`);
@@ -610,12 +661,12 @@ describe('R4.5 output and exit codes', () => {
         expect(r.stdout).toBe('Change Record validation: exempt (Change-Record: none)\n');
     });
     test('text report of a missing record names docs/changes', () => {
-        const r = runChangeValidate(repo.root, undefined, {});
+        const r = untouched('none', undefined, {});
         expect(r.code).toBe(2);
         expect(r.stdout.startsWith('Change Record validation: invalid\n- docs/changes: invalid\n  - record-missing: ')).toBe(true);
     });
     test('--json is one line with the documented shape, and a diagnostic without a field has no field key', () => {
-        const r = run();
+        const r = untouched('none', undefined, { json: true });
         expect(r.stdout.endsWith('\n')).toBe(true);
         expect(r.stdout.slice(0, -1)).not.toContain('\n');
         const out = report(r);
@@ -624,13 +675,12 @@ describe('R4.5 output and exit codes', () => {
         expect(Object.keys(out.records[0].diagnostics[0]).sort()).toEqual(['code', 'message']);
     });
     test('--json carries the field when a diagnostic names one', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix'));
         expect(Object.keys(diagsOf(run(REL))[0]).sort()).toEqual(['code', 'field', 'message']);
     });
     test('exit code 0 for a valid run', () => {
-        commitRecord();
-        expect(run().code).toBe(0);
+        expect(untouched('record', undefined, { json: true }).code).toBe(0);
     });
     test('exit code 0 for an exempt run', () => {
         repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: none');
@@ -638,20 +688,20 @@ describe('R4.5 output and exit codes', () => {
         expect(runChangeValidate(repo.root, undefined, {}).code).toBe(0);
     });
     test('exit code 2 for a missing record', () => {
-        expect(run().code).toBe(2);
+        expect(untouched('none', undefined, { json: true }).code).toBe(2);
     });
     test('exit code 2 for an invalid record', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/more.ts': '1' }, 'chore: more');
         expect(run().code).toBe(2);
     });
     test('a report is never written to stderr', () => {
-        expect(run().stderr).toBe('');
-        expect(runChangeValidate(repo.root, undefined, {}).stderr).toBe('');
+        expect(untouched('none', undefined, { json: true }).stderr).toBe('');
+        expect(untouched('none', undefined, {}).stderr).toBe('');
     });
     /** A committed record plus `count` unknown top-level keys in the working tree: `count` unknown-field diagnostics. */
     function withUnknownKeys(count: number): Diag[] {
-        commitRecord();
+        withRecord();
         const extra = Array.from({ length: count }, (_, i) => `extra${i}: 1`).join('\n');
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', `schema: awm.change-record/v1\n${extra}`));
         return diagsOf(run(REL));
@@ -677,14 +727,15 @@ describe('R4.5 output and exit codes', () => {
     test('at most 50 records are validated; a 51st-and-later record yields too-many-records and an invalid run', () => {
         const files = Object.fromEntries(Array.from({ length: 53 }, (_, i) => [`docs/changes/2026-10-17-r${String(i).padStart(2, '0')}.md`, 'x']));
         repo.commit(files, 'docs: many');
-        const out = report(run());
+        const r = run();
+        const out = report(r);
         expect(out.state).toBe('invalid');
         expect(out.records).toHaveLength(51);
         expect(out.records[0].path).toBe('docs/changes/2026-10-17-r00.md');
         expect(out.records[49].path).toBe('docs/changes/2026-10-17-r49.md');
         expect(out.records[50]).toEqual({ path: 'docs/changes', state: 'invalid', diagnostics: [{ code: 'too-many-records', message: '53 records were added; only the first 50 were validated' }] });
         expect(out.records.slice(0, 50).every((x) => x.diagnostics.every((d) => d.code !== 'too-many-records'))).toBe(true);
-        expect(run().code).toBe(2);
+        expect(r.code).toBe(2);
     });
     test('exactly 50 records are all validated with no too-many-records marker', () => {
         const files = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`docs/changes/2026-10-17-r${String(i).padStart(2, '0')}.md`, 'x']));
@@ -694,7 +745,7 @@ describe('R4.5 output and exit codes', () => {
         expect(out.records.some((x) => x.diagnostics.some((d) => d.code === 'too-many-records'))).toBe(false);
     });
     test('every message is one line of at most 300 units, in both formats', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('type: feat', 'type: fix').replace('semver: minor', 'semver: patch'));
         repo.git('commit', '-q', '-am', 'docs: edit the record');
         repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late');
@@ -705,7 +756,7 @@ describe('R4.5 output and exit codes', () => {
         for (const l of runChangeValidate(repo.root, undefined, {}).stdout.split('\n')) expect(l.length).toBeLessThanOrEqual(300);
     });
     test('a long record value with quotes and backslashes in a derived-mismatch message stays one bounded, escaped line', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('scope: changes', `scope: ${JSON.stringify('"\\'.repeat(300))}`));
         const d = diag(run(REL), 'derived-mismatch', 'scope');
         expect(d.message.length).toBeLessThanOrEqual(300);
@@ -714,12 +765,12 @@ describe('R4.5 output and exit codes', () => {
         for (const l of runChangeValidate(repo.root, REL, {}).stdout.split('\n')) expect(l.length).toBeLessThanOrEqual(300);
     });
     test('the modules of a derived-mismatch message are listed as a bracketed list', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('  - cli/src', '  - cli/src\n  - docs'));
         expect(diag(run(REL), 'derived-mismatch', 'modules').message).toBe('modules is ["cli/src", "docs"] but git derives ["cli/src"]');
     });
     test('a long recorded modules list does not hide the derived value (both halves stay visible)', () => {
-        commitRecord();
+        withRecord();
         const many = Array.from({ length: 40 }, (_, i) => `  - mod/m${String(i).padStart(2, '0')}`).join('\n');
         edit(REL, (t) => t.replace('  - cli/src', `  - cli/src\n${many}`));
         const d = diag(run(REL), 'derived-mismatch', 'modules');
@@ -728,14 +779,14 @@ describe('R4.5 output and exit codes', () => {
         expect(d.message.endsWith('but git derives ["cli/src"]')).toBe(true);
     });
     test('a long derived modules list does not hide the recorded value', () => {
-        commitRecord();
+        withRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`wide/w${String(i).padStart(2, '0')}/x.ts`, '1'])), 'chore: wide');
         const d = diag(run(), 'derived-mismatch', 'modules');
         expect(d.message.length).toBeLessThanOrEqual(300);
         expect(d.message.startsWith('modules is ["cli/src"] but git derives ["cli/src", "wide/w00"')).toBe(true);
     });
     test('when both the recorded and the derived list are long, each is cut to its own share and the whole message stays under the limit', () => {
-        commitRecord();
+        withRecord();
         repo.commit(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`wide/w${String(i).padStart(2, '0')}/x.ts`, '1'])), 'chore: wide');
         const many = Array.from({ length: 40 }, (_, i) => `  - mod/m${String(i).padStart(2, '0')}`).join('\n');
         repo.commit({ [REL]: fs.readFileSync(abs(REL), 'utf8').replace('  - cli/src', `  - cli/src\n${many}`) }, 'docs: record');
@@ -744,7 +795,7 @@ describe('R4.5 output and exit codes', () => {
         expect(d.message).toMatch(/^modules is \["cli\/src", "mod\/m00".*… but git derives \["cli\/src", "wide\/w00"/);
     });
     test('a null scope and a boolean are shown as themselves', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('scope: changes', 'scope: null').replace('breaking: false', 'breaking: true'));
         const ds = diagsOf(run(REL));
         expect(ds.find((d) => d.field === 'scope')?.message).toBe('scope is null but git derives "changes"');
@@ -804,55 +855,54 @@ describe('R4.5 operational failures under --json', () => {
 
 describe('R4.3 committed-record verdict (record-uncommitted)', () => {
     test('a clean committed record has no record-uncommitted diagnostic', () => {
-        commitRecord();
-        expect(codesOf(run())).not.toContain('record-uncommitted');
-        expect(run().code).toBe(0);
+        const r = untouched('record', undefined, { json: true });
+        expect(codesOf(r)).not.toContain('record-uncommitted');
+        expect(r.code).toBe(0);
     });
     test('an unstaged edit of a committed record is record-uncommitted', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => `${t}\nmore\n`);
         const r = run();
         expect(r.code).toBe(2);
         diag(r, 'record-uncommitted', undefined);
     });
     test('the verdict is not silently computed from the edit: an edit that keeps the record valid is still invalid', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => `${t}\nmore\n`);
         expect(run(REL).code).toBe(0); // the edited file on its own is fine ...
         expect(report(run()).state).toBe('invalid'); // ... but the branch's committed record is not what was validated
     });
     test('a staged but uncommitted edit is record-uncommitted', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => `${t}\nmore\n`);
         repo.git('add', REL);
         diag(run(), 'record-uncommitted', undefined);
     });
     test('an edit that also breaks the shape reports both', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other'));
         const c = codesOf(run());
         expect(c).toContain('record-uncommitted');
         expect(c).toContain('field-invalid');
     });
     test('uncommitted edit of another record does not taint a clean one', () => {
-        commitRecord('aaa');
-        commitRecord('bbb');
+        withTwoRecords();
         edit('docs/changes/2026-10-17-bbb.md', (t) => `${t}\nmore\n`);
         const out = report(run());
         expect(out.records.map((x) => x.state)).toEqual(['valid', 'invalid']);
     });
     test('an untracked unrelated file is not an uncommitted change of the record', () => {
-        commitRecord();
+        withRecord();
         fs.writeFileSync(path.join(repo.root, 'docs', 'changes', 'notes.md'), 'x');
         expect(run().code).toBe(0);
     });
     test('with an explicit path the working-tree file is validated and no record-uncommitted is reported', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => `${t}\nmore\n`);
         expect(codesOf(run(REL))).not.toContain('record-uncommitted');
     });
     test('a git failure while checking the record fails closed as record-uncommitted', () => {
-        commitRecord();
+        withRecord();
         spyOnGit((args) => { if (args.includes('status')) throw Object.assign(new Error('boom'), { code: 'ETIMEDOUT' }); });
         const r = run();
         expect(r.code).toBe(2);
@@ -863,9 +913,13 @@ describe('R4.3 committed-record verdict (record-uncommitted)', () => {
 describe('one derivation, one ancestry check and one late-file listing per verification commit', () => {
     /** Two valid records that both verify the same commit (the second is a copy of the first under another name). */
     function twoRecordsOneCommit(): string {
-        commitRecord('aaa');
-        const text = fs.readFileSync(abs('docs/changes/2026-10-17-aaa.md'), 'utf8').replace('id: 2026-10-17-aaa', 'id: 2026-10-17-bbb');
-        repo.commit({ 'docs/changes/2026-10-17-bbb.md': text }, 'docs(changes): bbb');
+        fixture('records aaa + copy bbb', () => {
+            commitRecord('aaa');
+            const copy = fs.readFileSync(abs('docs/changes/2026-10-17-aaa.md'), 'utf8').replace('id: 2026-10-17-aaa', 'id: 2026-10-17-bbb');
+            repo.commit({ 'docs/changes/2026-10-17-bbb.md': copy }, 'docs(changes): bbb');
+        });
+        const text = fs.readFileSync(abs('docs/changes/2026-10-17-bbb.md'), 'utf8');
+        expect(text).toContain('id: 2026-10-17-bbb');
         return /commit: ([0-9a-f]{40})/.exec(text)?.[1] as string;
     }
     function gitCalls(fn: () => void): string[][] {
@@ -897,7 +951,7 @@ describe('a path read through a symlinked working directory or repository root',
         return l;
     }
     posixOnly('a relative path is read from a cwd that is a symlink to the repository', () => {
-        commitRecord();
+        withRecord();
         const r = runChangeValidate(link(repo.root), REL, { json: true });
         expect(r.code).toBe(0);
         expect(report(r).records[0].path).toBe(REL);
@@ -908,20 +962,20 @@ describe('a path read through a symlinked working directory or repository root',
         expect(report(r).records[0].diagnostics.map((d) => d.code)).toEqual(['record-missing']);
     });
     posixOnly('an absolute path through a symlink to the repository is accepted', () => {
-        commitRecord();
+        withRecord();
         const r = runChangeValidate(repo.root, path.join(link(repo.root), ...REL.split('/')), { json: true });
         expect(r.code).toBe(0);
         expect(report(r).records[0].path).toBe(REL);
     });
     posixOnly('a repository root reported through a symlink still resolves a path given from the real directory', () => {
-        commitRecord();
+        withRecord();
         jest.spyOn(gitModule, 'repoRoot').mockReturnValue(link(repo.root));
         const r = runChangeValidate(repo.root, abs(REL), { json: true });
         expect(report(r).records[0].path).toBe(REL);
         expect(r.code).toBe(0);
     });
     posixOnly('a symlink to somewhere else is still outside the repository', () => {
-        commitRecord();
+        withRecord();
         const elsewhere = fs.mkdtempSync(path.join(repo.home, 'else-'));
         expectFailure(runChangeValidate(repo.root, path.join(link(elsewhere), '2026-10-17-rec.md'), {}), 'path-invalid');
     });
@@ -929,21 +983,21 @@ describe('a path read through a symlinked working directory or repository root',
 
 describe('R4.3 shape first', () => {
     test('an invalid-shape committed record with late code changes reports only the shape diagnostics', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other').replace('type: feat', 'type: fix'));
         repo.git('commit', '-q', '-am', 'docs: break the record');
         repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
         expect(codesOf(run(undefined, { strict: true }))).toEqual(['field-invalid']);
     });
     test('the same record with an explicit path reports only the shape diagnostics', () => {
-        commitRecord();
+        withRecord();
         edit(REL, (t) => t.replace('schema: awm.change-record/v1', 'schema: other'));
         repo.git('commit', '-q', '-am', 'docs: break the record');
         repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
         expect(codesOf(run(REL, { strict: true }))).toEqual(['field-invalid']);
     });
     test('once the shape is fixed the other diagnostics appear', () => {
-        commitRecord();
+        withRecord();
         repo.commit({ 'cli/src/core/late.ts': '1' }, 'feat(core): late');
         expect(codesOf(run())).toEqual(expect.arrayContaining(['code-changed-after-verification', 'derived-mismatch']));
     });
@@ -970,8 +1024,8 @@ describe('R4.6 read-only', () => {
         ['json', undefined, { json: true }],
         ['a path', REL, { strict: true }],
     ] as Array<[string, string | undefined, ValidateOpts]>)('%s run changes no file, no directory and no git state', (_n, target, opts) => {
-        commitRecord();
-        repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late');
+        withRecord();
+        repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late'); // also leaves the copied index fresh, as a real checkout's would be
         const before = snapshot();
         const status = repo.git('status', '--porcelain', '--ignored');
         const r = runChangeValidate(repo.root, target, opts);
@@ -987,7 +1041,7 @@ describe('R4.6 read-only', () => {
         expect(fs.existsSync(path.join(repo.root, 'docs'))).toBe(false);
     });
     test('a dirty working tree is not an error', () => {
-        commitRecord();
+        withRecord();
         fs.writeFileSync(path.join(repo.root, 'scratch.txt'), 'x');
         expect(run().code).toBe(0);
     });
@@ -1011,11 +1065,11 @@ describe('robustness: never throws, always a CommandResult', () => {
         expect(r.stderr).toMatch(/^(invalid-input|flag-invalid|path-invalid): [^\n]*\n$/);
     });
     test('undefined opts are accepted as no flags', () => {
-        commitRecord();
+        withRecord();
         expect(runChangeValidate(repo.root, undefined, bad(undefined)).code).toBe(0);
     });
     test('an unexpected exception becomes internal-error carrying only the error name', () => {
-        commitRecord();
+        withRecord();
         jest.spyOn(deriveModule, 'deriveFields').mockImplementation(() => { throw new TypeError('secret\u001b detail'); });
         const r = runChangeValidate(repo.root, undefined, {});
         expectFailure(r, 'internal-error');
@@ -1023,7 +1077,7 @@ describe('robustness: never throws, always a CommandResult', () => {
         expect(r.stderr).not.toContain('secret');
     });
     test('a HEAD that moves during validation is head-moved, not a verdict', () => {
-        commitRecord();
+        withRecord();
         const real = gitModule.headSha;
         let calls = 0;
         jest.spyOn(gitModule, 'headSha').mockImplementation((root: string) => (++calls === 1 ? real(root) : 'f'.repeat(40)));
@@ -1039,12 +1093,12 @@ describe('robustness: never throws, always a CommandResult', () => {
         expect(r.stderr).toContain('HEAD moved');
     });
     test('an unreadable HEAD is git-failed', () => {
-        commitRecord();
+        withRecord();
         jest.spyOn(gitModule, 'headSha').mockReturnValue(null);
         expectFailure(runChangeValidate(repo.root, undefined, {}), 'git-failed');
     });
     test('a git failure while listing the added records is git-failed', () => {
-        commitRecord();
+        withRecord();
         jest.spyOn(gitModule, 'addedFilesUnder').mockReturnValue(null);
         expectFailure(runChangeValidate(repo.root, undefined, {}), 'git-failed');
     });
@@ -1072,13 +1126,13 @@ describe('registerChangeCommand: validate', () => {
         expect(sub()?.registeredArguments.map((a) => [a.name(), a.required])).toEqual([['path', false]]);
     });
     test('a valid run prints the report and leaves the exit code alone', async () => {
-        commitRecord();
+        withRecord();
         await program().parseAsync(['node', 'awm', 'change', 'validate']);
         expect(out).toHaveBeenCalledWith(`Change Record validation: valid\n- ${REL}: valid\n`);
         expect(process.exitCode).toBe(savedExit);
     });
     test('flags and the path reach the command', async () => {
-        commitRecord('rec', 'fail');
+        withRecord('rec', 'fail');
         await program().parseAsync(['node', 'awm', 'change', 'validate', REL, '--strict', '--json']);
         const printed = String(out.mock.calls[0][0]);
         expect(JSON.parse(printed).records[0].diagnostics.map((d: Diag) => d.code)).toContain('verification-not-passing');

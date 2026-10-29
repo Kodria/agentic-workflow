@@ -173,9 +173,9 @@ describe('awm update — honest outcome', () => {
         expect(result.registries.failed).toEqual(['baseline']);
     });
 
-    it('un registry que falló pero conserva contenido sigue, y el cierre lo nombra en vez de anunciar éxito parejo', async () => {
-        // `unusableSyncedRegistries` mira contenido EN DISCO: se siembra el content root
-        // y el registries.json para que `docs` cuente como stale, no como roto.
+    it('un registry que falló falla cerrado aunque conserve contenido en disco (SG-7)', async () => {
+        // Pre-SG-7 update warn-and-continued on usable cache; #238 SG-7 requires
+        // non-zero exit for init/update/sync/registry add on any sync failure.
         const registriesDir = path.join(process.env.AWM_HOME as string, 'registries');
         fs.mkdirSync(path.join(registriesDir, 'docs', 'skills'), { recursive: true });
         fs.writeFileSync(
@@ -191,12 +191,12 @@ describe('awm update — honest outcome', () => {
             ],
         }));
 
-        expect(result.code).toBe(0);
+        expect(result.code).toBe(1);
         expect(result.registries).toEqual({ configured: 2, synced: 1, failed: ['docs'] });
-        const outro = updateOutro(result);
-        expect(outro).toMatch(/stale/i);
-        expect(outro).toMatch(/docs/);
-        expect(outro).not.toMatch(/^✅/);
+        expect(updateOutro(result)).toMatch(/Finished with registry sync errors/);
+        expect(updateOutro(result)).toMatch(/1\/2/);
+        expect(updateOutro(result)).toMatch(/docs/);
+        expect(errSpy.mock.calls.flat().join('\n')).toMatch(/docs/);
     });
 });
 

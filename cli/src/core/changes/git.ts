@@ -2,7 +2,7 @@ import path from 'path';
 import { execGit, execGitBytes } from './git-env';
 import { isSafeRelativePath, isSingleLine } from './text-safety';
 import { COMMIT_ID } from './types';
-import { gitState } from './worktree';
+import { treeDirty } from './worktree';
 
 // Every function here takes values that may be influenced by a user or by repository content (refs, paths, remote URLs).
 // None of them throws: git failures and invalid input come back as null / false / true (fail closed) so that callers
@@ -153,8 +153,7 @@ export function isCommittedClean(root: string, rel: string): boolean | null {
  * Unknown state, or an unsafe exclusion, counts as dirty: an unreadable repository must never look clean.
  */
 export function isDirtyOutside(root: string, extraExcludes: string[]): boolean {
-    const state = gitState(root, true, extraExcludes);
-    return state.kind !== 'ok' || state.dirty;
+    return treeDirty(root, true, extraExcludes) !== false;
 }
 
 /** Repository root with native separators; null outside a repository. Only `rev-parse`: never a (slow, refreshing) `status`. */

@@ -1,10 +1,8 @@
 // stepCache vs. syncRegistries()'s RESULT-shaped failures.
 //
 // `syncRegistries()` never throws on a per-registry failure — it returns
-// `{ action: 'error', error }` for that registry and keeps going. stepCache
-// used to `await` it and report a blanket 'applied', so a registry that never
-// landed on disk degraded silently into some later step's failure with its own
-// cause already gone.
+// `{ action: 'error', error }` for that registry. SG-7: stepCache fails closed
+// on ANY sync error (usable on-disk cache is not enough for init).
 //
 // Isolated in its own file (not steps.test.ts) because these assertions reach
 // `listRegistries()`, which resolves AWM_HOME at module require time — the env
@@ -87,12 +85,12 @@ describe('stepCache — registry sync error results', () => {
         expect(r.error).toContain('could not clone');
     });
 
-    it('stays applied but records the error when content is already on disk', async () => {
+    it('fails when sync errors even if content is already on disk (SG-7)', async () => {
         configureRegistries(['baseline'], ['baseline']);
         const r = await run([{ name: 'baseline', action: 'error', error: 'pull timed out' }]);
-        expect(r.action).toBe('applied');
-        expect(r.detail).toContain('baseline');
-        expect(r.detail).toContain('pull timed out');
+        expect(r.action).toBe('failed');
+        expect(r.error).toContain('baseline');
+        expect(r.error).toContain('pull timed out');
     });
 
     it('fails on a secondary registry that never landed, even when the base one synced', async () => {

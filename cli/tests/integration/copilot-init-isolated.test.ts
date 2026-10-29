@@ -31,6 +31,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { commitSeededRegistry } from '../helpers/commit-seeded-registry';
 
 describe('copilot provider — isolated home E2E (devCore global-scope guard regression)', () => {
     let tmpHome: string;
@@ -60,10 +61,11 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
     });
 
     /** Same fixture shape as codex-provider-isolated.test.ts's seedPublicRegistryFixture:
-     *  a real content-root registry (no git repo needed) with the bootstrap skill and one
-     *  baseline bundle. Copilot needs no hooks (providers/index.ts has no `hooks` config
-     *  for it) and no native agent renderer (`agent: null`), so the fixture is intentionally
-     *  smaller than Codex's. */
+     *  a real content-root registry with the bootstrap skill and one baseline bundle,
+     *  plus a local `.git` commit so SG-7 does not hard-fail init on an unreachable
+     *  example.invalid remote (stepCache skips when registryCache.present). Copilot
+     *  needs no hooks (providers/index.ts has no `hooks` config for it) and no native
+     *  agent renderer (`agent: null`), so the fixture is intentionally smaller than Codex's. */
     function seedPublicRegistryFixture(root: string): void {
         fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
         fs.writeFileSync(path.join(root, 'hooks/session-start'), '#!/bin/sh\necho "{}"\n', { mode: 0o755 });
@@ -83,6 +85,8 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
             name: 'dev-core', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
             dependsOn: [], skills: ['development-process'], workflows: [], agents: [],
         }));
+
+        commitSeededRegistry(root);
 
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(

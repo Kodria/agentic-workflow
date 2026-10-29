@@ -114,33 +114,33 @@ jobs:
           path: cli/prebuilds/${{ matrix.target }}/secure_fs.node
           if-no-files-found: error
 
-      # RF-5.1 docs contract (same tip as ci.yml; keep support-matrix pins elsewhere).
-      - name: Checkout baseline registry docs tip for RF-5.1 contract
-        uses: actions/checkout@v4
-        with:
-          repository: Kodria/awm-baseline-registry
-          ref: dc2e0f7128ed17242bbbb3077ac145e231c3abc5
-          path: awm-baseline-registry-docs
-
       - name: Tests
-        if: matrix.target != 'win32-arm64'
+        if: ${{ !startsWith(matrix.target, 'win32-') }}
         working-directory: cli
-        env:
-          AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
         run: npx jest --runInBand --bail
 
-      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.
-      - name: Tests (Windows ARM remainder)
-        if: matrix.target == 'win32-arm64'
+      # On both Windows runners the git-heavy suites run in the windows-shards job (watch, core Change Record, Change Record commands). Keep runInBand within each job; no test file may run twice or be dropped.
+      - name: Tests (Windows remainder)
+        if: startsWith(matrix.target, 'win32-')
         working-directory: cli
-        env:
-          AWM_BASELINE_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry-docs
-        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$|[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]|[/\\]cli[/\\]tests[/\\]core[/\\]changes[/\\]|[/\\]cli[/\\]tests[/\\]commands[/\\]changes?[/\\]'
 
-  # This job tests only the two ARM bottlenecks. The matrix job remains the
-  # sole producer of the win32-arm64 artifact consumed by the release.
-  windows-arm-hot:
-    runs-on: windows-11-arm
+  # Windows spawns processes about 3x slower than Linux, so its git-heavy suites run as parallel shards on
+  # BOTH Windows runners while the matrix `test` job runs the Windows remainder. The matrix job stays the
+  # sole producer of each native artifact.
+  windows-shards:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-11-arm]
+        shard:
+          - name: watch
+            pattern: '[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]'
+          - name: changes-core
+            pattern: '[/\\]cli[/\\]tests[/\\]core[/\\]changes[/\\]'
+          - name: changes-commands
+            pattern: '[/\\]cli[/\\]tests[/\\]commands[/\\]changes?[/\\]'
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
@@ -162,40 +162,12 @@ jobs:
         working-directory: cli
         run: npm run native:test-build
 
-      - name: Test hot Windows ARM suites
+      - name: Test Windows shard
         working-directory: cli
-        run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail
-
-  # The Change Record suites (git-heavy) are the ARM remainder's largest block (#223).
-  windows-arm-changes:
-    runs-on: windows-11-arm
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install
-        working-directory: cli
-        run: npm ci
-
-      - name: Build
-        working-directory: cli
-        run: npm run native:build && npm run build
-
-      - name: Build test-only native addon
-        working-directory: cli
-        run: npm run native:test-build
-
-      - name: Test Change Record Windows ARM suites
-        working-directory: cli
-        run: npx jest --runInBand --bail --testPathPatterns='[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
+        run: npx jest --runInBand --bail --testPathPatterns='${{ matrix.shard.pattern }}'
 
   release:
-    needs: [test, windows-arm-hot, windows-arm-changes] # rojo en cualquier plataforma o shard ARM no publica
+    needs: [test, windows-shards] # rojo en cualquier plataforma o shard Windows no publica
     runs-on: ubuntu-latest
     outputs:
       published: ${{ steps.release-result.outputs.published }}

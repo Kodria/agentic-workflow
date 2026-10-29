@@ -33,6 +33,13 @@ export function emptyGitConfig(home: string): string {
     return file;
 }
 
+/**
+ * Every test git child: no signing, and no automatic maintenance after a commit. A newer git runs that maintenance detached in
+ * the background, where its lock file under `.git/objects` appears and vanishes while a test copies or removes the repository
+ * (`cloneRepo` failed with ENOENT on macOS with git 2.55).
+ */
+const GIT_TEST_CONFIG = ['-c', 'commit.gpgsign=false', '-c', 'maintenance.auto=false', '-c', 'gc.auto=0'];
+
 /** The git runner of a repository: identity and config isolation in an explicit environment, optional explicit dates. */
 function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitInput' | 'gitAt' | 'commit'> {
     const env = {
@@ -40,13 +47,13 @@ function gitApi(root: string, home: string): Pick<TestRepo, 'git' | 'gitInput' |
         GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
     };
     const run = (extra: Record<string, string>, args: string[]) =>
-        execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env: { ...env, ...extra } }).trim();
+        execFileSync('git', [...GIT_TEST_CONFIG, ...args], { cwd: root, encoding: 'utf8', env: { ...env, ...extra } }).trim();
     const dates = (date: string): Record<string, string> => {
         const stamp = `${Math.floor(Date.parse(date) / 1000)} +0000`;
         return { GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp };
     };
     const git = (...args: string[]) => run({}, args);
-    const gitInput = (input: string, ...args: string[]) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env, input }).trim();
+    const gitInput = (input: string, ...args: string[]) => execFileSync('git', [...GIT_TEST_CONFIG, ...args], { cwd: root, encoding: 'utf8', env, input }).trim();
     const gitAt = (date: string, ...args: string[]) => run(dates(date), args);
     const commit = (files: Record<string, string>, message: string, date?: string): string => {
         for (const [rel, content] of Object.entries(files)) {
@@ -108,7 +115,12 @@ export { posixOnly } from '../../helpers/platform';
  */
 export function cloneRepo(template: TestRepo): TestRepo {
     const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-chg-')));
-    fs.cpSync(template.root, root, { recursive: true });
+    try {
+        fs.cpSync(template.root, root, { recursive: true });
+    } catch (error) {
+        fs.rmSync(root, { recursive: true, force: true });
+        throw error;
+    }
     const { git, gitInput, gitAt, commit } = gitApi(root, template.home);
     return { root, home: template.home, git, gitInput, gitAt, commit, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }

@@ -23,6 +23,7 @@ import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { createBundleDiagnosticReporter, discoverAllBundles } from './core/bundles';
 import { assertSyncedRegistriesUsable, syncRegistries } from './core/registries';
+import { reportRegistrySyncSoftFailures } from './core/registry-sync-report';
 import { planInstall } from './core/install-planner';
 import { applyInstallPlan } from './core/install-transaction';
 import { findProjectRoot } from './core/profile';
@@ -135,9 +136,8 @@ program.command('add [name]')
       s.start('Syncing registries...');
       const results = await syncRegistries();
       s.stop('Registries synced.');
-      for (const r of results) {
-          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-      }
+      // SG-7 soft path: usable cache may continue after stating cached version + SG-6 cause.
+      await reportRegistrySyncSoftFailures(results, (m) => console.warn(pc.yellow(m)));
       try {
           assertSyncedRegistriesUsable(results);
       } catch (e) {
@@ -502,9 +502,8 @@ program.command('list [package]')
       s.start('Syncing registries...');
       const listSyncResults = await syncRegistries();
       s.stop('Registries synced.');
-      for (const r of listSyncResults) {
-          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-      }
+      // SG-7 soft path: usable cache may continue after stating cached version + SG-6 cause.
+      await reportRegistrySyncSoftFailures(listSyncResults, (m) => console.warn(pc.yellow(m)));
       try {
           assertSyncedRegistriesUsable(listSyncResults);
       } catch (e) {

@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { bad, commitForgedSigned, cloneRepo, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
+import { bad, commitForgedSigned, cloneRepo, importCommits, makeRepo, posixOnly, showSignaturesInLog, spyOnGit, withEnv, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, UNSAFE, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, subjects } from './list-fixtures';
-import { MAX_SUBJECT, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
+import { MAX_SUBJECT, listChanges, type ListedChange, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 import { resolveBaseCommit } from '../../../src/core/changes/git';
 import { resolveRange } from '../../../src/core/changes/range';
 import { runChangeValidate } from '../../../src/commands/change';
@@ -11,15 +11,39 @@ import { MAX_RECORD_BYTES } from '../../../src/core/changes/types';
 
 let repo: TestRepo;
 let template: TestRepo;
-beforeAll(() => { template = makeRepo(); });
-afterAll(() => template.cleanup());
+/** The template plus `adoptIn`, and the template plus `historyIn`: prebuilt once, copied per test with no git process. */
+let adopted: TestRepo;
+let historic: TestRepo;
+beforeAll(() => {
+    template = makeRepo();
+    adopted = cloneRepo(template);
+    adoptIn(adopted);
+    historic = cloneRepo(template);
+    historyIn(historic);
+});
+afterAll(() => { adopted.cleanup(); historic.cleanup(); template.cleanup(); });
 beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const list = (opts: Record<string, unknown> = {}): ListOutcome => listIn(repo, opts);
 const listed = (opts: Record<string, unknown> = {}): ListResult => ok(list(opts));
-const adopt = (id?: string): string => adoptIn(repo, id);
-const history = (): void => historyIn(repo);
+const startFrom = (state: TestRepo): void => { repo.cleanup(); repo = cloneRepo(state); };
+/** The repository after `adoptIn(repo)` (a copy of the prebuilt one). */
+const adopt = (): void => startFrom(adopted);
+/** The repository after `historyIn(repo)` (a copy of the prebuilt one). */
+const history = (): void => startFrom(historic);
+/** The history of `historyIn`, listed once under a git spy for the tests that only read that listing (the state is never changed). */
+let historyListing: { result: ListResult; calls: string[][] } | undefined;
+function listedHistory(): { result: ListResult; calls: string[][] } {
+    if (historyListing === undefined) {
+        const spy = spyOnGit();
+        try { historyListing = { result: ok(listIn(historic)), calls: spy.calls }; } finally { spy.restore(); }
+    }
+    return historyListing;
+}
+type Planned = [files: Record<string, string>, message: string, date: string];
+/** The commits `repo.commit(files, message, date)` would make, in order, written by one `git fast-import` (importCommits). */
+const commitMany = (planned: Planned[]): void => importCommits(repo, planned.map(([files, message, date]) => ({ files, message: `${message}\n`, date })));
 
 describe('listChanges: input and base (R5.1, R3.1, R3.2, R3.5)', () => {
     test('resolves the local main by default and reports it', () => {
@@ -93,11 +117,7 @@ describe('listChanges: input and base (R5.1, R3.1, R3.2, R3.5)', () => {
         expect(r.changes.find((c) => c.subject === 'feat: first (#10)')?.classification).toBe('recorded');
     });
     test('a base that moves during the run cannot change the answer: every git call after the pin uses commit ids', () => {
-        history();
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const afterPin = spy.calls.filter((a) => a.includes('log') || a.includes('diff') || a.includes('ls-tree') || a.includes('for-each-ref'));
+        const afterPin = listedHistory().calls.filter((a) => a.includes('log') || a.includes('diff') || a.includes('ls-tree') || a.includes('for-each-ref'));
         expect(afterPin.length).toBeGreaterThan(0);
         for (const call of afterPin) expect(call).not.toContain('main');
     });
@@ -109,15 +129,16 @@ describe('listChanges: adoption point (R5.4)', () => {
         expect(listed()).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0 });
     });
     test('R5.4 a docs/changes/README.md alone does not count: the repo has not adopted Change Records', () => {
-        repo.commit({ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z');
-        repo.commit({ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z');
+        commitMany([[{ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z'], [{ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z']]);
         expect(listed()).toMatchObject({ adopted: false, changes: [], truncated: false, omitted: 0 });
     });
     test('R5.4 a README first and a record later: the adoption is the commit that added the record', () => {
-        repo.commit({ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z');
-        repo.commit({ 'a.ts': '1' }, 'feat: before the first record', '2026-10-16T10:00:00Z');
-        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'feat: first record', '2026-10-16T11:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: after', '2026-10-16T12:00:00Z');
+        commitMany([
+            [{ 'docs/changes/README.md': 'hello' }, 'docs: readme', '2026-10-16T09:00:00Z'],
+            [{ 'a.ts': '1' }, 'feat: before the first record', '2026-10-16T10:00:00Z'],
+            [{ [recordPath(FIRST)]: record(FIRST) }, 'feat: first record', '2026-10-16T11:00:00Z'],
+            [{ 'b.ts': '1' }, 'fix: after', '2026-10-16T12:00:00Z'],
+        ]);
         const r = listed();
         expect(r.adopted).toBe(true);
         expect(subjects(r)).toEqual(['fix: after', 'feat: first record']);
@@ -128,8 +149,7 @@ describe('listChanges: adoption point (R5.4)', () => {
         ['a non-markdown file', 'docs/changes/2026-10-10-x.txt'],
         ['a record-shaped name outside docs/changes', 'docs/other/2026-10-10-x.md'],
     ])('R5.4 %s does not mark the adoption', (_label, file) => {
-        repo.commit({ [file]: 'x' }, 'docs: not a record', '2026-10-16T09:00:00Z');
-        repo.commit({ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z');
+        commitMany([[{ [file]: 'x' }, 'docs: not a record', '2026-10-16T09:00:00Z'], [{ 'a.ts': '1' }, 'feat: a', '2026-10-16T10:00:00Z']]);
         expect(listed()).toMatchObject({ adopted: false, changes: [] });
     });
     test('a record that was added and later deleted still marks the adoption', () => {
@@ -139,15 +159,17 @@ describe('listChanges: adoption point (R5.4)', () => {
         expect(listed().adopted).toBe(true);
     });
     test('commits older than the first one that added a file under docs/changes are omitted; the adopting commit itself is kept', () => {
-        history();
-        expect(subjects(listed())).not.toContain('feat: before adoption');
-        expect(subjects(listed())).not.toContain('chore: init');
-        expect(subjects(listed())).toContain('feat: first (#10)');
+        const { result } = listedHistory();
+        expect(subjects(result)).not.toContain('feat: before adoption');
+        expect(subjects(result)).not.toContain('chore: init');
+        expect(subjects(result)).toContain('feat: first (#10)');
     });
     test('modifying a file under docs/changes is not an adoption: only the commit that added the first file is', () => {
-        repo.commit({ 'a.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
-        repo.commit({ [recordPath(FIRST)]: record(FIRST) }, 'docs: first file', '2026-10-16T10:00:00Z');
-        repo.commit({ [recordPath(FIRST)]: record(FIRST, { summary: 'Edit.' }) }, 'docs: edit', '2026-10-16T11:00:00Z');
+        commitMany([
+            [{ 'a.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z'],
+            [{ [recordPath(FIRST)]: record(FIRST) }, 'docs: first file', '2026-10-16T10:00:00Z'],
+            [{ [recordPath(FIRST)]: record(FIRST, { summary: 'Edit.' }) }, 'docs: edit', '2026-10-16T11:00:00Z'],
+        ]);
         expect(subjects(listed())).toEqual(['docs: edit', 'docs: first file']);
     });
     test('an adopted repo whose window holds no commit lists nothing', () => {
@@ -179,24 +201,20 @@ describe('listChanges: adoption point (R5.4)', () => {
 
 describe('listChanges: classification (R5.3)', () => {
     test('recorded, missing, exempt and invalid-record', () => {
-        history();
-        expect(byClass(listed())).toEqual({ 'feat: first (#10)': 'recorded', 'fix: no record': 'missing', 'chore(release): v1.0.0 [skip ci]': 'exempt', 'feat: bad record': 'invalid-record' });
+        expect(byClass(listedHistory().result)).toEqual({ 'feat: first (#10)': 'recorded', 'fix: no record': 'missing', 'chore(release): v1.0.0 [skip ci]': 'exempt', 'feat: bad record': 'invalid-record' });
     });
     test('entries come newest first, in first-parent order', () => {
-        history();
-        expect(subjects(listed())).toEqual(['feat: bad record', 'chore(release): v1.0.0 [skip ci]', 'fix: no record', 'feat: first (#10)']);
+        expect(subjects(listedHistory().result)).toEqual(['feat: bad record', 'chore(release): v1.0.0 [skip ci]', 'fix: no record', 'feat: first (#10)']);
     });
     test('a recorded entry holds the path and the full frontmatter, nothing else', () => {
-        history();
-        const first = listed().changes.find((c) => c.subject === 'feat: first (#10)');
+        const first = listedHistory().result.changes.find((c) => c.subject === 'feat: first (#10)');
         expect(first?.records).toHaveLength(1);
         expect(first?.records[0]).toMatchObject({ path: recordPath(FIRST), schema: 'awm.change-record/v1', id: FIRST, title: `T ${FIRST}`, summary_short: 'Primer cambio.', type: 'feat', modules: ['cli'] });
         expect(first?.records[0]).not.toHaveProperty('diagnostics');
         expect(first?.records[0]).toHaveProperty('verification.overall', 'pass');
     });
     test('an invalid-record entry holds the path and its diagnostics, no frontmatter', () => {
-        history();
-        const bad = listed().changes.find((c) => c.subject === 'feat: bad record');
+        const bad = listedHistory().result.changes.find((c) => c.subject === 'feat: bad record');
         expect(bad?.records).toHaveLength(1);
         expect(bad?.records[0]).toMatchObject({ path: recordPath('2026-10-17-bad') });
         expect(bad?.records[0]).not.toHaveProperty('schema');
@@ -257,8 +275,7 @@ describe('listChanges: classification (R5.3)', () => {
         expect((entry.records[0] as { diagnostics: Array<{ message: string }> }).diagnostics[0].message).toMatch(/not a regular file/);
     });
     test('exempt and missing entries have no records', () => {
-        history();
-        const r = listed();
+        const r = listedHistory().result;
         expect(r.changes.find((c) => c.classification === 'exempt')?.records).toEqual([]);
         expect(r.changes.find((c) => c.classification === 'missing')?.records).toEqual([]);
     });
@@ -274,8 +291,7 @@ describe('listChanges: classification (R5.3)', () => {
     });
     test('the opt-out must be a trailer of the final paragraph: a mention in the subject or the body does not exempt', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'feat: Change-Record: none', '2026-10-16T20:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'feat: b\n\nChange-Record: none\n\nand more text', '2026-10-16T21:00:00Z');
+        commitMany([[{ 'a.ts': '1' }, 'feat: Change-Record: none', '2026-10-16T20:00:00Z'], [{ 'b.ts': '1' }, 'feat: b\n\nChange-Record: none\n\nand more text', '2026-10-16T21:00:00Z']]);
         expect(byClass(listed())).toEqual({ 'feat: Change-Record: none': 'missing', 'feat: b': 'missing' });
     });
     test('a commit adding two records, one of them invalid, is invalid-record and lists both', () => {
@@ -444,8 +460,7 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
     });
     test('a failing ls-tree makes the entry invalid-record with git-failed, and the others are still read', () => {
         adopt();
-        repo.commit({ [recordPath('2026-10-16-a')]: record('2026-10-16-a') }, 'feat: a', '2026-10-16T10:00:00Z');
-        repo.commit({ [recordPath('2026-10-16-b')]: record('2026-10-16-b') }, 'feat: b', '2026-10-16T11:00:00Z');
+        commitMany([[{ [recordPath('2026-10-16-a')]: record('2026-10-16-a') }, 'feat: a', '2026-10-16T10:00:00Z'], [{ [recordPath('2026-10-16-b')]: record('2026-10-16-b') }, 'feat: b', '2026-10-16T11:00:00Z']]);
         let fails = 1;
         const spy = spyOnGit((args) => { if (args.includes('ls-tree') && fails-- > 0) throw new Error('boom'); });
         const r = listed();
@@ -455,8 +470,7 @@ describe('listChanges: size and paths of what git prints (R5.7, R1.8)', () => {
     });
     test('a failing read of one blob makes that record git-failed only', () => {
         adopt();
-        repo.commit({ [recordPath('2026-10-16-a')]: record('2026-10-16-a') }, 'feat: a', '2026-10-16T10:00:00Z');
-        repo.commit({ [recordPath('2026-10-16-b')]: record('2026-10-16-b') }, 'feat: b', '2026-10-16T11:00:00Z');
+        commitMany([[{ [recordPath('2026-10-16-a')]: record('2026-10-16-a') }, 'feat: a', '2026-10-16T10:00:00Z'], [{ [recordPath('2026-10-16-b')]: record('2026-10-16-b') }, 'feat: b', '2026-10-16T11:00:00Z']]);
         let fails = 1;
         const spy = spyOnGit((args) => { if (args.includes('show') && fails-- > 0) throw new Error('boom'); });
         const r = listed();
@@ -506,8 +520,7 @@ describe('listChanges: derived fields (R5.5)', () => {
     });
     test('a tag on a later commit contains the earlier ones', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z');
+        commitMany([[{ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z'], [{ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z']]);
         repo.gitAt('2026-10-16T12:00:00Z', 'tag', '-a', 'v2.0.0', '-m', 'v2.0.0');
         expect(listed().changes.map((c) => c.release)).toEqual(['v2.0.0', 'v2.0.0']);
     });
@@ -553,26 +566,35 @@ describe('listChanges: derived fields (R5.5)', () => {
     });
     describe('R5.5 the tag lookup is bounded: only the 500 earliest-dated containing tags are examined per entry', () => {
         /** Lightweight tags pointing at `sha`, created with one fast-import process. */
-        const lightTags = (sha: string, names: string[]): void => {
-            repo.gitInput(names.map((n) => `reset refs/tags/${n}\nfrom ${sha}\n`).join('\n'), 'fast-import', '--quiet');
+        const lightTags = (sha: string, names: string[], into: TestRepo = repo): void => {
+            into.gitInput(names.map((n) => `reset refs/tags/${n}\nfrom ${sha}\n`).join('\n'), 'fast-import', '--quiet');
         };
         const NAMES = Array.from({ length: 600 }, (_, i) => `t${String(i).padStart(4, '0')}`);
+        // One fix commit carrying the 600 lightweight tags, listed once under a git spy: the next two tests only read that listing.
+        let shared: { state: TestRepo; result: ListResult; calls: string[][] } | undefined;
+        afterAll(() => shared?.state.cleanup());
+        function sharedTags(): { result: ListResult; calls: string[][] } {
+            if (shared === undefined) {
+                const state = cloneRepo(adopted);
+                try {
+                    state.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
+                    lightTags(state.git('rev-parse', 'HEAD'), NAMES, state);
+                    const spy = spyOnGit();
+                    try { shared = { state, result: ok(listIn(state)), calls: spy.calls }; } finally { spy.restore(); }
+                } catch (error) {
+                    state.cleanup();
+                    throw error;
+                }
+            }
+            return shared;
+        }
         test('the for-each-ref call asks for at most 500 tags', () => {
-            adopt();
-            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
-            const spy = spyOnGit();
-            listed();
-            spy.restore();
-            const lookups = spy.calls.filter((a) => a.includes('for-each-ref') && a.includes('refs/tags/')); // the tag lookup, not the base's
+            const lookups = sharedTags().calls.filter((a) => a.includes('for-each-ref') && a.includes('refs/tags/')); // the tag lookup, not the base's
             expect(lookups).toHaveLength(1);
             expect(lookups[0]).toContain('--count=500');
         });
         test('600 lightweight tags on the commit: the earliest by date then name is the release', () => {
-            adopt();
-            repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-            lightTags(repo.git('rev-parse', 'HEAD'), NAMES);
-            expect(listed().changes[0].release).toBe('t0000');
+            expect(sharedTags().result.changes[0].release).toBe('t0000');
         });
         test('the earliest annotated tag among the first 500 still wins over 600 lightweight tags', () => {
             adopt();
@@ -704,8 +726,7 @@ describe('listChanges: shallow clones and the default base (R5.1)', () => {
     }
     test('a shallow clone fails with shallow-history and the remedy', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z');
+        commitMany([[{ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z'], [{ 'b.ts': '1' }, 'fix: b', '2026-10-16T11:00:00Z']]);
         const dest = clone(1);
         expect(repo.git('-C', dest, 'rev-parse', '--is-shallow-repository')).toBe('true');
         expect(listChanges(dest, { since: SINCE_48H })).toMatchObject({ ok: false, failure: { code: 'shallow-history', remedy: 'git fetch --unshallow' } });
@@ -744,46 +765,63 @@ describe('listChanges: shallow clones and the default base (R5.1)', () => {
 });
 
 describe('listChanges: hostile text from git is escaped and clipped', () => {
+    // The subjects of the next six tests are commits of ONE history after the adoption point, listed once (each entry is found by its
+    // own commit date); that state is never changed. The commits are made as each test made its own: repo.commit, or git commit -m.
+    const SUBJECTS = {
+        hostile: 'feat: \u001b[31mred\u001b[0m \u202eevil\u202c \u2028 \u0085 \u007f end (#5)',
+        long: `feat: ${'x'.repeat(5000)}`,
+        atCap: `feat: ${'x'.repeat(MAX_SUBJECT - 6)}`,
+        surrogates: `feat: ${'x'.repeat(MAX_SUBJECT - 7)}\u{1F600}\u{1F600}`,
+    };
+    const ORDER = ['hostile', 'long', 'atCap', 'surrogates', 'controls', 'empty'] as const;
+    const dateOf = (key: (typeof ORDER)[number]): string => new Date(Date.UTC(2026, 9, 16, 10, 0, 0) + ORDER.indexOf(key) * 60_000).toISOString();
+    let shared: { state: TestRepo; result: ListResult } | undefined;
+    afterAll(() => shared?.state.cleanup());
+    function entry(key: (typeof ORDER)[number]): ListedChange {
+        if (shared === undefined) {
+            const state = cloneRepo(adopted);
+            try {
+                for (const k of ['hostile', 'long', 'atCap', 'surrogates'] as const) state.commit({ [`${k}.ts`]: '1' }, SUBJECTS[k], dateOf(k));
+                state.gitAt(dateOf('controls'), 'commit', '--allow-empty', '-q', '--allow-empty-message', '-m', '\u001b\u001b');
+                state.gitAt(dateOf('empty'), 'commit', '--allow-empty', '-q', '--allow-empty-message', '-m', '');
+                shared = { state, result: ok(listIn(state)) };
+            } catch (error) {
+                state.cleanup();
+                throw error;
+            }
+        }
+        expect(shared.result.changes).toHaveLength(ORDER.length);
+        const found = shared.result.changes.find((c) => c.merged_at === dateOf(key));
+        if (found === undefined) throw new Error(`no entry for ${key}`);
+        return found;
+    }
     test('control characters, line separators and bidi marks in a subject are escaped', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, 'feat: \u001b[31mred\u001b[0m \u202eevil\u202c \u2028 \u0085 \u007f end (#5)', '2026-10-16T10:00:00Z');
-        const entry = listed().changes[0];
-        expect(entry.subject).not.toMatch(UNSAFE);
-        expect(entry.subject).toContain('\\u001b[31mred');
-        expect(entry.subject).toContain('\\u202e');
-        expect(entry.pr).toBe(5);
+        const e = entry('hostile');
+        expect(e.subject).not.toMatch(UNSAFE);
+        expect(e.subject).toContain('\\u001b[31mred');
+        expect(e.subject).toContain('\\u202e');
+        expect(e.pr).toBe(5);
     });
     test('a subject is clipped to the subject cap with an ellipsis', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, `feat: ${'x'.repeat(5000)}`, '2026-10-16T10:00:00Z');
-        const subject = listed().changes[0].subject;
+        const subject = entry('long').subject;
         expect(MAX_SUBJECT).toBe(1024);
         expect(subject.length).toBe(MAX_SUBJECT);
         expect(subject.endsWith('…')).toBe(true);
     });
     test('a subject exactly at the cap is not clipped', () => {
-        adopt();
-        const subject = `feat: ${'x'.repeat(MAX_SUBJECT - 6)}`;
-        repo.commit({ 'a.ts': '1' }, subject, '2026-10-16T10:00:00Z');
-        expect(listed().changes[0].subject).toBe(subject);
+        expect(entry('atCap').subject).toBe(SUBJECTS.atCap);
     });
     test('the cut never splits a surrogate pair', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, `feat: ${'x'.repeat(MAX_SUBJECT - 7)}\u{1F600}\u{1F600}`, '2026-10-16T10:00:00Z');
-        const subject = listed().changes[0].subject;
+        const subject = entry('surrogates').subject;
         expect(Buffer.from(subject, 'utf8').toString('utf8')).toBe(subject);
         expect(subject.length).toBeLessThanOrEqual(MAX_SUBJECT);
     });
     test('a subject made only of controls is still one clean line', () => {
-        adopt();
-        repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '--allow-empty-message', '-m', '\u001b\u001b');
-        const subject = listed().changes[0].subject;
+        const subject = entry('controls').subject;
         expect(subject).not.toMatch(UNSAFE);
     });
     test('a commit with an empty message has an empty subject', () => {
-        adopt();
-        repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '--allow-empty-message', '-m', '');
-        expect(listed().changes[0].subject).toBe('');
+        expect(entry('empty').subject).toBe('');
     });
     test('bidi marks inside a valid record are escaped in what list returns', () => {
         adopt();
@@ -808,8 +846,7 @@ describe('listChanges: hostile text from git is escaped and clipped', () => {
         expect(r.changes[0].sha).toMatch(/^[0-9a-f]{40}$/);
     });
     test('GIT_LITERAL_PATHSPECS and GIT_GLOB_PATHSPECS in the environment do not change the answer', () => {
-        history();
-        const plain = byClass(listed());
-        expect(withEnv({ GIT_LITERAL_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1' }, () => byClass(listed()))).toEqual(plain);
+        const plain = byClass(listedHistory().result);
+        expect(withEnv({ GIT_LITERAL_PATHSPECS: '1', GIT_GLOB_PATHSPECS: '1' }, () => byClass(ok(listIn(historic))))).toEqual(plain);
     });
 });

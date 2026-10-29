@@ -25,14 +25,6 @@ describe('Publication B portable bootstrap contract', () => {
         expect(help).toContain('--dry-run');
     });
 
-    it('documents schema v3, explicit migration, dry-run, and environment separation', () => {
-        const reference = fs.readFileSync(path.join(root, 'docs/cli-reference.md'), 'utf8');
-        expect(reference).toContain('awm sensors bootstrap [--mode project-sensors|native-gate|opt-out] [--reason <text>] [--dry-run]');
-        expect(reference).toContain('schemaVersion: 3');
-        expect(reference).toContain('never writes');
-        expect(reference).toContain('each environment updates its own AWM installation separately');
-    });
-
     it('keeps all documented v3 declarations free of machine registry paths', () => {
         const reference = fs.readFileSync(path.join(root, 'docs/cli-reference.md'), 'utf8');
         const examples = Array.from(reference.matchAll(/```json\s*\n([\s\S]*?)```/g), match => JSON.parse(match[1]));

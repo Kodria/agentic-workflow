@@ -38,6 +38,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AwmPreferences } from '../../src/utils/config';
+import { commitSeededRegistry } from '../helpers/commit-seeded-registry';
 
 describe('codex provider — isolated home E2E (Task 9)', () => {
     let tmpHome: string;
@@ -74,8 +75,10 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
 
     /** Hand-seeds a registry content root with everything a real `awm init` needs:
      *  hooks (Claude + Codex), the bootstrap skill, one baseline bundle providing
-     *  both a skill and a Codex-native agent artifact. No git repo involved — the
-     *  registry cache is content-root-shaped, exactly what a real clone produces. */
+     *  both a skill and a Codex-native agent artifact. Content-root-shaped like a
+     *  real clone, plus a local `.git` commit so `machine.registryCache.present`
+     *  is true and `stepCache` skips network sync (SG-7 hard-fails any sync error,
+     *  and `https://example.invalid/...` is intentionally unreachable). */
     function seedPublicRegistryFixture(root: string): void {
         fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
         fs.writeFileSync(path.join(root, 'hooks/session-start'), '#!/bin/sh\necho "{}"\n', { mode: 0o755 });
@@ -102,6 +105,9 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
             name: 'dev-core', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
             dependsOn: [], skills: ['development-process'], workflows: [], agents: ['development-process'],
         }));
+
+        // Local commit only — no origin. Present+.git makes stepCache skip sync.
+        commitSeededRegistry(root);
 
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(

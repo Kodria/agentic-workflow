@@ -6,8 +6,9 @@ import { gatherContext } from '../core/diagnostics/context';
 import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import {
     contentRoots, registriesNeedSync, seedBaselineRegistry, capabilityRoot,
-    assertSyncedRegistriesUsable,
+    assertSyncedRegistriesUsable, registrySyncErrors, describeRegistrySyncErrors,
 } from '../core/registries';
+import { hardFailOnAnyRegistrySyncError } from '../core/registry-sync-report';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
 import {
@@ -215,10 +216,15 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             seedBaselineRegistry();
             if (registriesNeedSync()) {
                 // `syncRegistries()` reports per-registry failures as RESULTS,
-                // never as throws (core/registries.ts) — swallowing them here
-                // let an unavailable registry degrade silently into some later
-                // step's failure instead of being reported as its own cause.
-                assertSyncedRegistriesUsable((await mergedActions.syncCache()) ?? []);
+                // never as throws (core/registries.ts). SG-7: init exits non-zero
+                // on any sync/clone failure (usable cache is not enough here).
+                const syncResults = (await mergedActions.syncCache()) ?? [];
+                if (hardFailOnAnyRegistrySyncError(syncResults)) {
+                    throw new Error(
+                        `registry sync failed — ${describeRegistrySyncErrors(registrySyncErrors(syncResults))}`,
+                    );
+                }
+                assertSyncedRegistriesUsable(syncResults);
             }
 
             const bundles = discoverAllBundles(undefined, reporter);

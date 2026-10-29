@@ -2,7 +2,7 @@
 //
 // Resolver de versiones por tags semver — WS-3. Sin estado propio: git es la
 // única fuente de verdad (la versión vigente se deriva de `git describe`).
-import simpleGit, { SimpleGit } from 'simple-git';
+import { createRegistryGit, type RegistryGit } from './registry-git';
 import { getPreferences } from '../utils/config';
 
 export type Channel = 'stable' | 'dev';
@@ -29,7 +29,7 @@ function bySemverAsc(a: string, b: string): number {
     return a1 - b1 || a2 - b2 || a3 - b3;
 }
 
-async function defaultBranch(git: SimpleGit): Promise<string> {
+async function defaultBranch(git: RegistryGit): Promise<string> {
     try {
         const ref = (await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim();
         const name = ref.split('/').slice(1).join('/');
@@ -49,7 +49,7 @@ async function defaultBranch(git: SimpleGit): Promise<string> {
 }
 
 /** Tags semver vX.Y.Z del repo, orden ascendente. Hace fetch --tags --prune primero. */
-async function fetchVersionTags(git: SimpleGit): Promise<string[]> {
+async function fetchVersionTags(git: RegistryGit): Promise<string[]> {
     await git.raw(['fetch', '--tags', '--prune', 'origin']);
     const tags = (await git.tags()).all.filter((t) => TAG_RE.test(t));
     return tags.sort(bySemverAsc);
@@ -63,7 +63,7 @@ export async function resolveTargetRef(
     repoDir: string,
     opts: { pin?: string; channel: Channel }
 ): Promise<ResolvedRef> {
-    const git = simpleGit(repoDir);
+    const git = createRegistryGit(repoDir);
     const tags = await fetchVersionTags(git);
 
     if (opts.pin) {
@@ -88,7 +88,7 @@ export async function resolveTargetRef(
 /** Versión checkouteada actual ("X.Y.Z") si HEAD coincide exactamente con un tag semver; null si sigue un branch. */
 export async function currentVersion(repoDir: string): Promise<string | null> {
     try {
-        const out = (await simpleGit(repoDir).raw(['describe', '--tags', '--exact-match', 'HEAD'])).trim();
+        const out = (await createRegistryGit(repoDir).raw(['describe', '--tags', '--exact-match', 'HEAD'])).trim();
         return TAG_RE.test(out) ? out.slice(1) : null;
     } catch {
         return null;

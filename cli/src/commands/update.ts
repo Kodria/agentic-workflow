@@ -21,8 +21,9 @@ import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import {
     syncRegistries, verifyMinCliVersions, assertRegistryGates, contentRoots, capabilityRoot,
-    assertSyncedRegistriesUsable, RegistrySyncResult,
+    assertSyncedRegistriesUsable, registrySyncErrors, RegistrySyncResult,
 } from '../core/registries';
+import { hardFailOnAnyRegistrySyncError } from '../core/registry-sync-report';
 import { awmHome } from '../core/paths';
 import { regenerateGlobalContext, RegenResult } from '../core/context/regenerate';
 import { planReconciliation } from '../core/reconciliation';
@@ -100,10 +101,16 @@ const NO_REGISTRIES: RegistryOutcome = { configured: 0, synced: 0, failed: [] };
 export function updateOutro(result: RunUpdateResult): string {
     const { registries: reg } = result;
     if (reg.configured === 0) return 'Nothing updated — no registries configured on this machine.';
-    if (result.code !== 0) return 'Update failed — see errors above.';
-    if (reg.failed.length > 0) {
-        return `⚠ Updated with stale content — ${reg.synced}/${reg.configured} registries synced, `
-            + `kept on-disk content for: ${reg.failed.join(', ')}.`;
+    // SG-7: sync errors always yield code ≠ 0. When healthy registries still advanced,
+    // later stages ran — say so instead of the unreachable pre-SG-7 "stale content / exit 0".
+    if (result.code !== 0) {
+        if (reg.failed.length > 0 && reg.synced > 0) {
+            return (
+                `⚠ Finished with registry sync errors — ${reg.synced}/${reg.configured} registries synced `
+                + `(failed: ${reg.failed.join(', ')}); see errors above.`
+            );
+        }
+        return 'Update failed — see errors above.';
     }
     return `✅ ${reg.synced} ${reg.synced === 1 ? 'registry' : 'registries'}, skills and hooks updated.`;
 }
@@ -137,8 +144,10 @@ export async function runUpdateCore(
 
     const registryResults = await d.syncRegistries();
     for (const r of registryResults) {
-        if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-        else if (r.disposition === 'regressed') {
+        if (r.action === 'error') {
+            // Printed below as a hard SG-7 failure — skip the stale warn path.
+            continue;
+        } else if (r.disposition === 'regressed') {
             const latest = r.availableVersion && r.availableVersion !== r.version
                 ? ` Latest available: ${r.availableVersion}.`
                 : '';
@@ -178,11 +187,17 @@ export async function runUpdateCore(
         return { code: 1, selectedAgents, registries };
     }
 
-    // Falla CERRADO solo cuando el registry quedó sin contenido en disco: ahí lo que sigue
-    // leería un árbol inexistente y el fallo reaparecería más tarde, disfrazado de otra
-    // etapa. Un registry que falló pero conserva su contenido queda stale, no roto — se
-    // sigue (doctrina de `unusableSyncedRegistries`: un registry secundario flaky nunca
-    // aborta la corrida) y el cierre lo nombra en vez de declarar éxito parejo.
+    // SG-7: any sync/clone failure → non-zero exit with classified message.
+    // Do NOT abort the later stages early when healthy registries already advanced
+    // on disk (audit A1): reconcile / hooks / self-update still run against usable
+    // content, then the command exits ≠ 0 naming the failed registry.
+    const syncHadErrors = hardFailOnAnyRegistrySyncError(registryResults);
+    if (syncHadErrors) {
+        for (const e of registrySyncErrors(registryResults)) {
+            console.error(pc.red(`  ✖  registry ${e.name}: ${e.error}`));
+        }
+    }
+
     try {
         assertSyncedRegistriesUsable(registryResults);
     } catch (e) {
@@ -235,5 +250,5 @@ export async function runUpdateCore(
     // según haya o no un humano en stdin — no este llamador.
     await d.offerSelfUpdate(options.yes === true ? 'assume-yes' : undefined);
 
-    return { code: 0, selectedAgents, registries };
+    return { code: syncHadErrors ? 1 : 0, selectedAgents, registries };
 }
