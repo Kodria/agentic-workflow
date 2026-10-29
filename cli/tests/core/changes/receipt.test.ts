@@ -695,12 +695,12 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
     afterAll(() => manifested?.cleanup());
     beforeEach(() => {
         process.exitCode = undefined;
+        // The shared state is its own copy, never the test's `repo`: a failed copy below must not let afterEach remove it.
         if (manifested === undefined) {
             commitManifest(root);
-            manifested = repo;
-        } else {
-            repo.cleanup();
+            manifested = cloneRepo(repo);
         }
+        repo.cleanup();
         useRepo(manifested);
         (findManifestDir as jest.Mock).mockReset().mockImplementation((start: string) => {
             const project = resolveSensorProject(start);
