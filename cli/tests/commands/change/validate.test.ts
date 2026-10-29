@@ -54,15 +54,16 @@ function commitRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass', sensors: 
 // happens there once); every test that starts from it gets a private file copy (no git process) that it may change freely.
 const fixtures = new Map<string, TestRepo>();
 afterAll(() => { for (const f of fixtures.values()) f.cleanup(); });
-function fixture(key: string, build: () => void): void {
-    let built = fixtures.get(key);
-    if (built === undefined) {
+/** The prebuilt state `key` (built by `build` on first use). */
+function built(key: string, build: () => void): TestRepo {
+    let state = fixtures.get(key);
+    if (state === undefined) {
         const own = repo;
         repo = cloneRepo(template);
         try {
             build();
-            built = repo;
-            fixtures.set(key, built);
+            state = repo;
+            fixtures.set(key, state);
         } catch (error) {
             repo.cleanup();
             throw error;
@@ -70,13 +71,35 @@ function fixture(key: string, build: () => void): void {
             repo = own;
         }
     }
-    repo.cleanup();
-    repo = cloneRepo(built);
+    return state;
 }
+/** Starts the test from a private copy of the prebuilt state `key`. */
+function fixture(key: string, build: () => void): void {
+    const state = built(key, build);
+    repo.cleanup();
+    repo = cloneRepo(state);
+}
+const recordKey = (slug: string, overall: string, sensors: string[]): string => `record ${slug} ${overall} ${sensors.join(',')}`;
 /** The repository after `commitRecord(slug, overall, sensors)`, from a prebuilt state. Returns the record's path. */
 function withRecord(slug = 'rec', overall: 'pass' | 'fail' = 'pass', sensors: string[] = ['lint']): string {
-    fixture(`record ${slug} ${overall} ${sensors.join(',')}`, () => { commitRecord(slug, overall, sensors); });
+    fixture(recordKey(slug, overall, sensors), () => { commitRecord(slug, overall, sensors); });
     return `docs/changes/2026-10-17-${slug}.md`;
+}
+const sharedRuns = new Map<string, CommandResult>();
+/**
+ * `runChangeValidate(root, target, opts)` on an untouched prebuilt state: `none` is the template (a branch with one commit and no
+ * record), `record` is the state of `withRecord()`. Validation is read-only (R4.6, asserted below), so each distinct run is made
+ * once and its result is shared by the tests that only read it.
+ */
+function untouched(state: 'none' | 'record', target: string | undefined, opts: ValidateOpts): CommandResult {
+    const key = JSON.stringify([state, target ?? null, opts]);
+    let r = sharedRuns.get(key);
+    if (r === undefined) {
+        const root = state === 'none' ? template.root : built(recordKey('rec', 'pass', ['lint']), () => { commitRecord(); }).root;
+        r = runChangeValidate(root, target, opts);
+        sharedRuns.set(key, r);
+    }
+    return r;
 }
 /** The repository after `commitRecord('aaa')` and `commitRecord('bbb')`, from a prebuilt state. */
 const withTwoRecords = (): void => fixture('records aaa bbb', () => { commitRecord('aaa'); commitRecord('bbb'); });
@@ -261,7 +284,7 @@ describe('target path safety', () => {
 
 describe('R4.2 missing record and the opt-out trailer', () => {
     test('no record and no trailer fails with record-missing, state invalid, exit 2', () => {
-        const r = run();
+        const r = untouched('none', undefined, { json: true });
         expect(r.code).toBe(2);
         expect(report(r).state).toBe('invalid');
         diag(r, 'record-missing', undefined);
@@ -355,8 +378,7 @@ describe('base resolution (R3.1, R3.2, R3.5)', () => {
 
 describe('R4.3 base checks', () => {
     test('a filled record that matches git passes', () => {
-        withRecord();
-        const r = run();
+        const r = untouched('record', undefined, { json: true });
         expect(r.code).toBe(0);
         expect(report(r)).toMatchObject({ state: 'valid', records: [{ path: REL, state: 'valid', diagnostics: [] }] });
     });
@@ -440,9 +462,10 @@ describe('R4.3 base checks', () => {
     test('code changed after the verified commit is code-changed-after-verification', () => {
         withRecord();
         repo.commit({ 'cli/src/late.ts': '1' }, 'chore: late');
-        const d = diag(run(), 'code-changed-after-verification', undefined);
+        const r = run();
+        const d = diag(r, 'code-changed-after-verification', undefined);
         expect(d.message).toContain('cli/src/late.ts');
-        expect(codesOf(run())).not.toContain('derived-mismatch'); // same module, same type: only the late code is wrong
+        expect(codesOf(r)).not.toContain('derived-mismatch'); // same module, same type: only the late code is wrong
     });
     test('files under docs/changes changed after the verified commit are not code', () => {
         withRecord();
@@ -638,12 +661,12 @@ describe('R4.5 output and exit codes', () => {
         expect(r.stdout).toBe('Change Record validation: exempt (Change-Record: none)\n');
     });
     test('text report of a missing record names docs/changes', () => {
-        const r = runChangeValidate(repo.root, undefined, {});
+        const r = untouched('none', undefined, {});
         expect(r.code).toBe(2);
         expect(r.stdout.startsWith('Change Record validation: invalid\n- docs/changes: invalid\n  - record-missing: ')).toBe(true);
     });
     test('--json is one line with the documented shape, and a diagnostic without a field has no field key', () => {
-        const r = run();
+        const r = untouched('none', undefined, { json: true });
         expect(r.stdout.endsWith('\n')).toBe(true);
         expect(r.stdout.slice(0, -1)).not.toContain('\n');
         const out = report(r);
@@ -657,8 +680,7 @@ describe('R4.5 output and exit codes', () => {
         expect(Object.keys(diagsOf(run(REL))[0]).sort()).toEqual(['code', 'field', 'message']);
     });
     test('exit code 0 for a valid run', () => {
-        withRecord();
-        expect(run().code).toBe(0);
+        expect(untouched('record', undefined, { json: true }).code).toBe(0);
     });
     test('exit code 0 for an exempt run', () => {
         repo.commit({ 'b.ts': '1' }, 'docs: b\n\nChange-Record: none');
@@ -666,7 +688,7 @@ describe('R4.5 output and exit codes', () => {
         expect(runChangeValidate(repo.root, undefined, {}).code).toBe(0);
     });
     test('exit code 2 for a missing record', () => {
-        expect(run().code).toBe(2);
+        expect(untouched('none', undefined, { json: true }).code).toBe(2);
     });
     test('exit code 2 for an invalid record', () => {
         withRecord();
@@ -674,8 +696,8 @@ describe('R4.5 output and exit codes', () => {
         expect(run().code).toBe(2);
     });
     test('a report is never written to stderr', () => {
-        expect(run().stderr).toBe('');
-        expect(runChangeValidate(repo.root, undefined, {}).stderr).toBe('');
+        expect(untouched('none', undefined, { json: true }).stderr).toBe('');
+        expect(untouched('none', undefined, {}).stderr).toBe('');
     });
     /** A committed record plus `count` unknown top-level keys in the working tree: `count` unknown-field diagnostics. */
     function withUnknownKeys(count: number): Diag[] {
@@ -705,14 +727,15 @@ describe('R4.5 output and exit codes', () => {
     test('at most 50 records are validated; a 51st-and-later record yields too-many-records and an invalid run', () => {
         const files = Object.fromEntries(Array.from({ length: 53 }, (_, i) => [`docs/changes/2026-10-17-r${String(i).padStart(2, '0')}.md`, 'x']));
         repo.commit(files, 'docs: many');
-        const out = report(run());
+        const r = run();
+        const out = report(r);
         expect(out.state).toBe('invalid');
         expect(out.records).toHaveLength(51);
         expect(out.records[0].path).toBe('docs/changes/2026-10-17-r00.md');
         expect(out.records[49].path).toBe('docs/changes/2026-10-17-r49.md');
         expect(out.records[50]).toEqual({ path: 'docs/changes', state: 'invalid', diagnostics: [{ code: 'too-many-records', message: '53 records were added; only the first 50 were validated' }] });
         expect(out.records.slice(0, 50).every((x) => x.diagnostics.every((d) => d.code !== 'too-many-records'))).toBe(true);
-        expect(run().code).toBe(2);
+        expect(r.code).toBe(2);
     });
     test('exactly 50 records are all validated with no too-many-records marker', () => {
         const files = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`docs/changes/2026-10-17-r${String(i).padStart(2, '0')}.md`, 'x']));
@@ -832,9 +855,9 @@ describe('R4.5 operational failures under --json', () => {
 
 describe('R4.3 committed-record verdict (record-uncommitted)', () => {
     test('a clean committed record has no record-uncommitted diagnostic', () => {
-        withRecord();
-        expect(codesOf(run())).not.toContain('record-uncommitted');
-        expect(run().code).toBe(0);
+        const r = untouched('record', undefined, { json: true });
+        expect(codesOf(r)).not.toContain('record-uncommitted');
+        expect(r.code).toBe(0);
     });
     test('an unstaged edit of a committed record is record-uncommitted', () => {
         withRecord();
