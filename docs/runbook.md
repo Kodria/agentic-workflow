@@ -270,10 +270,16 @@ git clone git@github.com:your-org/your-registry.git
 awm registry add git@github.com:your-org/your-registry.git --no-install
 ```
 
-AWM invokes Git, so the shell's `ssh-agent` and `~/.ssh/config` apply normally.
-For headless automation, set `GIT_TERMINAL_PROMPT=0` so a bad credential fails
-instead of waiting for interactive input. A failed registry add is atomic: it
-does not leave a configured registry or partial clone behind.
+AWM invokes Git through a non-interactive factory: it forces
+`GIT_TERMINAL_PROMPT=0` and does not pass ambient `GIT_*` variables into the
+child (so `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, and
+`GIT_CONFIG_*` are ignored). Prefer file-based Git settings that still reach
+the child — `~/.ssh/config` / `core.sshCommand`, `credential.helper`,
+`http.sslCAInfo` / `http.sslCAPath`, and ordinary `git config --global`
+entries. `ssh-agent` (`SSH_AUTH_SOCK`) continues to work. When an ignored
+`GIT_*` name is present, AWM prints a one-shot notice with the **names** only
+(never values) and the matching config remedy. A failed registry add is
+atomic: it does not leave a configured registry or partial clone behind.
 
 ## Version pins and rollout
 
