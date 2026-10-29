@@ -88,11 +88,13 @@ const fail = (code: string, message: string): Derived => ({ ok: false, diagnosti
  * conventional commit does), while `semver` and `breaking` cover every commit.
  * `mergeBaseSha` must be a full commit id (the output of `mergeBase`); anything else is `invalid-input`.
  */
-export function deriveFields(root: string, mergeBaseSha: string | null): Derived {
+export function deriveFields(root: string, mergeBaseSha: string | null, pinnedHead?: string): Derived {
     if (typeof root !== 'string' || root.length === 0) return fail('invalid-input', 'repository root must be a non-empty string');
     if (typeof mergeBaseSha !== 'string' || !COMMIT_ID.test(mergeBaseSha)) return fail('invalid-input', `merge-base must be a full commit id, got "${esc(mergeBaseSha as string)}"`);
-    // HEAD is read once: the log and the diff below both use this sha, so a HEAD that moves meanwhile cannot mix snapshots.
-    const head = headSha(root);
+    if (pinnedHead !== undefined && (typeof pinnedHead !== 'string' || !COMMIT_ID.test(pinnedHead))) return fail('invalid-input', `pinned HEAD must be a full commit id, got "${esc(pinnedHead as string)}"`);
+    // HEAD is read once: the log and the diff below both use this sha, so a HEAD that moves meanwhile cannot mix snapshots. A
+    // command that already pinned HEAD passes it (and checks `headMovedFailure` afterwards), saving one more `rev-parse`.
+    const head = pinnedHead ?? headSha(root);
     if (head === null) return fail('git-failed', 'git could not read HEAD');
     const range = `${mergeBaseSha}..${head}`;
     // --full-history: with a pathspec git would otherwise prune the side of a merge whose tree equals the other parent

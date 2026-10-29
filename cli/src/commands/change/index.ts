@@ -107,7 +107,7 @@ function changeNew(cwd: string, slug: string, rawOpts: unknown, deps: ChangeDeps
     const range = resolveRange(root, opts.base);
     if (!range.ok) return failed(range.failure);
     const { head } = range;
-    const derived = deriveFields(root, range.mergeBase);
+    const derived = deriveFields(root, range.mergeBase, head);
     if (!derived.ok) return fail(derived.diagnostic.code, derived.diagnostic.message);
     const movedAfterDerive = headMovedFailure(root, head);
     if (movedAfterDerive) return failed(movedAfterDerive);
@@ -245,7 +245,7 @@ interface ValidateRun {
     late: Map<string, { count: number; first: string[] } | null>;
 }
 
-const deriveOnce = (run: ValidateRun): Derived => (run.derived ??= deriveFields(run.root, run.mergeBaseSha));
+const deriveOnce = (run: ValidateRun): Derived => (run.derived ??= deriveFields(run.root, run.mergeBaseSha, run.head));
 
 function lateFiles(run: ValidateRun, commit: string): { count: number; first: string[] } | null {
     if (!run.late.has(commit)) {
