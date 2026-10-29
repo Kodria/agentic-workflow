@@ -3,26 +3,71 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { gitAtLeast, importCommits, cloneRepo, makeRepo, posixOnly, spyOnGit, type TestRepo } from './helpers';
 import { FIRST, SINCE_48H, adoptIn, byClass, commitLiterally, historyIn, listIn, ok, record, recordPath, snapshotDir, subjects } from './list-fixtures';
-import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_RECORDS_PER_RUN, MAX_SUBJECT, PAGE_SIZE, listChanges, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
+import { DEFAULT_LIMIT, MAX_RECORDS_PER_ENTRY, MAX_RECORDS_PER_RUN, MAX_SUBJECT, PAGE_SIZE, listChanges, type ListedChange, type ListOutcome, type ListResult } from '../../../src/core/changes/list';
 
 let repo: TestRepo;
 let template: TestRepo;
-beforeAll(() => { template = makeRepo(); });
-afterAll(() => template.cleanup());
+/** The template plus the default adoption commit of `adoptIn`: `adopt()` starts a test from a copy of it (no git process). */
+let adopted: TestRepo;
+beforeAll(() => { template = makeRepo(); adopted = cloneRepo(template); adoptIn(adopted); });
+afterAll(() => { adopted.cleanup(); template.cleanup(); });
 beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const list = (opts: Record<string, unknown> = {}): ListOutcome => listIn(repo, opts);
 const listed = (opts: Record<string, unknown> = {}): ListResult => ok(list(opts));
-const adopt = (id?: string): string => adoptIn(repo, id);
+/** The default adoption commit (a copy of the prebuilt `adopted` repository), or `adoptIn(repo, id)` for another id. */
+const adopt = (id?: string): void => {
+    if (id !== undefined) { adoptIn(repo, id); return; }
+    repo.cleanup();
+    repo = cloneRepo(adopted);
+};
 const history = (): void => historyIn(repo);
+type Planned = [files: Record<string, string>, message: string, date: string];
+/** The commits `repo.commit(files, message, date)` would make, in order, written by one `git fast-import` (importCommits). */
+const commitMany = (planned: Planned[]): void => importCommits(repo, planned.map(([files, message, date]) => ({ files, message: `${message}\n`, date })));
+/** `n` commits `${prefix}${i}` (i from `from`), each adding `${file}${i}.ts`, all at `date`. */
+const series = (n: number, prefix: string, file: string, date: string, from = 1): Planned[] =>
+    Array.from({ length: n }, (_, k) => [{ [`${file}${from + k}.ts`]: '1' }, `${prefix}${from + k}`, date]);
+
+/**
+ * A state for read-only tests, built once (lazily, by `build` acting on `repo`) and listed once under a git spy; the tests that
+ * share it only read the result and the recorded git calls, and never change the state.
+ */
+function sharedListing(build: () => void, opts: Record<string, unknown> = {}): () => { result: ListResult; calls: string[][] } {
+    let state: TestRepo | undefined;
+    let memo: { result: ListResult; calls: string[][] } | undefined;
+    afterAll(() => state?.cleanup());
+    return () => {
+        if (memo === undefined) {
+            const own = repo;
+            repo = cloneRepo(template);
+            try {
+                build();
+                state = repo;
+                const spy = spyOnGit();
+                try { memo = { result: listed(opts), calls: spy.calls }; } finally { spy.restore(); }
+            } catch (error) {
+                if (state === undefined) repo.cleanup();
+                throw error;
+            } finally {
+                repo = own;
+            }
+        }
+        return memo;
+    };
+}
+/** One `fix: a` commit after the adoption point, listed once. */
+const oneFix = sharedListing(() => { adopt(); repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z'); });
 
 describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
     test('the window start is inclusive and a commit one second older is out', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: before', '2026-10-15T11:59:59Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: at start', '2026-10-15T12:00:00Z');
-        repo.commit({ 'c.ts': '1' }, 'fix: after', '2026-10-15T12:00:01Z');
+        commitMany([
+            [{ 'a.ts': '1' }, 'fix: before', '2026-10-15T11:59:59Z'],
+            [{ 'b.ts': '1' }, 'fix: at start', '2026-10-15T12:00:00Z'],
+            [{ 'c.ts': '1' }, 'fix: after', '2026-10-15T12:00:01Z'],
+        ]);
         expect(subjects(listed())).toEqual(['fix: after', 'fix: at start']);
     });
     test('a future-dated commit is included', () => {
@@ -34,9 +79,11 @@ describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
     });
     test('each commit is tested individually: an old-dated commit between two in-window ones does not stop the walk', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: x', '2026-10-16T10:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: y old', '2026-10-01T10:00:00Z');
-        repo.commit({ 'c.ts': '1' }, 'fix: z', '2026-10-16T12:00:00Z');
+        commitMany([
+            [{ 'a.ts': '1' }, 'fix: x', '2026-10-16T10:00:00Z'],
+            [{ 'b.ts': '1' }, 'fix: y old', '2026-10-01T10:00:00Z'],
+            [{ 'c.ts': '1' }, 'fix: z', '2026-10-16T12:00:00Z'],
+        ]);
         expect(subjects(listed())).toEqual(['fix: z', 'fix: x']);
     });
     test('merged_at is the committer date, not the author date', () => {
@@ -52,20 +99,19 @@ describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
     });
     test('beyond the limit the newest entries are kept and the rest are counted', () => {
         adopt();
-        for (let i = 1; i <= 5; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, `2026-10-16T0${i}:00:00Z`);
+        commitMany(Array.from({ length: 5 }, (_, k) => [{ [`f${k + 1}.ts`]: '1' }, `fix: n${k + 1}`, `2026-10-16T0${k + 1}:00:00Z`]));
         const r = listed({ limit: 3 });
         expect(subjects(r)).toEqual(['fix: n5', 'fix: n4', 'fix: n3']);
         expect(r).toMatchObject({ truncated: true, omitted: 2 });
     });
     test('exactly at the limit is not truncated', () => {
         adopt();
-        for (let i = 1; i <= 3; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, `2026-10-16T0${i}:00:00Z`);
+        commitMany(Array.from({ length: 3 }, (_, k) => [{ [`f${k + 1}.ts`]: '1' }, `fix: n${k + 1}`, `2026-10-16T0${k + 1}:00:00Z`]));
         expect(listed({ limit: 3 })).toMatchObject({ truncated: false, omitted: 0 });
     });
     test('the limit counts window entries only, not older commits', () => {
         adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: old', '2026-10-01T00:00:00Z');
-        repo.commit({ 'b.ts': '1' }, 'fix: new', '2026-10-16T00:00:00Z');
+        commitMany([[{ 'a.ts': '1' }, 'fix: old', '2026-10-01T00:00:00Z'], [{ 'b.ts': '1' }, 'fix: new', '2026-10-16T00:00:00Z']]);
         expect(listed({ limit: 1 })).toMatchObject({ truncated: false, omitted: 0 });
     });
     test('a limit above 200 is capped at 200: 205 window entries give 200 listed and 5 omitted', () => {
@@ -111,24 +157,25 @@ describe('listChanges: window and bounds (R5.2, R5.5, R5.7)', () => {
     });
     test('the per-run budget fails closed on the commits that come after it is spent', () => {
         adopt();
-        for (let i = 1; i <= 3; i++) repo.commit({ [recordPath(`2026-10-16-r${i}`)]: record(`2026-10-16-r${i}`) }, `feat: r${i}`, `2026-10-16T0${i}:00:00Z`);
+        commitMany(Array.from({ length: 3 }, (_, k) => [{ [recordPath(`2026-10-16-r${k + 1}`)]: record(`2026-10-16-r${k + 1}`) }, `feat: r${k + 1}`, `2026-10-16T0${k + 1}:00:00Z`]));
         const r = listed({ maxRecords: 2 });
         expect(byClass(r)).toEqual({ 'feat: r3': 'recorded', 'feat: r2': 'recorded', 'feat: r1': 'invalid-record' });
         expect(r.changes[2].records).toEqual([{ path: 'docs/changes', diagnostics: [expect.objectContaining({ code: 'too-many-records' })] }]);
     });
     test('the per-run budget is spent on records actually read: a commit refused for being too large does not use it up', () => {
         adopt();
-        repo.commit(files(1, 100), 'feat: small', '2026-10-16T01:00:00Z');
-        repo.commit(files(3, 200), 'feat: big', '2026-10-16T02:00:00Z');
-        repo.commit(files(2, 300), 'feat: medium', '2026-10-16T03:00:00Z');
+        commitMany([
+            [files(1, 100), 'feat: small', '2026-10-16T01:00:00Z'],
+            [files(3, 200), 'feat: big', '2026-10-16T02:00:00Z'],
+            [files(2, 300), 'feat: medium', '2026-10-16T03:00:00Z'],
+        ]);
         const r = listed({ maxRecords: 3 });
         expect(byClass(r)).toEqual({ 'feat: medium': 'recorded', 'feat: big': 'invalid-record', 'feat: small': 'recorded' });
         expect(r.changes.find((c) => c.subject === 'feat: big')?.records).toHaveLength(1);
     });
     test('a budget of exactly the records of the run reads them all', () => {
         adopt();
-        repo.commit(files(2, 100), 'feat: a', '2026-10-16T01:00:00Z');
-        repo.commit(files(1, 200), 'feat: b', '2026-10-16T02:00:00Z');
+        commitMany([[files(2, 100), 'feat: a', '2026-10-16T01:00:00Z'], [files(1, 200), 'feat: b', '2026-10-16T02:00:00Z']]);
         expect(Object.values(byClass(listed({ maxRecords: 3 })))).toEqual(['recorded', 'recorded']);
         expect(Object.values(byClass(listed({ maxRecords: 2 })))).toEqual(['recorded', 'invalid-record']);
     });
@@ -147,19 +194,12 @@ describe('listChanges: subjects and tags beyond their caps are clipped, never an
         expect(r.changes[1].subject.endsWith('…')).toBe(true);
     }, 120_000);
     test('the subject is asked from git bounded, so that git never prints all of it', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const call = spy.calls.find((a) => a.some((x) => x.startsWith('--format=%H%x1f%<(')));
+        const call = oneFix().calls.find((a) => a.some((x) => x.startsWith('--format=%H%x1f%<(')));
         expect(call).toBeDefined();
         expect(call?.some((x) => /%<\(\d+,trunc\)%s/.test(x))).toBe(true);
     });
     test('a short subject is returned without the padding git adds', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        expect(subjects(listed())).toEqual(['fix: a']);
+        expect(subjects(oneFix().result)).toEqual(['fix: a']);
     });
     test('R5.5 a commit whose subject cannot be read still lists: its pr is null (the tail fallback), never a failure', () => {
         adopt();
@@ -172,9 +212,9 @@ describe('listChanges: subjects and tags beyond their caps are clipped, never an
     });
     test('one bad subject among many is found by halving the batch: a logarithmic number of calls, not one per commit', () => {
         adopt();
-        for (let i = 1; i <= 7; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, '2026-10-16T10:00:00Z');
+        commitMany(series(7, 'fix: n', 'f', '2026-10-16T10:00:00Z'));
         repo.gitAt('2026-10-16T10:00:00Z', 'commit', '--allow-empty', '-q', '-F', bigMessage(`fix: ${'\u0301'.repeat(9_000_000)}`));
-        for (let i = 8; i <= 15; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, '2026-10-16T11:00:00Z');
+        commitMany(series(8, 'fix: n', 'f', '2026-10-16T11:00:00Z', 8));
         const spy = spyOnGit();
         const r = listed();
         spy.restore();
@@ -201,7 +241,12 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
     const isScan = (a: string[]): boolean => a.includes('log') && a.some((x) => x === '--format=%H%x1f%ct%x1f%P');
     const isAdoptionPage = (a: string[]): boolean => a.includes('log') && a.some((x) => x.startsWith(':(top,glob)docs/changes/'));
     /** `n` commits in the window, `fix: n1` oldest. */
-    const commits = (n: number, from = 1): void => { for (let i = from; i < from + n; i++) repo.commit({ [`f${i}.ts`]: '1' }, `fix: n${i}`, '2026-10-16T10:00:00Z'); };
+    const inWindow = (n: number, from = 1): Planned[] => series(n, 'fix: n', 'f', '2026-10-16T10:00:00Z', from);
+    const commits = (n: number, from = 1): void => commitMany(inWindow(n, from));
+    /** `n` commits `fix: old${i}`, each adding `o${i}.ts`, dated before the window. */
+    const old = (n: number): Planned[] => series(n, 'fix: old', 'o', '2026-10-01T10:00:00Z');
+    /** `n` commits `docs: note ${i}`, each adding `docs/changes/2026-10-16-n${i}.md` (a record-like name: they touch docs/changes). */
+    const notes = (n: number, from = 1): Planned[] => Array.from({ length: n }, (_, k) => [{ [`docs/changes/2026-10-16-n${from + k}.md`]: '1' }, `docs: note ${from + k}`, '2026-10-16T10:00:00Z']);
     const countCalls = (pred: (a: string[]) => boolean, opts: Record<string, unknown>): number => { const spy = spyOnGit(); listed(opts); spy.restore(); return spy.calls.filter(pred).length; };
 
     test('the real page size is 10 000 commits and is what a default run asks git for', () => {
@@ -238,8 +283,7 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
         expect(listed({ pageSize: 1 })).toEqual(listed());
     });
     test('the scan stops at the adoption point: no page is read beyond the one holding it', () => {
-        repo.commit({ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
-        repo.commit({ 'old2.ts': '1' }, 'feat: before too', '2026-10-16T09:30:00Z');
+        commitMany([[{ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z'], [{ 'old2.ts': '1' }, 'feat: before too', '2026-10-16T09:30:00Z']]);
         adopt('2026-10-16-first');
         commits(5);
         const r = listed({ pageSize: 2 });
@@ -248,35 +292,31 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
     });
     test('the scan stops at the first page without a commit in the window', () => {
         adopt();
-        for (let i = 1; i <= 6; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
-        commits(2);
+        commitMany([...old(6), ...inWindow(2)]);
         expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n2', 'fix: n1']);
         expect(countCalls(isScan, { pageSize: 2 })).toBe(2);
     });
     test('a window with no commit in it reads one page only', () => {
         adopt();
-        for (let i = 1; i <= 6; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commitMany(old(6));
         expect(listed({ pageSize: 2 })).toMatchObject({ adopted: true, changes: [], truncated: false, omitted: 0 });
         expect(countCalls(isScan, { pageSize: 2 })).toBe(1);
     });
     test('a page that holds some commits of the window and some older ones is followed by one more page', () => {
         adopt();
-        for (let i = 1; i <= 4; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
-        commits(1);
+        commitMany([...old(4), ...inWindow(1)]);
         expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n1']);
         expect(countCalls(isScan, { pageSize: 2 })).toBe(2);
     });
     test('a commit dated inside the window beyond a page with none is not listed (dates are assumed not to decrease)', () => {
         adopt();
-        commits(1);
-        for (let i = 1; i <= 3; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
-        commits(1, 2);
+        commitMany([...inWindow(1), ...old(3), ...inWindow(1, 2)]);
         expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: n2']);
         expect(subjects(listed({ pageSize: 10 }))).toEqual(['fix: n2', 'fix: n1']);
     });
     test('an unusable date counts as inside the window when it decides whether to read on', () => {
         adopt();
-        for (let i = 1; i <= 4; i++) repo.commit({ [`o${i}.ts`]: '1' }, `fix: old${i}`, '2026-10-01T10:00:00Z');
+        commitMany(old(4));
         commitLiterally(repo, '');
         repo.commit({ 'o5.ts': '1' }, 'fix: old5', '2026-10-01T10:00:00Z');
         expect(subjects(listed({ pageSize: 2 }))).toEqual(['fix: odd date']);
@@ -304,23 +344,19 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
         expect(paged).toEqual(listed());
     });
     test('the adoption search is paged too: the oldest commit that touched docs/changes is found across pages', () => {
-        repo.commit({ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z');
-        for (let i = 1; i <= 7; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        commitMany([[{ 'old.ts': '1' }, 'feat: before', '2026-10-16T09:00:00Z'], ...notes(7)]);
         const paged = listed({ pageSize: 3 });
         expect(subjects(paged)).toEqual(Array.from({ length: 7 }, (_, i) => `docs: note ${7 - i}`));
         expect(paged).toEqual(listed());
         expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
     });
     test('the adoption search reads one more, empty, page when the last one was full', () => {
-        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        commitMany(notes(6));
         expect(subjects(listed({ pageSize: 3 }))).toHaveLength(6);
         expect(countCalls(isAdoptionPage, { pageSize: 3 })).toBe(3);
     });
     test('the adoption search skips commits that did not touch docs/changes between two pages', () => {
-        for (let i = 1; i <= 3; i++) {
-            repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
-            commits(2, i * 10);
-        }
+        commitMany([1, 2, 3].flatMap((i) => [...notes(1, i), ...inWindow(2, i * 10)]));
         const r = listed({ pageSize: 2 });
         expect(r.changes.map((c) => c.subject).filter((x) => x.startsWith('docs:'))).toEqual(['docs: note 3', 'docs: note 2', 'docs: note 1']);
         expect(r).toEqual(listed());
@@ -343,7 +379,7 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
         expect(outcome).toMatchObject({ ok: false, failure: { code: 'git-failed' } });
     });
     test('a git failure on a later page of the adoption search is a git-failed failure', () => {
-        for (let i = 1; i <= 6; i++) repo.commit({ [`docs/changes/2026-10-16-n${i}.md`]: '1' }, `docs: note ${i}`, '2026-10-16T10:00:00Z');
+        commitMany(notes(6));
         let seen = 0;
         const spy = spyOnGit((args) => { if (isAdoptionPage(args) && ++seen === 2) throw new Error('boom'); });
         const outcome = list({ pageSize: 2 });
@@ -353,12 +389,7 @@ describe('listChanges: the first-parent scan is read in pages (R5.7)', () => {
 });
 
 describe('listChanges: the pr comes from the true end of the full subject (R5.5)', () => {
-    const prOf = (subject: string): number | null => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, subject, '2026-10-16T10:00:00Z');
-        return listed().changes[0].pr;
-    };
-    test.each([
+    const CASES: Array<[string, string, number | null]> = [
         ['5000 characters long', `fix: ${'a'.repeat(5000)} (#12)`, 12],
         ['1030 characters long (just beyond the subject cap)', `fix: ${'a'.repeat(1030 - 12)} (#12)`, 12],
         ['exactly the width of the tail', `${'x'.repeat(64 - 6)} (#12)`, 12],
@@ -374,28 +405,38 @@ describe('listChanges: the pr comes from the true end of the full subject (R5.5)
         ['with accented characters at the cut', `${'\u00e9'.repeat(100)} (#12)`, 12],
         ['with astral characters at the cut', `${'\u{1F600}'.repeat(100)} (#12)`, 12],
         ['with two (#n) at the end', `fix: ${'a'.repeat(300)} (#1) (#2)`, 2],
-    ])('a subject %s', (_label, subject, pr) => {
-        expect(prOf(subject)).toBe(pr);
+    ];
+    const CLIPPED = `fix: ${'a'.repeat(5000)} (#12)`;
+    const SHORT = 'fix: short (#4)';
+    // Every subject below is its own commit of one shared history, listed once; an entry is found by its (unique) commit date.
+    const SUBJECTS = [...CASES.map(([, subject]) => subject), CLIPPED, SHORT];
+    const dateOf = (i: number): string => new Date(Date.UTC(2026, 9, 16, 10, 0, 0) + i * 60_000).toISOString();
+    const shared = sharedListing(() => {
+        adopt();
+        commitMany(SUBJECTS.map((subject, i) => [{ [`a${i}.ts`]: '1' }, subject, dateOf(i)]));
+    });
+    const entryOf = (subject: string): ListedChange => {
+        const { changes } = shared().result;
+        expect(changes).toHaveLength(SUBJECTS.length);
+        const i = SUBJECTS.indexOf(subject);
+        expect(i).toBeGreaterThan(-1);
+        const entry = changes.find((c) => c.merged_at === dateOf(i));
+        if (entry === undefined) throw new Error(`no entry for subject ${i}`);
+        return entry;
+    };
+    test.each(CASES)('a subject %s', (_label, subject, pr) => {
+        expect(entryOf(subject).pr).toBe(pr);
     });
     test('the end of the subject is asked from git bounded to the tail width', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: a', '2026-10-16T10:00:00Z');
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        expect(spy.calls.some((a) => a.includes('--format=%H%x1f%<(64,ltrunc)%s'))).toBe(true);
+        expect(oneFix().calls.some((a) => a.includes('--format=%H%x1f%<(64,ltrunc)%s'))).toBe(true);
     });
     test('the subject itself is still clipped while the pr is read from its end', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, `fix: ${'a'.repeat(5000)} (#12)`, '2026-10-16T10:00:00Z');
-        const entry = listed().changes[0];
+        const entry = entryOf(CLIPPED);
         expect(entry.subject.length).toBe(MAX_SUBJECT);
         expect(entry.pr).toBe(12);
     });
     test('the tail never leaks into the subject', () => {
-        adopt();
-        repo.commit({ 'a.ts': '1' }, 'fix: short (#4)', '2026-10-16T10:00:00Z');
-        expect(listed().changes[0].subject).toBe('fix: short (#4)');
+        expect(entryOf(SHORT).subject).toBe(SHORT);
     });
 });
 
@@ -433,21 +474,15 @@ describe('listChanges: read-only and bounded (R5.7)', () => {
         expect(byClass(r)).toEqual({ 'fix: next': 'missing', 'feat: first': 'invalid-record' });
         expect(r.changes[1].records).toEqual([{ path: recordPath(FIRST), diagnostics: [expect.objectContaining({ code: 'git-failed' })] }]);
     });
+    // The history of `historyIn`, listed once under a git spy: the next four tests only read the calls it made.
+    const historyCalls = (() => { const shared = sharedListing(history); return (): string[][] => shared().calls; })();
     test('every git call is read-only', () => {
-        history();
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const subcommands = new Set(spy.calls.map((a) => a.find((x) => !x.startsWith('-') && x !== 'diff.relative=false') ?? ''));
+        const subcommands = new Set(historyCalls().map((a) => a.find((x) => !x.startsWith('-') && x !== 'diff.relative=false') ?? ''));
         expect([...subcommands].sort()).toEqual(expect.arrayContaining(['log']));
         for (const name of subcommands) expect(['rev-parse', 'log', 'diff', 'ls-tree', 'show', 'for-each-ref', 'config']).toContain(name);
     });
     test('every git log carries the safety flags', () => {
-        history();
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const logs = spy.calls.filter((a) => a.includes('log'));
+        const logs = historyCalls().filter((a) => a.includes('log'));
         expect(logs.length).toBeGreaterThanOrEqual(3);
         for (const call of logs) {
             expect(call).toContain('--no-show-signature');
@@ -456,11 +491,7 @@ describe('listChanges: read-only and bounded (R5.7)', () => {
         }
     });
     test('pathspecs are literal and follow a --', () => {
-        history();
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const withPath = spy.calls.filter((a) => a.some((x) => x.includes('docs/changes')));
+        const withPath = historyCalls().filter((a) => a.some((x) => x.includes('docs/changes')));
         expect(withPath.length).toBeGreaterThan(0);
         for (const call of withPath) {
             const dash = call.indexOf('--');
@@ -469,22 +500,17 @@ describe('listChanges: read-only and bounded (R5.7)', () => {
         }
     });
     test('the history is read along the first parent only, in pages', () => {
-        history();
-        const spy = spyOnGit();
-        listed();
-        spy.restore();
-        const scans = spy.calls.filter((a) => a.includes('log') && a.some((x) => x.startsWith('--max-count=')));
+        const scans = historyCalls().filter((a) => a.includes('log') && a.some((x) => x.startsWith('--max-count=')));
         expect(scans.length).toBeGreaterThanOrEqual(2);
         for (const call of scans) { expect(call).toContain('--first-parent'); expect(call).toContain(`--max-count=${PAGE_SIZE}`); }
     });
     test('git calls per entry are constant: recorded entries cost the same however long the history', () => {
         adopt();
-        const add = (from: number, to: number): void => {
-            for (let i = from; i <= to; i++) {
-                const id = `2026-10-16-r${String(i).padStart(3, '0')}`;
-                repo.commit({ [recordPath(id)]: record(id) }, `feat: r${i}`, '2026-10-16T10:00:00Z');
-            }
-        };
+        const add = (from: number, to: number): void => commitMany(Array.from({ length: to - from + 1 }, (_, k) => {
+            const i = from + k;
+            const id = `2026-10-16-r${String(i).padStart(3, '0')}`;
+            return [{ [recordPath(id)]: record(id) }, `feat: r${i}`, '2026-10-16T10:00:00Z'];
+        }));
         const count = (): number => { const spy = spyOnGit(); const r = listed(); spy.restore(); expect(r.changes.length).toBeGreaterThan(0); return spy.calls.length; };
         add(1, 5);
         const small = count();
