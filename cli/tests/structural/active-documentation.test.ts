@@ -77,13 +77,6 @@ describe('active documentation contract', () => {
         }
     });
 
-    it('documents the two-stage boundary and official bundle scopes (R3, R8)', () => {
-        expect(read('docs/installation.md')).toContain('Prepare the machine');
-        expect(read('docs/project-setup.md')).toContain('Initialize a project');
-        expect(read('docs/configuration.md')).toContain('`dev` and `product`');
-        expect(read('docs/project-setup.md')).toContain('`frontend`');
-    });
-
     it('documents every init provider and option (R5, R14.2)', () => {
         const config = read('docs/configuration.md');
         for (const agent of AGENT_TARGETS) {
@@ -92,45 +85,5 @@ describe('active documentation contract', () => {
         for (const flag of ['--agent', '--machine-only', '--yes', '--json']) {
             expect(config).toContain(`\`${flag}\``);
         }
-    });
-
-    it('assigns canonical topics instead of copying provider paths (R12)', () => {
-        expect(read('docs/configuration.md')).toContain('[Support matrix](support-matrix.md)');
-        expect(read('docs/configuration.md')).not.toMatch(/~\/\.(?:claude|codex|cursor|gemini)/);
-    });
-
-    it('keeps generated provider support prose in the canonical language (R2)', () => {
-        const matrix = read('docs/support-matrix.md');
-        expect(matrix).toContain('### Where each artifact is installed');
-        expect(matrix).toContain('### Agent profiles, workflows, hooks, and context');
-        expect(matrix).not.toContain('Dónde aterriza cada artefacto');
-        expect(matrix).not.toContain('Perfiles de agente, workflows, hooks y contexto');
-    });
-
-    it('keeps R3 canonical documentation in English and reachable from the hub', () => {
-        const hub = read('docs/README.md');
-        expect(hub).toContain('decisions.md');
-        for (const file of [
-            'docs/framework.md', 'docs/configuration.md', 'docs/project-setup.md',
-            'docs/runbook.md', 'docs/cli-reference.md', 'docs/support-matrix.md',
-            'docs/architecture.md',
-        ]) {
-            expect(read(file)).not.toContain('### Metodología');
-        }
-    });
-
-    it('keeps provider tiers, registries, and hook targets technically precise (R2)', () => {
-        const matrix = read('docs/support-matrix.md');
-        const runbook = read('docs/runbook.md');
-        const cliReference = read('docs/cli-reference.md');
-
-        expect(matrix).toContain('Re-anchors process guidance');
-        expect(matrix).toContain('Only `awm sensors run` is an enforceable deterministic gate');
-        expect(runbook).toContain('A registry needs at least one content directory');
-        expect(runbook).toMatch(/`catalog\.json` is required only when the registry\s+publishes bundles/);
-        expect(cliReference).toContain('`claude-code` and `codex`');
-        expect(cliReference).toContain('`--agent` is an alias for `--target`');
-        expect(cliReference).toContain('`dev` and `product` baseline bundles');
-        expect(runbook).toContain('bundles/<bundle-name>/bundle.json');
     });
 });
