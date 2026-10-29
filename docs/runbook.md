@@ -272,14 +272,19 @@ awm registry add git@github.com:your-org/your-registry.git --no-install
 
 AWM invokes Git through a non-interactive factory: it forces
 `GIT_TERMINAL_PROMPT=0` and does not pass ambient `GIT_*` variables into the
-child (so `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`, and
-`GIT_CONFIG_*` are ignored). Prefer file-based Git settings that still reach
-the child — `~/.ssh/config` / `core.sshCommand`, `credential.helper`,
-`http.sslCAInfo` / `http.sslCAPath`, and ordinary `git config --global`
-entries. `ssh-agent` (`SSH_AUTH_SOCK`) continues to work. When an ignored
-`GIT_*` name is present, AWM prints a one-shot notice with the **names** only
-(never values) and the matching config remedy. A failed registry add is
-atomic: it does not leave a configured registry or partial clone behind.
+child (so `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_SSL_CAINFO`,
+`GIT_CONFIG_*`, and `SSH_ASKPASS` are ignored). Prefer file-based Git settings
+that still reach the child — `~/.ssh/config` / `core.sshCommand`,
+`credential.helper`, `http.sslCAInfo` / `http.sslCAPath`, and ordinary
+`git config --global` entries. `ssh-agent` (`SSH_AUTH_SOCK`) continues to work.
+When a stripped **transport/auth** name is present (`GIT_SSL_*`, `GIT_ASKPASS`,
+`GIT_SSH*`, `GIT_PROXY*`, `GIT_HTTP_*`, `GIT_CURL_*`, `GIT_CONFIG*`, `SSH_ASKPASS`),
+AWM prints a one-shot notice with the **names** only (never values) and the
+matching config remedy — unrelated names like `GIT_EDITOR` do not warn. A failed
+`awm registry add` is atomic: it does not leave a configured registry or partial
+clone behind. On `awm update` / `awm sync`, a failed registry still exits ≠ 0
+after later stages run against healthy/usable content (so the machine is not left
+half-reconciled).
 
 ## Version pins and rollout
 
