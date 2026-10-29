@@ -1,7 +1,6 @@
 // cli/src/commands/registry/add.ts
 // Logic for `awm registry add`, separated from commander wiring (testable without prompts).
 import fs from 'fs';
-import simpleGit from 'simple-git';
 import {
     registriesDir,
     readRegistriesConfig,
@@ -11,6 +10,7 @@ import {
     contentRoots,
     REGISTRY_DIR_NAMES,
 } from '../../core/registries';
+import { createRegistryGit } from '../../core/registry-git';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { BundleDiagnosticReporter, discoverAllBundles } from '../../core/bundles';
 import { readDeclaredOrchestrators } from '../../core/orchestrators';
@@ -49,7 +49,7 @@ export async function addRegistry(remote: string, nameOverride?: string, reporte
 
     fs.mkdirSync(registriesDir(), { recursive: true });
     try {
-        await simpleGit().clone(remote, dest);
+        await createRegistryGit().clone(remote, dest);
     } catch (e) {
         fs.rmSync(dest, { recursive: true, force: true });
         return { ok: false, name, error: `Clone failed: ${e instanceof Error ? e.message : String(e)}` };

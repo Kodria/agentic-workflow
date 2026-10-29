@@ -1,8 +1,8 @@
 // src/core/registries.ts
 import fs from 'fs';
 import path from 'path';
-import simpleGit from 'simple-git';
 import { resolveBaseRemote } from './registry';
+import { createRegistryGit } from './registry-git';
 import { resolveTargetRef, machineVersionOpts, compareSemver, currentVersion, normalizePin } from './versioning';
 import { cliVersion } from './cli-version';
 import { awmHome } from './paths';
@@ -245,15 +245,15 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
             if (freshClone) {
                 fs.mkdirSync(registriesDir(), { recursive: true });
                 try {
-                    await simpleGit().clone(reg.remote, reg.contentRoot);
+                    await createRegistryGit().clone(reg.remote, reg.contentRoot);
                 } catch (e) {
                     fs.rmSync(reg.contentRoot, { recursive: true, force: true });
                     throw e;
                 }
             } else {
-                await simpleGit(reg.contentRoot).reset(['--hard']);
+                await createRegistryGit(reg.contentRoot).reset(['--hard']);
             }
-            const git = simpleGit(reg.contentRoot);
+            const git = createRegistryGit(reg.contentRoot);
             const previousVersion = freshClone ? null : await currentVersion(reg.contentRoot);
             const versionOpts = machineVersionOpts(reg.name);
             let resolved;
