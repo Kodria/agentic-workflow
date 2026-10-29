@@ -1,4 +1,5 @@
 # Issue #238 simple-git 4.x bump Implementation Plan
+<!-- awm-qa-complete: 2026-10-29 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
