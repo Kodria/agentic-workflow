@@ -39,7 +39,9 @@ describe('simple-git v4 pin (#238)', () => {
         const factory = fs.readFileSync(path.join(CLI_ROOT, FACTORY), 'utf8');
         expect(factory).toMatch(/allowEnvironment:\s*\[\s*['"]GIT_TERMINAL_PROMPT['"]\s*\]/);
         expect(factory).not.toMatch(/allowUnsafe/);
-        expect(factory).toMatch(/timeout:\s*\{\s*block:\s*60_?000\s*\}/);
+        // B1 / V1: factory must use the shared constant (not a duplicated literal).
+        expect(factory).toMatch(/timeout:\s*\{\s*block:\s*REGISTRY_GIT_TIMEOUT_MS\s*\}/);
+        expect(factory).toMatch(/export\s+const\s+REGISTRY_GIT_TIMEOUT_MS\s*=\s*60_?000\s*;/);
         // SG-3: guarded env must be applied — deleting `.env(buildRegistryGitEnv())` must fail this pin.
         expect(factory).toMatch(/\.env\(\s*buildRegistryGitEnv\(\)/);
     });

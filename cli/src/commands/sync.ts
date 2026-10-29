@@ -103,12 +103,14 @@ export async function runSyncCore(
     const selectedAgents = resolved.targets;
 
     const syncResults = await d.syncRegistries();
-    // SG-7: any sync/clone failure → non-zero (do not warn-and-continue on usable cache).
-    if (hardFailOnAnyRegistrySyncError(syncResults)) {
+    // SG-7: any sync/clone failure → non-zero exit. Keep later profile sync / link
+    // repair when usable content remains (audit A1) — aborting here left healthy
+    // registries advanced on disk without reconciling the project tree.
+    const syncHadErrors = hardFailOnAnyRegistrySyncError(syncResults);
+    if (syncHadErrors) {
         for (const e of registrySyncErrors(syncResults)) {
             console.error(pc.red(`  ✖  registry ${e.name}: ${e.error}`));
         }
-        return { code: 1, selectedAgents };
     }
 
     try {
@@ -159,7 +161,7 @@ export async function runSyncCore(
 
     if (profile.extensions.length === 0) {
         console.log(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
-        return { code: 0, selectedAgents };
+        return { code: syncHadErrors ? 1 : 0, selectedAgents };
     }
 
     const method = options.method === 'copy' ? 'copy' : 'symlink';
@@ -183,5 +185,5 @@ export async function runSyncCore(
         console.log(pc.dim(`  transaction ${id} — undo with \`awm backup restore ${id}\``));
     }
 
-    return { code: 0, selectedAgents, result };
+    return { code: syncHadErrors ? 1 : 0, selectedAgents, result };
 }

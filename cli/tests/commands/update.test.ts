@@ -193,7 +193,9 @@ describe('awm update — honest outcome', () => {
 
         expect(result.code).toBe(1);
         expect(result.registries).toEqual({ configured: 2, synced: 1, failed: ['docs'] });
-        expect(updateOutro(result)).toBe('Update failed — see errors above.');
+        expect(updateOutro(result)).toMatch(/Finished with registry sync errors/);
+        expect(updateOutro(result)).toMatch(/1\/2/);
+        expect(updateOutro(result)).toMatch(/docs/);
         expect(errSpy.mock.calls.flat().join('\n')).toMatch(/docs/);
     });
 });

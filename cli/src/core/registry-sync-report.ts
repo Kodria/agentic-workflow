@@ -4,6 +4,7 @@ import {
     type RegistrySyncResult,
 } from './registries';
 import { formatClassifiedRegistryFailure } from './registry-git-errors';
+import { esc } from './changes/text-safety';
 import { currentVersion } from './versioning';
 
 export { formatClassifiedRegistryFailure };
@@ -19,11 +20,12 @@ export type SoftSyncFailureInput = {
 /**
  * Soft path for `awm add` / `awm list` (SG-7): continue on usable cache only after
  * stating the cached version plus the classified cause/remedy.
+ * Avoids duplicating "registry X … sync failed" (audit B3); escapes the name like SG-6.
  */
 export function formatRegistrySyncSoftFailure(input: SoftSyncFailureInput): string {
     const versionLabel = input.cachedVersion ? `v${input.cachedVersion}` : 'unknown';
     return (
-        `⚠ registry ${input.name}: sync failed — continuing with cached version ${versionLabel}. `
+        `⚠ Continuing with cached version ${versionLabel} for registry ${esc(input.name)}. `
         + input.classifiedMessage
     );
 }

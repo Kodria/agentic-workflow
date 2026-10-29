@@ -11,6 +11,27 @@ export const REGISTRY_GIT_TIMEOUT_MS = 60_000;
  */
 const NON_PREFIX_GUARDED_ENV = new Set(['editor', 'pager', 'prefix', 'ssh_askpass', 'visual']);
 
+/**
+ * Ambient names that affect registry transport/auth and are stripped by the factory.
+ * SG-5 warns only for these (audit M2) — not GIT_EDITOR / GIT_PAGER / GIT_AUTHOR_*.
+ * Includes SSH_ASKPASS (audit B2), which simple-git also guards without a GIT_ prefix.
+ */
+function isTransportRelevantIgnoredEnv(key: string): boolean {
+    const lower = key.toLowerCase();
+    if (lower === 'ssh_askpass') return true;
+    if (!lower.startsWith('git_')) return false;
+    if (lower === 'git_terminal_prompt') return false;
+    return (
+        lower.startsWith('git_ssl_')
+        || lower === 'git_askpass'
+        || lower.startsWith('git_ssh')
+        || lower.startsWith('git_proxy')
+        || lower.startsWith('git_http_')
+        || lower.startsWith('git_curl_')
+        || lower.startsWith('git_config')
+    );
+}
+
 /** Copy parent env without guarded GIT_* / editor keys, then force non-interactive prompts. */
 export function buildRegistryGitEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
@@ -25,12 +46,10 @@ export function buildRegistryGitEnv(parent: NodeJS.ProcessEnv = process.env): No
     return env;
 }
 
+/** Names of stripped transport/auth vars worth warning about (SG-5) — never values. */
 export function listIgnoredGuardedGitEnvNames(parent: NodeJS.ProcessEnv = process.env): string[] {
     return Object.keys(parent)
-        .filter((key) => {
-            const lower = key.toLowerCase();
-            return lower.startsWith('git_') && lower !== 'git_terminal_prompt';
-        })
+        .filter((key) => isTransportRelevantIgnoredEnv(key))
         .sort((a, b) => a.localeCompare(b));
 }
 
@@ -38,7 +57,7 @@ export function listIgnoredGuardedGitEnvNames(parent: NodeJS.ProcessEnv = proces
 export function formatIgnoredGitEnvNotice(names: string[]): string {
     const listed = names.join(', ');
     return (
-        `⚠ Ignoring ambient GIT_* env vars: ${listed}. `
+        `⚠ Ignoring ambient transport/auth env vars: ${listed}. `
         + 'Use file-based git config instead '
         + '(e.g. git config --global http.sslCAInfo <path>, credential.helper, core.sshCommand / ~/.ssh/config).'
     );
@@ -53,7 +72,7 @@ export function resetIgnoredGitEnvNoticeForTests(): void {
 
 /**
  * Before the first network registry git op: warn once listing ignored ambient
- * GIT_* names (except GIT_TERMINAL_PROMPT) and point at file-based remedies (SG-5).
+ * transport/auth env names (except GIT_TERMINAL_PROMPT) and point at file-based remedies (SG-5).
  */
 export function warnIgnoredGitEnvOnce(
     log: (message: string) => void = (message) => console.warn(message),
@@ -70,7 +89,7 @@ export function createRegistryGit(baseDir?: string): RegistryGit {
     const git = simpleGit({
         ...(baseDir !== undefined ? { baseDir } : {}),
         allowEnvironment: ['GIT_TERMINAL_PROMPT'],
-        timeout: { block: 60_000 },
+        timeout: { block: REGISTRY_GIT_TIMEOUT_MS },
     });
     return git.env(buildRegistryGitEnv());
 }

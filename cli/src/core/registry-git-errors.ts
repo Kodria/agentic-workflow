@@ -1,3 +1,4 @@
+import { REGISTRY_GIT_TIMEOUT_MS } from './registry-git';
 import { cleanText, clipMessage, esc } from './changes/text-safety';
 
 /** Classified failure kinds for registry network git ops (SG-6). */
@@ -24,7 +25,10 @@ const REMEDIES: Record<RegistryGitErrorClass, string> = {
     ssh: 'set core.sshCommand or ~/.ssh/config (awm ignores ambient GIT_SSH_COMMAND)',
     'not-found': 'verify the remote URL and that the repository exists and is reachable',
     // simple-git `timeout.block` resets on stdout/stderr activity — idle bound, not wall-clock.
-    timeout: 'check network connectivity; registry git children are killed after 60s without stdout/stderr activity',
+    // Only the plugin's "block timeout reached" is this class (audit M1); git/curl "timed out" → network.
+    timeout:
+        `check network connectivity; registry git children are killed after ${REGISTRY_GIT_TIMEOUT_MS / 1000}s `
+        + 'without stdout/stderr activity',
 };
 
 /**
@@ -61,9 +65,9 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
     const fatalLine = extractFatalLine(message);
 
     let errorClass: RegistryGitErrorClass;
-    if (
-        /timed?\s*out|timeout|block timeout/i.test(message)
-    ) {
+    // Audit M1: only simple-git's idle-block plugin text is `timeout`. Git/curl
+    // "Connection timed out" / "timed out" are connectivity → `network`.
+    if (/block timeout reached/i.test(message)) {
         errorClass = 'timeout';
     } else if (
         /ssl|tls|certificate|unable to get local issuer|certificate verify failed/i.test(message)
@@ -76,8 +80,13 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
     ) {
         errorClass = 'not-found';
     } else if (
-        /host key verification|permission denied \(publickey\)|\bssh\b/i.test(message)
-        && !/terminal prompts disabled|authentication failed|could not read username/i.test(message)
+        /host key verification|permission denied \(publickey\)/i.test(message)
+    ) {
+        errorClass = 'ssh';
+    } else if (
+        // Remaining SSH transport wording — but DNS/timeout under ssh: belongs to network.
+        /\bssh\b/i.test(message)
+        && !/could not resolve|name or service not known|timed?\s*out|connection timed out|terminal prompts disabled|authentication failed|could not read username/i.test(message)
     ) {
         errorClass = 'ssh';
     } else if (
@@ -85,7 +94,7 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
     ) {
         errorClass = 'authentication';
     } else if (
-        /could not resolve host|failed to connect|connection refused|network is unreachable|unable to connect|proxy|name or service not known/i.test(message)
+        /could not resolve host|could not resolve hostname|failed to connect|connection refused|network is unreachable|unable to connect|proxy|name or service not known|timed?\s*out|connection timed out/i.test(message)
     ) {
         errorClass = 'network';
     } else {

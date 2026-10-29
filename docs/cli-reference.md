@@ -670,8 +670,8 @@ claim work the run did not do:
 | Situation | Exit | Closing line |
 |---|---|---|
 | Every configured registry synced | `0` | `✅ N registries, skills and hooks updated.` |
-| A registry failed but its content is still on disk | `0` | `⚠ Updated with stale content — …` naming the stale registry |
-| A registry failed and left no content on disk | `1` | the failing registry and its error |
+| A registry failed (usable content still on disk) | `1` | SG-6 error for the failed registry; later stages (context, artifacts, hooks, self-update) still run against healthy/usable content; closing line names the partial sync |
+| A registry failed and left no usable content on disk | `1` | the failing registry and its error (later stages do not run) |
 | **No registries configured** on this machine | `1` | `Nothing updated — no registries configured on this machine.` (run `awm init`) |
 | Any later stage failed (context, artifacts, hooks) | `1` | the failing stage |
 

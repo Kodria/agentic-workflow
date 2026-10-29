@@ -82,6 +82,18 @@ describe('registry-git ignored-env notice (#238 S2 / SG-5)', () => {
         expect(lines[0]).not.toContain('/secret/');
         expect(lines[0]).not.toMatch(/GIT_TERMINAL_PROMPT/);
     });
+
+    it('SG-5 lists only transport/auth names (not GIT_EDITOR) and includes SSH_ASKPASS (M2/B2)', () => {
+        const parent: NodeJS.ProcessEnv = {
+            GIT_EDITOR: 'vim',
+            GIT_PAGER: 'less',
+            GIT_ASKPASS: '/secret/askpass',
+            SSH_ASKPASS: '/secret/ssh-askpass',
+            GIT_TERMINAL_PROMPT: '0',
+        };
+        expect(listIgnoredGuardedGitEnvNames(parent)).toEqual(['GIT_ASKPASS', 'SSH_ASKPASS']);
+        expect(listIgnoredGuardedGitEnvNames(parent)).not.toContain('GIT_EDITOR');
+    });
 });
 
 describe('classifyRegistryGitError (#238 S2 / SG-6)', () => {
@@ -106,6 +118,20 @@ describe('classifyRegistryGitError (#238 S2 / SG-6)', () => {
     it('maps timeout plugin message → timeout', () => {
         const c = classifyRegistryGitError(new Error('block timeout reached (60000ms) — killing process'));
         expect(c.class).toBe('timeout');
+        expect(c.remedy).toMatch(/60s/);
+    });
+
+    it('maps git/curl Connection timed out → network, not awm idle timeout (M1)', () => {
+        const c = classifyRegistryGitError(new Error(
+            "fatal: unable to access 'https://github.com/x/y.git/': Failed to connect to github.com port 443 after 133030 ms: Connection timed out",
+        ));
+        expect(c.class).toBe('network');
+        expect(c.remedy).not.toMatch(/killed after 60s/);
+    });
+
+    it('maps ssh Could not resolve hostname → network, not ssh (M1)', () => {
+        const c = classifyRegistryGitError(new Error('ssh: Could not resolve hostname example.invalid: Name or service not known'));
+        expect(c.class).toBe('network');
     });
 
     it('maps SSH host key failures → ssh with core.sshCommand remedy', () => {

@@ -43,6 +43,8 @@ describe('registry-sync-report pure helpers (#238 S2)', () => {
         expect(soft).toMatch(/network/i);
         expect(soft).toMatch(/Could not resolve host/i);
         expect(soft).toMatch(/remedy:/);
+        // B3: soft line must not say "sync failed" twice before the classified clause.
+        expect(soft.match(/sync failed/gi)?.length ?? 0).toBe(1);
     });
 
     it('formatRegistrySyncSoftFailure uses unknown when cachedVersion is null', () => {
@@ -140,6 +142,7 @@ describe('awm sync / update hard-exit on sync error (#238 S2 / SG-7)', () => {
             JSON.stringify({ version: 1, extensions: [], agents: ['claude-code'] }),
         );
 
+        const reconcile = jest.fn(() => []);
         const { runSyncCore } = require('../../src/commands/sync');
         const result = await runSyncCore(
             { cwd: project },
@@ -150,17 +153,23 @@ describe('awm sync / update hard-exit on sync error (#238 S2 / SG-7)', () => {
                 verifyMinCliVersions: () => [],
                 verifyProjectPins: async () => [],
                 syncProfile: () => ({ extensions: [], installed: [], skipped: [], transactionIds: [] }),
-                reconcileProjectSkillLinks: () => [],
+                reconcileProjectSkillLinks: reconcile,
             },
         );
         expect(result.code).not.toBe(0);
+        // A1: later stages still run when usable content remains.
+        expect(reconcile).toHaveBeenCalled();
     });
 
     it('runUpdateCore returns code !== 0 when a registry fails even with usable on-disk content', async () => {
         writePrefs();
         seedUsableDocsRegistry();
 
-        const { runUpdateCore } = require('../../src/commands/update');
+        const regenerate = jest.fn(() => []);
+        const planReconciliation = jest.fn(() => ({ operations: [], records: [], reports: [] }));
+        const applyInstallPlan = jest.fn(() => ({ installed: [], skipped: [], transactionId: 'tx', modifiedFiles: [] }));
+        const offerSelfUpdate = jest.fn(async () => {});
+        const { runUpdateCore, updateOutro } = require('../../src/commands/update');
         const result = await runUpdateCore(
             {},
             {
@@ -168,14 +177,20 @@ describe('awm sync / update hard-exit on sync error (#238 S2 / SG-7)', () => {
                     { name: 'docs', action: 'error', error: 'network unreachable' },
                 ],
                 verifyMinCliVersions: () => [],
-                regenerateGlobalContext: () => [],
-                planReconciliation: () => ({ operations: [], records: [], reports: [] }),
-                applyInstallPlan: () => ({ installed: [], skipped: [], transactionId: 'tx', modifiedFiles: [] }),
+                regenerateGlobalContext: regenerate,
+                planReconciliation,
+                applyInstallPlan,
                 resyncInstalledHooks: () => [],
-                offerSelfUpdate: async () => {},
+                offerSelfUpdate,
             },
         );
         expect(result.code).not.toBe(0);
         expect(result.registries.failed).toEqual(['docs']);
+        // A1: pipeline continues after sync error when content is usable.
+        expect(regenerate).toHaveBeenCalled();
+        expect(planReconciliation).toHaveBeenCalled();
+        expect(applyInstallPlan).toHaveBeenCalled();
+        expect(offerSelfUpdate).toHaveBeenCalled();
+        expect(updateOutro(result)).toMatch(/Finished with registry sync errors|Update failed/i);
     });
 });
