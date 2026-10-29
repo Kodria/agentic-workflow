@@ -10,7 +10,7 @@ import os from 'os';
 import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
-import { makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
+import { cloneRepo, makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
 import { allowsUnmeasuredRelaxation, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, sensorPairs, writeReceipt, type SensorReceiptV2 } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
@@ -36,15 +36,19 @@ let root: string; let home: string;
 const gitEnv = () => ({ ...process.env, HOME: home, GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_NOSYSTEM: '1' });
 const g = (...args: string[]) => repo.git(...args);
 
-beforeEach(() => {
-    repo = makeRepo();
-    root = repo.root; home = repo.home;
+// One template repository for the whole file (it also holds HOME and AWM_HOME on a throwaway home); every test gets a copy (no git).
+let template: TestRepo;
+beforeAll(() => {
+    template = makeRepo();
     // makeRepo's own .gitignore ignores `.awm/`; these tests need a repository that does NOT (R2.2b), so the first commit is replaced.
-    repo.commit({ '.gitignore': 'node_modules\n', 'a.txt': 'a' }, 'feat: a');
+    template.commit({ '.gitignore': 'node_modules\n', 'a.txt': 'a' }, 'feat: a');
 });
+const useRepo = (from: TestRepo): void => { repo = cloneRepo(from); root = repo.root; home = repo.home; };
+beforeEach(() => useRepo(template));
 afterEach(() => repo.cleanup());
 
 afterAll(() => {
+    template.cleanup(); // restores HOME, AWM_HOME and the git config variables
     for (const k of ENV_KEYS) expect(process.env[k]).toBe(ORIGINAL[k]);
     expect(listRuns()).toEqual(RUNS_BEFORE);
 });
@@ -686,9 +690,18 @@ describe('sensors run wiring (R2.2, R2.4)', () => {
         g('add', '-A'); g('commit', '-q', '-m', `chore: manifest in ${path.basename(dir)}`);
     };
     const receiptNames = () => fs.readdirSync(receiptsDir()).sort();
+    // The template plus `commitManifest(root)`, built once: each test of this block starts from a copy of it.
+    let manifested: TestRepo | undefined;
+    afterAll(() => manifested?.cleanup());
     beforeEach(() => {
         process.exitCode = undefined;
-        commitManifest(root);
+        if (manifested === undefined) {
+            commitManifest(root);
+            manifested = repo;
+        } else {
+            repo.cleanup();
+        }
+        useRepo(manifested);
         (findManifestDir as jest.Mock).mockReset().mockImplementation((start: string) => {
             const project = resolveSensorProject(start);
             return project.state === 'configured' ? project.projectRoot : null;
