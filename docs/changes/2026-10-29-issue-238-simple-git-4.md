@@ -16,6 +16,7 @@ modules:
   - cli/src/core
   - cli/tests/commands
   - cli/tests/core
+  - cli/tests/helpers
   - cli/tests/integration
   - cli/tests/structural
   - docs
@@ -24,13 +25,13 @@ links:
   plan: docs/plans/2026-10-29-issue-238-simple-git-4-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/238
 verification:
-  commit: 8c600d32d8d55964585e302d0e8e175378cc6023
+  commit: 15b0bf264f2f323f2b587c98ca87dd92ce07de6c
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:056af3b376d08886a89557d2f5c4085422b9694f61340c0bf1c7758107921396
+  receipt_digest: sha256:db696fef7f0522795e58d0f6e3a3a55e0feae521d2c6884d1005e84e9d0972f7
 manual_validation:
   - step: Tras publicar la CLI, escanear una imagen que instale agentic-workflow-manager
     expected: Inspector/ECR ya no reporta CVE-2026-102826/102827/102828/102829 sobre simple-git / @simple-git/argv-parser
@@ -53,9 +54,9 @@ rollback: Revertir el merge del PR o pinear de nuevo simple-git@3.36.0 (reintrod
 ## Qué se probó
 
 - Suites estructurales / factory / honesty / registries-sync / registry add / versioning (PASS).
-- `awm sensors run` overall `pass` en `8c600d32` (lint, typecheck, depcheck).
+- `awm sensors run` overall `pass` en `15b0bf26` (lint, typecheck, depcheck).
 - Reviews S1/S2 + Track A PASS; Track B B1 (credenciales en URL) corregido y re-verificado.
-- CI follow-up: fixtures E2E de init (codex/copilot) ahora incluyen `.git` local para que SG-7 no hard-falle sync contra `example.invalid`; `gate-reconcile` reintenta spawn en Windows ARM como `process.test.ts`.
+- CI follow-up: helper `commitSeededRegistry` en fixtures de init reales (codex/copilot/provider-checks) para que SG-7 no hard-falle sync contra `example.invalid`; `gate-reconcile` reintenta spawn en Windows ARM; suite local completa 389/389 pass.
 
 ## Qué falta validar
 
