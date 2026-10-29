@@ -17,21 +17,47 @@ afterEach(() => expect(listReal()).toEqual(realBefore));
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 let repo: TestRepo;
 let template: TestRepo;
-beforeAll(() => { template = makeRepo(); });
-afterAll(() => template.cleanup());
+/** The template plus `buildHistory`, built once: `history()` starts a test from a copy of it (no git process). */
+let historic: TestRepo;
+beforeAll(() => {
+    template = makeRepo();
+    historic = cloneRepo(template);
+    buildHistory(historic);
+});
+afterAll(() => { historic.cleanup(); template.cleanup(); });
 beforeEach(() => { repo = cloneRepo(template); });
 afterEach(() => { jest.restoreAllMocks(); repo.cleanup(); });
 
 const FIRST = '2026-10-16-first';
+function buildHistory(into: TestRepo): void {
+    into.commit({ 'old.ts': '1' }, 'feat: before adoption', '2026-10-16T09:00:00Z');
+    into.commit({ [recordPath(FIRST)]: record(FIRST), 'a.ts': '1' }, 'feat: first (#10)', '2026-10-16T20:00:00Z');
+    into.commit({ 'b.ts': '1' }, 'fix: no record', '2026-10-16T21:00:00Z');
+    into.commit({ 'c.ts': '1' }, 'chore(release): v1.0.0 [skip ci]\n\nChange-Record: none', '2026-10-16T22:00:00Z');
+    into.commit({ [recordPath('2026-10-17-bad')]: '---\nschema: nope\n---\n' }, 'feat: bad record', '2026-10-17T01:00:00Z');
+    into.gitAt('2026-10-17T02:00:00Z', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0');
+}
+/** The repository after `buildHistory` (a copy of the prebuilt one). */
 function history(): void {
-    repo.commit({ 'old.ts': '1' }, 'feat: before adoption', '2026-10-16T09:00:00Z');
-    repo.commit({ [recordPath(FIRST)]: record(FIRST), 'a.ts': '1' }, 'feat: first (#10)', '2026-10-16T20:00:00Z');
-    repo.commit({ 'b.ts': '1' }, 'fix: no record', '2026-10-16T21:00:00Z');
-    repo.commit({ 'c.ts': '1' }, 'chore(release): v1.0.0 [skip ci]\n\nChange-Record: none', '2026-10-16T22:00:00Z');
-    repo.commit({ [recordPath('2026-10-17-bad')]: '---\nschema: nope\n---\n' }, 'feat: bad record', '2026-10-17T01:00:00Z');
-    repo.gitAt('2026-10-17T02:00:00Z', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0');
+    repo.cleanup();
+    repo = cloneRepo(historic);
 }
 const run = (opts: Record<string, unknown> = {}, deps: Record<string, unknown> = {}): CommandResult => runChangesList(repo.root, opts as never, { now, ...deps } as never);
+const sharedRuns = new Map<string, CommandResult>();
+/**
+ * `run(opts)` on the untouched prebuilt history. The command is read-only (R5.7, asserted below), so each distinct run is made once
+ * and its result shared by the tests that only read it.
+ */
+function onHistory(opts: Record<string, unknown>): CommandResult {
+    const key = JSON.stringify(Object.entries(opts).sort(([a], [b]) => a.localeCompare(b)));
+    let r = sharedRuns.get(key);
+    if (r === undefined) {
+        r = runChangesList(historic.root, opts as never, { now } as never);
+        sharedRuns.set(key, r);
+    }
+    return r;
+}
+const historyJson = () => JSON.parse(onHistory({ since: '48h', format: 'json' }).stdout);
 const json = (opts: Record<string, unknown> = {}, deps: Record<string, unknown> = {}) => JSON.parse(run({ since: '48h', format: 'json', ...opts }, deps).stdout);
 const failure = (r: CommandResult, code: string): void => {
     expect(r.code).toBe(2);
@@ -170,8 +196,7 @@ describe('awm changes list: adoption (R5.4)', () => {
 
 describe('awm changes list: classification and derived fields (R5.1, R5.3, R5.4, R5.5)', () => {
     test('classifies and derives', () => {
-        history();
-        const out = json();
+        const out = historyJson();
         const byClass = Object.fromEntries(out.changes.map((c: { subject: string; classification: string }) => [c.subject, c.classification]));
         expect(byClass).toEqual({ 'feat: first (#10)': 'recorded', 'fix: no record': 'missing', 'chore(release): v1.0.0 [skip ci]': 'exempt', 'feat: bad record': 'invalid-record' });
         const first = out.changes.find((c: { subject: string }) => c.subject === 'feat: first (#10)');
@@ -180,8 +205,7 @@ describe('awm changes list: classification and derived fields (R5.1, R5.3, R5.4,
         expect(out.repo).toBeNull();
     });
     test('pre-adoption commits are omitted', () => {
-        history();
-        expect(JSON.stringify(json())).not.toContain('before adoption');
+        expect(JSON.stringify(historyJson())).not.toContain('before adoption');
     });
     test('repo identity strips credentials', () => {
         history();
@@ -251,27 +275,23 @@ describe('awm changes list: mixed invalid commits, odd dates and shallow clones 
 
 describe('awm changes list: formats (R5.6)', () => {
     test('json is one document on one line', () => {
-        history();
-        const r = run({ since: '48h', format: 'json' });
+        const r = onHistory({ since: '48h', format: 'json' });
         expect(r.stdout.split('\n')).toHaveLength(2);
         expect(Object.keys(JSON.parse(r.stdout))).toEqual(['schema', 'repo', 'base', 'since', 'adopted', 'truncated', 'omitted', 'changes']);
         expect(JSON.parse(r.stdout).adopted).toBe(true);
     });
     test('voice speaks recorded changes and counts the rest', () => {
-        history();
-        const r = run({ since: '48h', format: 'voice' });
+        const r = onHistory({ since: '48h', format: 'voice' });
         expect(r.stdout).toContain('Primer cambio. feat, verificado, 2 validaciones manuales pendientes.');
         expect(r.stdout).toMatch(/1 cambio\(s\) sin record y 1 con record inválido/);
     });
     test('text is a table with the classification of each change', () => {
-        history();
-        const out = run({ since: '48h' }).stdout;
+        const out = onHistory({ since: '48h' }).stdout;
         for (const word of ['recorded', 'missing', 'exempt', 'invalid-record', 'v1.0.0', '#10']) expect(out).toContain(word);
         expect(out.split('\n')[0]).toMatch(/^WHEN\s+CLASSIFICATION/);
     });
     test('text is the default format', () => {
-        history();
-        expect(run({ since: '48h' }).stdout).toBe(run({ since: '48h', format: 'text' }).stdout);
+        expect(onHistory({ since: '48h' }).stdout).toBe(onHistory({ since: '48h', format: 'text' }).stdout);
     });
     test('an empty window says so in text', () => {
         history();
@@ -287,8 +307,7 @@ describe('awm changes list: formats (R5.6)', () => {
         expect(run({ since: '48h', format: 'voice' }, deps).stdout).toMatch(/Hay 2 cambio\(s\) más antiguo\(s\) sin mostrar/);
     });
     test('no format prints anything on stderr when it succeeds', () => {
-        history();
-        for (const format of ['text', 'json', 'voice']) expect(run({ since: '48h', format }).stderr).toBe('');
+        for (const format of ['text', 'json', 'voice']) expect(onHistory({ since: '48h', format }).stderr).toBe('');
     });
 });
 
