@@ -21,8 +21,9 @@ import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import {
     syncRegistries, verifyMinCliVersions, assertRegistryGates, contentRoots, capabilityRoot,
-    assertSyncedRegistriesUsable, RegistrySyncResult,
+    assertSyncedRegistriesUsable, registrySyncErrors, RegistrySyncResult,
 } from '../core/registries';
+import { hardFailOnAnyRegistrySyncError } from '../core/registry-sync-report';
 import { awmHome } from '../core/paths';
 import { regenerateGlobalContext, RegenResult } from '../core/context/regenerate';
 import { planReconciliation } from '../core/reconciliation';
@@ -137,8 +138,10 @@ export async function runUpdateCore(
 
     const registryResults = await d.syncRegistries();
     for (const r of registryResults) {
-        if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-        else if (r.disposition === 'regressed') {
+        if (r.action === 'error') {
+            // Printed below as a hard SG-7 failure — skip the stale warn path.
+            continue;
+        } else if (r.disposition === 'regressed') {
             const latest = r.availableVersion && r.availableVersion !== r.version
                 ? ` Latest available: ${r.availableVersion}.`
                 : '';
@@ -178,11 +181,14 @@ export async function runUpdateCore(
         return { code: 1, selectedAgents, registries };
     }
 
-    // Falla CERRADO solo cuando el registry quedó sin contenido en disco: ahí lo que sigue
-    // leería un árbol inexistente y el fallo reaparecería más tarde, disfrazado de otra
-    // etapa. Un registry que falló pero conserva su contenido queda stale, no roto — se
-    // sigue (doctrina de `unusableSyncedRegistries`: un registry secundario flaky nunca
-    // aborta la corrida) y el cierre lo nombra en vez de declarar éxito parejo.
+    // SG-7: any sync/clone failure → non-zero with classified message (no stale continue).
+    if (hardFailOnAnyRegistrySyncError(registryResults)) {
+        for (const e of registrySyncErrors(registryResults)) {
+            console.error(pc.red(`  ✖  registry ${e.name}: ${e.error}`));
+        }
+        return { code: 1, selectedAgents, registries };
+    }
+
     try {
         assertSyncedRegistriesUsable(registryResults);
     } catch (e) {

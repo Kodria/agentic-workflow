@@ -168,16 +168,11 @@ export async function stepCache(d: InitDeps): Promise<StepResult> {
     }
 
     // `syncRegistries()` reports per-registry failures as RESULTS, not throws
-    // (registries.ts), so the `try` above catches none of them. Ignoring them
-    // is what let an unavailable base registry degrade silently into some
-    // later step's failure — with its own cause already gone.
+    // (registries.ts), so the `try` above catches none of them. SG-7: init must
+    // fail closed on ANY sync/clone failure (usable on-disk cache is not enough).
     const errors = registrySyncErrors(results);
     if (errors.length === 0) return ok('machine.cache', 'machine', 'applied');
 
-    // A registry that errored and has no content on disk is unusable, and every
-    // later step that reads it will fail for a reason that no longer names this
-    // cause — so machine.cache owns it here. One that errored but still has
-    // content is stale, not broken: record it and carry on.
     const unusable = unusableSyncedRegistries(results);
     if (unusable.length > 0) {
         return failed(
@@ -185,7 +180,10 @@ export async function stepCache(d: InitDeps): Promise<StepResult> {
             `registry unavailable — ${describeRegistrySyncErrors(unusable)}`,
         );
     }
-    return ok('machine.cache', 'machine', 'applied', `stale registries — ${describeRegistrySyncErrors(errors)}`);
+    return failed(
+        'machine.cache', 'machine',
+        `registry sync failed — ${describeRegistrySyncErrors(errors)}`,
+    );
 }
 
 /** Step 2 – Install the session-start hook for the target agent. */

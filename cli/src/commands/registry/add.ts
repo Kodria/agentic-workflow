@@ -10,7 +10,8 @@ import {
     contentRoots,
     REGISTRY_DIR_NAMES,
 } from '../../core/registries';
-import { createRegistryGit } from '../../core/registry-git';
+import { createRegistryGit, warnIgnoredGitEnvOnce } from '../../core/registry-git';
+import { formatClassifiedRegistryFailure } from '../../core/registry-git-errors';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { BundleDiagnosticReporter, discoverAllBundles } from '../../core/bundles';
 import { readDeclaredOrchestrators } from '../../core/orchestrators';
@@ -48,11 +49,16 @@ export async function addRegistry(remote: string, nameOverride?: string, reporte
     }
 
     fs.mkdirSync(registriesDir(), { recursive: true });
+    warnIgnoredGitEnvOnce();
     try {
         await createRegistryGit().clone(remote, dest);
     } catch (e) {
         fs.rmSync(dest, { recursive: true, force: true });
-        return { ok: false, name, error: `Clone failed: ${e instanceof Error ? e.message : String(e)}` };
+        return {
+            ok: false,
+            name,
+            error: `Clone failed: ${formatClassifiedRegistryFailure({ name, remote, err: e })}`,
+        };
     }
 
     if (!validateRegistryLayout(dest)) {

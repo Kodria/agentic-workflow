@@ -34,6 +34,38 @@ export function listIgnoredGuardedGitEnvNames(parent: NodeJS.ProcessEnv = proces
         .sort((a, b) => a.localeCompare(b));
 }
 
+/** Operator notice for SG-5 — names only, never values. */
+export function formatIgnoredGitEnvNotice(names: string[]): string {
+    const listed = names.join(', ');
+    return (
+        `⚠ Ignoring ambient GIT_* env vars: ${listed}. `
+        + 'Use file-based git config instead '
+        + '(e.g. git config --global http.sslCAInfo <path>, credential.helper, core.sshCommand / ~/.ssh/config).'
+    );
+}
+
+let ignoredGitEnvWarned = false;
+
+/** Test seam: clear the once-per-process SG-5 flag. */
+export function resetIgnoredGitEnvNoticeForTests(): void {
+    ignoredGitEnvWarned = false;
+}
+
+/**
+ * Before the first network registry git op: warn once listing ignored ambient
+ * GIT_* names (except GIT_TERMINAL_PROMPT) and point at file-based remedies (SG-5).
+ */
+export function warnIgnoredGitEnvOnce(
+    log: (message: string) => void = (message) => console.warn(message),
+    parent: NodeJS.ProcessEnv = process.env,
+): void {
+    if (ignoredGitEnvWarned) return;
+    const names = listIgnoredGuardedGitEnvNames(parent);
+    if (names.length === 0) return;
+    ignoredGitEnvWarned = true;
+    log(formatIgnoredGitEnvNotice(names));
+}
+
 export function createRegistryGit(baseDir?: string): RegistryGit {
     const git = simpleGit({
         ...(baseDir !== undefined ? { baseDir } : {}),

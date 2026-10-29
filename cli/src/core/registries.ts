@@ -2,7 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 import { resolveBaseRemote } from './registry';
-import { createRegistryGit } from './registry-git';
+import { createRegistryGit, warnIgnoredGitEnvOnce } from './registry-git';
+import { formatClassifiedRegistryFailure } from './registry-git-errors';
 import { resolveTargetRef, machineVersionOpts, compareSemver, currentVersion, normalizePin } from './versioning';
 import { cliVersion } from './cli-version';
 import { awmHome } from './paths';
@@ -233,8 +234,10 @@ export type RegistrySyncResult =
     | { name: string; action: 'error'; error: string };
 
 /** Sincroniza cada registry configurado al ref resuelto (pin > último tag > HEAD);
- *  re-clona si falta el dir. Errores por-registry NO fatales: se reportan en el resultado. */
+ *  re-clona si falta el dir. Errores por-registry se reportan en el resultado (clasificados SG-6);
+ *  si el llamador debe abortar lo decide la política SG-7 del comando. */
 export async function syncRegistries(): Promise<RegistrySyncResult[]> {
+    warnIgnoredGitEnvOnce();
     const results: RegistrySyncResult[] = [];
     for (const reg of listRegistries()) {
         try {
@@ -286,7 +289,11 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
                 ...(resolved.kind === 'tag' ? { availableVersion: `v${resolved.latestVersion}` } : {}),
             });
         } catch (e) {
-            results.push({ name: reg.name, action: 'error', error: e instanceof Error ? e.message : String(e) });
+            results.push({
+                name: reg.name,
+                action: 'error',
+                error: formatClassifiedRegistryFailure({ name: reg.name, remote: reg.remote, err: e }),
+            });
         }
     }
     return results;

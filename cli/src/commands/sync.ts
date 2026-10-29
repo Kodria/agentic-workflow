@@ -14,8 +14,10 @@ import { AgentTarget } from '../providers';
 import { noteWindowsCaveat } from '../core/paths';
 import { findProjectRoot, readProfile } from '../core/profile';
 import {
-    syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, assertSyncedRegistriesUsable, RegistrySyncResult,
+    syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, assertSyncedRegistriesUsable,
+    registrySyncErrors, RegistrySyncResult,
 } from '../core/registries';
+import { hardFailOnAnyRegistrySyncError } from '../core/registry-sync-report';
 import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-install';
 import { verifyProjectPins, PinFailure } from '../core/profile-pins';
@@ -101,8 +103,12 @@ export async function runSyncCore(
     const selectedAgents = resolved.targets;
 
     const syncResults = await d.syncRegistries();
-    for (const r of syncResults) {
-        if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+    // SG-7: any sync/clone failure → non-zero (do not warn-and-continue on usable cache).
+    if (hardFailOnAnyRegistrySyncError(syncResults)) {
+        for (const e of registrySyncErrors(syncResults)) {
+            console.error(pc.red(`  ✖  registry ${e.name}: ${e.error}`));
+        }
+        return { code: 1, selectedAgents };
     }
 
     try {
