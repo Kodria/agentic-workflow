@@ -6,23 +6,25 @@ import type { RegistrySyncResult } from '../../src/core/registries';
 import {
     formatClassifiedRegistryFailure,
     formatRegistrySyncSoftFailure,
+    formatSoftRegistrySyncFailures,
     hardFailOnAnyRegistrySyncError,
 } from '../../src/core/registry-sync-report';
 
 describe('registry-sync-report pure helpers (#238 S2)', () => {
-    it('formatClassifiedRegistryFailure includes name, remote, class, fatal, remedy — never env values', () => {
+    it('formatClassifiedRegistryFailure includes name, remote, class, fatal, remedy — never URL userinfo', () => {
+        const token = 'ghp_TESTSECRET_DO_NOT_ECHO';
         const text = formatClassifiedRegistryFailure({
             name: 'baseline',
-            remote: 'https://example.test/baseline.git',
-            err: new Error('fatal: could not read Username: terminal prompts disabled'),
+            remote: `https://${token}@example.test/baseline.git`,
+            err: new Error(`fatal: could not read Username for 'https://${token}@example.test': terminal prompts disabled`),
         });
         expect(text).toContain('baseline');
-        expect(text).toContain('https://example.test/baseline.git');
+        expect(text).toContain('example.test/baseline.git');
         expect(text).toMatch(/authentication/i);
         expect(text).toMatch(/terminal prompts disabled/i);
         expect(text).toMatch(/credential\.helper/);
-        expect(text).not.toContain('/secret/');
-        expect(text).not.toMatch(/GIT_ASKPASS\s*=/);
+        expect(text).not.toContain(token);
+        expect(text).not.toMatch(/ghp_/);
     });
 
     it('formatRegistrySyncSoftFailure states cached version plus SG-6 cause/remedy', () => {
@@ -40,6 +42,16 @@ describe('registry-sync-report pure helpers (#238 S2)', () => {
         expect(soft).toContain('docs');
         expect(soft).toMatch(/network/i);
         expect(soft).toMatch(/Could not resolve host/i);
+        expect(soft).toMatch(/remedy:/);
+    });
+
+    it('formatRegistrySyncSoftFailure uses unknown when cachedVersion is null', () => {
+        const soft = formatRegistrySyncSoftFailure({
+            name: 'docs',
+            cachedVersion: null,
+            classifiedMessage: 'registry docs sync failed (class=network); remedy: check connectivity',
+        });
+        expect(soft).toMatch(/cached version unknown/i);
     });
 
     it('hardFailOnAnyRegistrySyncError is true when any result is action:error', () => {
@@ -50,6 +62,23 @@ describe('registry-sync-report pure helpers (#238 S2)', () => {
         ];
         expect(hardFailOnAnyRegistrySyncError(ok)).toBe(false);
         expect(hardFailOnAnyRegistrySyncError(mixed)).toBe(true);
+    });
+
+    it('formatSoftRegistrySyncFailures emits only usable errored registries with cached version', async () => {
+        const results: RegistrySyncResult[] = [
+            { name: 'ok', action: 'pulled', version: 'v1.0.0' },
+            { name: 'stale', action: 'error', error: 'registry stale sync failed (class=network); remedy: check connectivity' },
+            { name: 'gone', action: 'error', error: 'registry gone sync failed (class=not-found); remedy: verify the remote URL' },
+        ];
+        const lines = await formatSoftRegistrySyncFailures(results, {
+            isUsable: (name) => name === 'stale',
+            cachedVersion: (name) => (name === 'stale' ? '2.0.0' : null),
+        });
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatch(/stale/);
+        expect(lines[0]).toMatch(/cached version v2\.0\.0/i);
+        expect(lines[0]).toMatch(/class=network/);
+        expect(lines.join('\n')).not.toMatch(/\bgone\b/);
     });
 });
 

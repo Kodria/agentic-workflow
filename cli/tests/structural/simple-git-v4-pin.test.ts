@@ -40,5 +40,7 @@ describe('simple-git v4 pin (#238)', () => {
         expect(factory).toMatch(/allowEnvironment:\s*\[\s*['"]GIT_TERMINAL_PROMPT['"]\s*\]/);
         expect(factory).not.toMatch(/allowUnsafe/);
         expect(factory).toMatch(/timeout:\s*\{\s*block:\s*60_?000\s*\}/);
+        // SG-3: guarded env must be applied — deleting `.env(buildRegistryGitEnv())` must fail this pin.
+        expect(factory).toMatch(/\.env\(\s*buildRegistryGitEnv\(\)/);
     });
 });

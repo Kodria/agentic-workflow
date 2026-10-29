@@ -1,3 +1,5 @@
+import { cleanText, clipMessage, esc } from './changes/text-safety';
+
 /** Classified failure kinds for registry network git ops (SG-6). */
 export type RegistryGitErrorClass =
     | 'authentication'
@@ -21,8 +23,20 @@ const REMEDIES: Record<RegistryGitErrorClass, string> = {
     network: 'check connectivity / proxy via git config --global http.proxy (awm does not pass ambient GIT_* proxy vars)',
     ssh: 'set core.sshCommand or ~/.ssh/config (awm ignores ambient GIT_SSH_COMMAND)',
     'not-found': 'verify the remote URL and that the repository exists and is reachable',
-    timeout: 'check network connectivity; registry git operations time out after 60s',
+    // simple-git `timeout.block` resets on stdout/stderr activity — idle bound, not wall-clock.
+    timeout: 'check network connectivity; registry git children are killed after 60s without stdout/stderr activity',
 };
+
+/**
+ * Strip credential-bearing userinfo from a remote URL (or URL-shaped substring) before
+ * echoing it to operators. HTTPS `user:token@host` / `user@host` → scheme://host… only.
+ * Does not JSON-escape or clip — callers run `cleanText`/`clipMessage`/`esc` for echo safety.
+ */
+export function redactRemoteForDisplay(remote: string): string {
+    if (typeof remote !== 'string' || !remote) return '';
+    // https://user:pass@host/... or https://user@host/...
+    return remote.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, '$1');
+}
 
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -79,16 +93,17 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
         errorClass = 'network';
     }
 
+    const rawFatal = fatalLine ?? (message.trim() ? message.trim().split(/\r?\n/).pop()!.slice(0, 240) : null);
     return {
         class: errorClass,
-        fatalLine: fatalLine ?? (message.trim() ? message.trim().split(/\r?\n/).pop()!.slice(0, 240) : null),
+        fatalLine: rawFatal === null ? null : redactRemoteForDisplay(rawFatal),
         remedy: REMEDIES[errorClass],
     };
 }
 
 /**
  * Operator-facing SG-6 line: registry name, remote when known, class, fatal, remedy.
- * Never includes ambient env values.
+ * Never includes ambient env values or URL userinfo credentials.
  */
 export function formatClassifiedRegistryFailure(opts: {
     name: string;
@@ -96,12 +111,14 @@ export function formatClassifiedRegistryFailure(opts: {
     err: unknown;
 }): string {
     const classified = classifyRegistryGitError(opts.err);
-    const remotePart = opts.remote ? `; remote=${opts.remote}` : '';
+    const remotePart = opts.remote
+        ? `; remote=${clipMessage(cleanText(redactRemoteForDisplay(opts.remote)))}`
+        : '';
     const fatalPart = classified.fatalLine
-        ? `; fatal: ${classified.fatalLine.replace(/^fatal:\s*/i, '')}`
+        ? `; fatal: ${clipMessage(cleanText(classified.fatalLine.replace(/^fatal:\s*/i, '')))}`
         : '';
     return (
-        `registry ${opts.name} sync failed (class=${classified.class}${remotePart}${fatalPart}); `
+        `registry ${esc(opts.name)} sync failed (class=${classified.class}${remotePart}${fatalPart}); `
         + `remedy: ${classified.remedy}`
     );
 }

@@ -9,7 +9,7 @@ import {
     resetIgnoredGitEnvNoticeForTests,
     warnIgnoredGitEnvOnce,
 } from '../../src/core/registry-git';
-import { classifyRegistryGitError } from '../../src/core/registry-git-errors';
+import { classifyRegistryGitError, formatClassifiedRegistryFailure } from '../../src/core/registry-git-errors';
 
 describe('registry-git factory (#238 S1)', () => {
     it('buildRegistryGitEnv drops guarded GIT_* keys, keeps PATH, forces GIT_TERMINAL_PROMPT=0', () => {
@@ -126,5 +126,27 @@ describe('classifyRegistryGitError (#238 S2 / SG-6)', () => {
         ));
         expect(c.class).toBe('not-found');
         expect(c.class).not.toBe('ssh');
+    });
+
+    it('maps unknown transport wording → network (default)', () => {
+        const c = classifyRegistryGitError(new Error('something unexpected happened in git'));
+        expect(c.class).toBe('network');
+    });
+});
+
+describe('formatClassifiedRegistryFailure redacts URL credentials (#238 QA B1)', () => {
+    it('strips https userinfo from remote= and fatal lines', () => {
+        const token = 'ghp_SECRETTOKEN1234567890';
+        const remote = `https://${token}@github.com/org/private-reg.git`;
+        const msg = formatClassifiedRegistryFailure({
+            name: 'corp',
+            remote,
+            err: new Error(`fatal: repository '${remote}' not found`),
+        });
+        expect(msg).toContain('github.com/org/private-reg.git');
+        expect(msg).not.toContain(token);
+        expect(msg).not.toMatch(/ghp_/);
+        expect(msg).toMatch(/class=not-found/);
+        expect(msg).toMatch(/remedy:/);
     });
 });
