@@ -1,3 +1,8 @@
+## v9.22.1 - 2026-10-29
+
+### Fixes
+- **deps:** upgrade simple-git to 4.0.2 for CVE remediation (#238) (#239)
+
 ## v9.22.0 - 2026-10-28
 
 ### Features
