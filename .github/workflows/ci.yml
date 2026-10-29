@@ -110,15 +110,15 @@ jobs:
         run: git diff --exit-code -- docs/support-matrix.md
 
       - name: Test
-        if: matrix.target != 'win32-arm64'
+        if: ${{ !startsWith(matrix.target, 'win32-') }}
         working-directory: cli
         run: npx jest --runInBand --bail
 
-      # The ARM runner's slow suites run in two separate jobs (watch track-finalize/freeze, and the Change Record suites). Keep runInBand within each job; no test file may run twice or be dropped.
-      - name: Test (Windows ARM remainder)
-        if: matrix.target == 'win32-arm64'
+      # On both Windows runners the git-heavy suites run in the windows-shards job (watch, core Change Record, Change Record commands). Keep runInBand within each job; no test file may run twice or be dropped.
+      - name: Test (Windows remainder)
+        if: startsWith(matrix.target, 'win32-')
         working-directory: cli
-        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$|[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]|[/\\]cli[/\\]tests[/\\]core[/\\]changes[/\\]|[/\\]cli[/\\]tests[/\\]commands[/\\]changes?[/\\]'
 
       # This is intentionally a second consumer boundary: the regular suite
       # executes this checkout, while this gate invokes the npm tarball that a
@@ -151,8 +151,22 @@ jobs:
         working-directory: cli
         run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand
 
-  windows-arm-hot:
-    runs-on: windows-11-arm
+  # Windows spawns processes about 3x slower than Linux, so its git-heavy suites run as parallel shards on
+  # BOTH Windows runners while the matrix `test` job runs the Windows remainder. The matrix job stays the
+  # sole producer of each native artifact.
+  windows-shards:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-11-arm]
+        shard:
+          - name: watch
+            pattern: '[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]'
+          - name: changes-core
+            pattern: '[/\\]cli[/\\]tests[/\\]core[/\\]changes[/\\]'
+          - name: changes-commands
+            pattern: '[/\\]cli[/\\]tests[/\\]commands[/\\]changes?[/\\]'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -172,31 +186,6 @@ jobs:
         working-directory: cli
         run: npm run native:test-build
 
-      - name: Test hot Windows ARM suites
+      - name: Test Windows shard
         working-directory: cli
-        run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail
-
-  windows-arm-changes:
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install
-        working-directory: cli
-        run: npm ci
-
-      - name: Build
-        working-directory: cli
-        run: npm run native:build && npm run build
-
-      - name: Build test-only native addon
-        working-directory: cli
-        run: npm run native:test-build
-
-      - name: Test Change Record Windows ARM suites
-        working-directory: cli
-        run: npx jest --runInBand --bail --testPathPatterns='[/\\]cli[/\\]tests[/\\](core[/\\]changes|commands[/\\]changes?)[/\\]'
+        run: npx jest --runInBand --bail --testPathPatterns='${{ matrix.shard.pattern }}'
