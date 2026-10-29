@@ -7,11 +7,11 @@ import { cloneRepo, importCommits, makeRepo, nonRepoDir, posixOnly, type TestRep
 import { registerChangeCommand, runChangeNew, type NewOpts } from '../../../src/commands/change';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import * as ledgerStore from '../../../src/core/ledger/store';
-import { buildReceipt, writeReceipt } from '../../../src/core/changes/receipt';
+import { buildReceipt, writeReceipt, type SensorReceipt } from '../../../src/core/changes/receipt';
 import { loadFrontmatter, splitRecord } from '../../../src/core/changes/parse';
 import * as renderModule from '../../../src/core/changes/render';
 import { validateRecordShape } from '../../../src/core/changes/validate-shape';
-import { PENDING_MARKER, type Verification } from '../../../src/core/changes/types';
+import { MAX_RECORD_BYTES, PENDING_MARKER, type DerivedFields, type Verification } from '../../../src/core/changes/types';
 import type { CommandResult } from '../../../src/core/command-result';
 
 const REAL_CHANGES_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'docs', 'changes');
@@ -53,6 +53,35 @@ function sharedRepo(): void {
     beforeAll(() => { newRepo(); receiptForHead(); });
     afterAll(() => repo.cleanup());
 }
+/**
+ * Prebuilt states: each is built once, lazily, in its own clone of the template (the git work happens there once), and every test
+ * that starts from it gets a private file copy (no git process) that it may change freely. `build` returns what the test needs
+ * of how the state was made (a command result, a text), handed back on every use.
+ */
+const fixtures = new Map<string, { state: TestRepo; value: unknown }>();
+afterAll(() => { for (const f of fixtures.values()) f.state.cleanup(); });
+function fromFixture<T>(key: string, build: () => T): T {
+    let built = fixtures.get(key);
+    if (built === undefined) {
+        const own = repo;
+        repo = cloneRepo(template);
+        try {
+            built = { state: repo, value: build() };
+            fixtures.set(key, built);
+        } catch (error) {
+            repo.cleanup();
+            throw error;
+        } finally {
+            repo = own;
+        }
+    }
+    repo.cleanup();
+    repo = cloneRepo(built.state);
+    return built.value as T;
+}
+/** The repository after `receiptForHead()` and `run('change-record')` (the record is created, not committed): that run's result. */
+const created = (): CommandResult => fromFixture('created', () => { receiptForHead(); return run('change-record'); });
+
 // The command writes only into the throwaway repository: the real checkout is never touched.
 afterEach(() => expect(listReal()).toEqual(realBefore));
 afterAll(() => expect(listReal()).toEqual(realBefore));
@@ -140,20 +169,17 @@ describe('awm change new: receipt and clean tree (R3.6)', () => {
 describe('awm change new: skeleton (R3.7, R3.9)', () => {
     freshRepo();
     test('prints the created path and writes exactly that file', () => {
-        receiptForHead();
-        const r = run('change-record');
+        const r = created();
         expect(r).toEqual({ code: 0, stdout: 'Created docs/changes/2026-10-17-change-record.md\n', stderr: '' });
         expect(recordFiles()).toEqual(['2026-10-17-change-record.md']);
     });
     test('derives type, scope, semver, breaking and modules from the branch commits', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const fm = frontmatter(read());
         expect(fm).toMatchObject({ schema: 'awm.change-record/v1', id: '2026-10-17-change-record', type: 'feat', scope: 'changes', semver: 'minor', breaking: false, modules: ['cli/src'] });
     });
     test('copies commit, overall, sensors and the digest of the receipt into verification', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const expected: Verification = {
             commit: repo.git('rev-parse', 'HEAD'),
             overall: 'pass',
@@ -170,8 +196,7 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
         expect((frontmatter(read()).verification as Verification).receipt_digest).toBe(digest);
     });
     test('every narrative field and every body section carries the pending marker', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const text = read();
         const fm = frontmatter(text);
         expect(fm.title).toBe(PENDING_MARKER);
@@ -184,8 +209,7 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
         }
     });
     test('the skeleton fails validation only because of its pending markers', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const { diagnostics } = validateRecordShape('2026-10-17-change-record.md', read(), { root: repo.root });
         expect(diagnostics.map((d) => d.code)).toEqual(['pending-content']);
     });
@@ -205,13 +229,11 @@ describe('awm change new: skeleton (R3.7, R3.9)', () => {
         expect(frontmatter(read()).links).toEqual({ plan: 'docs/plans/p.md', issue: 'https://github.com/o/r/issues/217' });
     });
     test('without --plan and --issue there is no links key', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         expect(frontmatter(read())).not.toHaveProperty('links');
     });
     test('the record ends with a newline and uses LF only', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const text = read();
         expect(text.endsWith('\n')).toBe(true);
         expect(text).not.toContain('\r');
@@ -271,8 +293,20 @@ describe('awm change new: the 65536-byte boundary of the record (R3.4, R1.8)', (
         ...Array.from({ length: fillers }, (_, i) => ({ name: `f${String(i).padStart(4, '0')}${'x'.repeat(95)}`, status: 'pass' as const, errors: [] })),
         { name: `v${'x'.repeat(variable - 1)}`, status: 'pass' as const, errors: [] },
     ];
-    const setReceipt = (fillers: number, variable: number): void => {
-        writeReceipt(repo.root, buildReceipt({ commit: repo.git('rev-parse', 'HEAD'), ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors: sensorList(fillers, variable) } as never }));
+    /** The receipt for HEAD of (fillers, variable), not written. */
+    const receiptOf = (head: string, fillers: number, variable: number): SensorReceipt =>
+        buildReceipt({ commit: head, ranAt: RECEIPT_TIME, cliVersion: '9.20.0', output: { overall: 'pass', sensors: sensorList(fillers, variable) } as never });
+    const setReceipt = (fillers: number, variable: number): void => { writeReceipt(repo.root, receiptOf(repo.git('rev-parse', 'HEAD'), fillers, variable)); };
+    /** The verification block the command copies from a receipt. */
+    const verificationOf = (r: SensorReceipt): Verification => ({ commit: r.commit, overall: r.overall, sensors: r.sensors, receipt_digest: r.digest });
+    /** The derived fields a record states. */
+    const fieldsOf = (text: string): DerivedFields => {
+        const fm = frontmatter(text);
+        return { type: fm.type, scope: fm.scope, semver: fm.semver, breaking: fm.breaking, modules: fm.modules } as DerivedFields;
+    };
+    const bytesOf = (text: string | null): number => {
+        if (text === null) throw new Error('the record could not be rendered');
+        return Buffer.byteLength(text, 'utf8');
     };
     /** Largest n in [lo, hi] for which `fits(n)` holds, `fits` being true up to a point and false after it. */
     const largest = (lo: number, hi: number, fits: (n: number) => boolean): number => {
@@ -280,12 +314,17 @@ describe('awm change new: the 65536-byte boundary of the record (R3.4, R1.8)', (
         while (a < b) { const mid = Math.ceil((a + b) / 2); if (fits(mid)) a = mid; else b = mid - 1; }
         return a;
     };
-    /** Runs `attempt` for a receipt of (fillers, variable); `bytes` is the size of the file it wrote, null when it failed as too large. */
-    function findBoundary(attempt: () => { bytes: number | null }): { fillers: number; variable: number; atLimit: number | null; oneMore: number | null } {
-        const fits = (fillers: number, variable: number): number | null => { setReceipt(fillers, variable); return attempt().bytes; };
-        const fillers = largest(0, 700, (k) => fits(k, 1) !== null);
-        const variable = largest(1, 128, (l) => fits(fillers, l) !== null);
-        return { fillers, variable, atLimit: fits(fillers, variable), oneMore: variable < 128 ? fits(fillers, variable + 1) : -1 };
+    /**
+     * The receipt (fillers, variable) whose record is exactly at the limit is searched with `predict` (the size of the record the
+     * command would write for it: the pure renderer the command writes with, no git), then the command itself is run on that receipt
+     * and on the one a byte larger: `attempt` reports the size of the file it wrote, null when it failed as too large.
+     */
+    function findBoundary(predict: (fillers: number, variable: number) => number, attempt: () => { bytes: number | null }): { fillers: number; variable: number; atLimit: number | null; oneMore: number | null } {
+        const fits = (fillers: number, variable: number): boolean => predict(fillers, variable) <= MAX_RECORD_BYTES;
+        const fillers = largest(0, 700, (k) => fits(k, 1));
+        const variable = largest(1, 128, (l) => fits(fillers, l));
+        const real = (f: number, v: number): number | null => { setReceipt(f, v); return attempt().bytes; };
+        return { fillers, variable, atLimit: real(fillers, variable), oneMore: variable < 128 ? real(fillers, variable + 1) : -1 };
     }
     test('change new: a record of exactly 65536 bytes is written, one of 65537 is record-too-large', () => {
         const attempt = (): { bytes: number | null } => {
@@ -294,7 +333,15 @@ describe('awm change new: the 65536-byte boundary of the record (R3.4, R1.8)', (
             expect(r.stderr).toContain('record-too-large');
             return { bytes: null };
         };
-        const found = findBoundary(attempt);
+        const head = repo.git('rev-parse', 'HEAD');
+        setReceipt(0, 1);
+        expect(run('change-record').code).toBe(0);
+        const fields = fieldsOf(read());
+        const predict = (f: number, v: number): number => bytesOf(renderModule.renderSkeleton({ id: '2026-10-17-change-record', fields, verification: verificationOf(receiptOf(head, f, v)), links: {}, provenance: {} }));
+        // The prediction is the command's own output: the record it just wrote, byte for byte.
+        expect(read()).toBe(renderModule.renderSkeleton({ id: '2026-10-17-change-record', fields, verification: verificationOf(receiptOf(head, 0, 1)), links: {}, provenance: {} }));
+        fs.rmSync(file());
+        const found = findBoundary(predict, attempt);
         expect(found.variable).toBeLessThan(128);
         expect(found.atLimit).toBe(65536);
         expect(found.oneMore).toBeNull();
@@ -311,7 +358,16 @@ describe('awm change new: the 65536-byte boundary of the record (R3.4, R1.8)', (
             expect(read()).toBe(original);
             return { bytes: null };
         };
-        const found = findBoundary(attempt);
+        const head = repo.git('rev-parse', 'HEAD');
+        setReceipt(0, 1);
+        expect(run('change-record', { refresh: true }).code).toBe(0);
+        const refreshed = read();
+        const fields = fieldsOf(refreshed);
+        fs.writeFileSync(file(), original);
+        const predict = (f: number, v: number): number => bytesOf(renderModule.refreshDerived(original, fields, verificationOf(receiptOf(head, f, v))));
+        // The prediction is the command's own output: the record it just refreshed, byte for byte.
+        expect(renderModule.refreshDerived(original, fields, verificationOf(receiptOf(head, 0, 1)))).toBe(refreshed);
+        const found = findBoundary(predict, attempt);
         expect(found.variable).toBeLessThan(128);
         expect(found.atLimit).toBe(65536);
         expect(found.oneMore).toBeNull();
@@ -334,8 +390,7 @@ describe('awm change new: HEAD moving while the command runs', () => {
         expect(recordFiles()).toEqual([]);
     });
     test('a HEAD that moves before a refresh is written is head-moved and the record is untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
         receiptForHead();
         const before = read();
@@ -404,8 +459,7 @@ describe('awm change new: provenance (R3.8)', () => {
         return r.state;
     }
     test('omits the provenance key entirely when no source exists', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         expect(frontmatter(read())).not.toHaveProperty('provenance');
     });
     test('model and session come only from flags', () => {
@@ -468,23 +522,20 @@ describe('awm change new: provenance (R3.8)', () => {
 describe('awm change new: no overwrite (R3.10)', () => {
     freshRepo();
     test('refuses to overwrite on the same date and leaves the file untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         fs.writeFileSync(file(), 'edited by hand');
         expectFailure(run('change-record'), 'record-exists', 'use --refresh to update derived fields');
         expect(read()).toBe('edited by hand');
     });
     test('refuses the same slug on another date', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const before = read();
         expectFailure(run('change-record', {}, { now: () => new Date('2026-10-20T12:00:00.000Z') }), 'record-exists', 'use --refresh to update derived fields');
         expect(recordFiles()).toEqual(['2026-10-17-change-record.md']);
         expect(read()).toBe(before);
     });
     test('a different slug is not blocked by an existing record', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         expect(run('change-record-2').code).toBe(0);
         expect(recordFiles()).toEqual(['2026-10-17-change-record-2.md', '2026-10-17-change-record.md']);
     });
@@ -503,8 +554,7 @@ describe('awm change new: no overwrite (R3.10)', () => {
         expect(fs.readFileSync(outside, 'utf8')).toBe('precious');
     });
     test('a listing that misses an existing file still never overwrites it (exclusive create)', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         fs.writeFileSync(file(), 'edited by hand');
         interceptFs('readdirSync', (a) => isRecordsDirArg(a[0]), () => []);
         expectFailure(run('change-record'), 'record-exists', 'use --refresh to update derived fields');
@@ -792,7 +842,7 @@ describe('awm change new: base and derivation diagnostics (R3.1, R3.2, R3.5)', (
 
 describe('awm change new --refresh (R3.11)', () => {
     freshRepo();
-    function recordCommitted(mutate: (text: string) => string = (t) => t): string {
+    function buildRecordCommitted(mutate: (text: string) => string): string {
         receiptForHead();
         run('change-record');
         const edited = mutate(read().split(PENDING_MARKER).join('written by agent'));
@@ -802,6 +852,10 @@ describe('awm change new --refresh (R3.11)', () => {
         repo.commit({ 'cli/src/core/b.ts': '1' }, 'fix(core): b');
         receiptForHead();
         return edited;
+    }
+    /** A filled record committed, a later fix(core) commit and a receipt for it. Without `mutate` the state is prebuilt (fromFixture). */
+    function recordCommitted(mutate?: (text: string) => string): string {
+        return mutate === undefined ? fromFixture('record committed', () => buildRecordCommitted((t) => t)) : buildRecordCommitted(mutate);
     }
     const strip = (s: string) => s.replace(/^(type|scope|semver|breaking|modules|verification):[\s\S]*?(?=^[a-z_]+:|^---$)/gm, '');
 
@@ -859,8 +913,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expectFailure(run('change-record', { refresh: true }), 'record-missing', 'run awm change new change-record to create it');
     });
     test('two records with the same slug are record-ambiguous and neither is modified', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         run('change-record', {}, { now });
         fs.copyFileSync(file(), path.join(recordsDir(), '2026-11-01-change-record.md'));
         const before = recordFiles().map((f) => fs.readFileSync(path.join(recordsDir(), f), 'utf8'));
@@ -877,8 +930,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read()).toBe('---\n: : :\n---\n');
     });
     test('a record missing a derived key is record-invalid and untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const broken = read().replace(/^semver: .*\n/m, '');
         fs.writeFileSync(file(), broken);
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): broken');
@@ -887,8 +939,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read()).toBe(broken);
     });
     test('R3.4 a refresh that would push the record over 64 KiB is record-too-large with a remedy, and the record is untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): record');
         const files = Object.fromEntries(Array.from({ length: 4000 }, (_, i) => [`vendor/package-${String(i).padStart(5, '0')}/index.js`, '1']));
         importCommits(repo, [{ message: 'feat(vendor): import vendored packages', files, date: '2026-10-17T10:30:00Z' }]);
@@ -898,8 +949,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read()).toBe(before);
     });
     test('a record already over 64 KiB on disk is record-invalid and untouched (it cannot be read for a rewrite)', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         fs.writeFileSync(file(), `${read()}\n${'x'.repeat(70 * 1024)}\n`);
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): huge');
         receiptForHead();
@@ -908,8 +958,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read()).toBe(before);
     });
     test('a record that is not valid UTF-8 is record-invalid and untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const bytes = Buffer.concat([fs.readFileSync(file()), Buffer.from([0xff, 0xfe, 0x0a])]);
         fs.writeFileSync(file(), bytes);
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): bytes');
@@ -918,8 +967,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(fs.readFileSync(file()).equals(bytes)).toBe(true);
     });
     test('a record with a UTF-8 BOM is record-invalid and its bytes are untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), fs.readFileSync(file())]);
         fs.writeFileSync(file(), bytes);
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): bom');
@@ -928,8 +976,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(fs.readFileSync(file()).equals(bytes)).toBe(true);
     });
     test('a record without a BOM but with non-ASCII text still refreshes and keeps those bytes', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         fs.writeFileSync(file(), fs.readFileSync(file(), 'utf8').split(PENDING_MARKER).join('Qué se probó ñandú \u{1F600}'));
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): text');
         repo.commit({ 'cli/src/core/b.ts': '1' }, 'fix(core): b');
@@ -939,16 +986,14 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(read().charCodeAt(0)).toBe('-'.charCodeAt(0));
     });
     test('a record larger than the record limit is record-invalid', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         fs.appendFileSync(file(), 'x'.repeat(70 * 1024));
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): big');
         receiptForHead();
         expectFailure(run('change-record', { refresh: true }), 'record-invalid');
     });
     test('a record whose derived keys are quoted is refreshed and still validates', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const quoted = read().replace(/^(type|semver) *:/gm, '"$1" :');
         fs.writeFileSync(file(), quoted.split(PENDING_MARKER).join('written by agent'));
         repo.git('add', '-A'); repo.git('commit', '-q', '-m', 'docs(changes): quoted');
@@ -985,8 +1030,7 @@ describe('awm change new --refresh (R3.11)', () => {
         expect(run('change-record', { refresh: true, base: 'main' }).code).toBe(0);
     });
     test('a derived key spelled with a YAML escape is record-invalid and the bytes are untouched', () => {
-        receiptForHead();
-        run('change-record');
+        created();
         const bytes = Buffer.from(read().replace(/^type: .*$/m, '"t\\x79pe": fix'));
         expect(bytes.toString('utf8')).toContain('"t\\x79pe": fix');
         fs.writeFileSync(file(), bytes);
