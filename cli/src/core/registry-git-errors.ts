@@ -56,7 +56,13 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
     ) {
         errorClass = 'tls';
     } else if (
-        /host key verification|permission denied \(publickey\)|\bssh\b|could not read from remote repository/i.test(message)
+        // Score repository-shaped not-found BEFORE broad SSH wording — GitHub SSH
+        // often pairs "Repository not found" with "Could not read from remote repository".
+        /repository not found|remote:\s*.*not found|fatal:\s*repository .+ not found|404\b/i.test(message)
+    ) {
+        errorClass = 'not-found';
+    } else if (
+        /host key verification|permission denied \(publickey\)|\bssh\b/i.test(message)
         && !/terminal prompts disabled|authentication failed|could not read username/i.test(message)
     ) {
         errorClass = 'ssh';
@@ -64,11 +70,6 @@ export function classifyRegistryGitError(err: unknown): ClassifiedRegistryGitErr
         /terminal prompts disabled|authentication failed|could not read username|auth(entication)? (fail|required)|401\b|403\b|invalid credentials/i.test(message)
     ) {
         errorClass = 'authentication';
-    } else if (
-        /repository not found|not found\.?$|404\b|does not exist/i.test(message)
-        || /fatal: repository .+ not found/i.test(message)
-    ) {
-        errorClass = 'not-found';
     } else if (
         /could not resolve host|failed to connect|connection refused|network is unreachable|unable to connect|proxy|name or service not known/i.test(message)
     ) {

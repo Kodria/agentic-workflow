@@ -317,15 +317,13 @@ export function describeRegistrySyncErrors(errors: { name: string; error: string
  * Registries that both errored during sync AND no longer have a usable content
  * layout afterwards — i.e. genuinely unusable, as opposed to merely stale.
  *
- * `syncRegistries()` deliberately reports per-registry failures as results
- * rather than throwing, so a flaky secondary registry never aborts a whole
- * run. Callers that go on to READ registry content (init) still need to know
- * whether what they are about to read remains usable: otherwise a missing,
- * empty, or unsafe registry
- * resurfaces much later as an unrelated step's failure, with its real cause
- * already discarded. Note that "usable" is deliberately about content on disk,
- * not about being a healthy git clone — a seeded content root with no `.git`
- * fails to sync every time and is still perfectly readable.
+ * `syncRegistries()` still reports per-registry failures as results rather than
+ * throwing (so callers can classify/format each one). Under SG-7, init / update /
+ * sync / registry add exit non-zero on ANY sync error; add / list may continue
+ * only when cached content remains usable — and this helper is what those soft
+ * paths consult. "Usable" is about content on disk, not a healthy git clone —
+ * a seeded content root with no `.git` fails to sync every time and is still
+ * readable.
  */
 export function unusableSyncedRegistries(
     results: RegistrySyncResult[],

@@ -119,4 +119,12 @@ describe('classifyRegistryGitError (#238 S2 / SG-6)', () => {
         expect(c.class).toBe('not-found');
         expect(c.fatalLine).toMatch(/not found/i);
     });
+
+    it('prefers not-found over broad SSH wording when remote says Repository not found', () => {
+        const c = classifyRegistryGitError(new Error(
+            'ERROR: Repository not found.\nfatal: Could not read from remote repository.',
+        ));
+        expect(c.class).toBe('not-found');
+        expect(c.class).not.toBe('ssh');
+    });
 });

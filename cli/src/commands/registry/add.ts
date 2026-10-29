@@ -57,7 +57,7 @@ export async function addRegistry(remote: string, nameOverride?: string, reporte
         return {
             ok: false,
             name,
-            error: `Clone failed: ${formatClassifiedRegistryFailure({ name, remote, err: e })}`,
+            error: formatClassifiedRegistryFailure({ name, remote, err: e }),
         };
     }
 
