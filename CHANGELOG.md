@@ -1,3 +1,8 @@
+## v9.22.2 - 2026-10-30
+
+### Fixes
+- **sensors:** strip eslint tool-cache under read-only admission (#240) (#241)
+
 ## v9.22.1 - 2026-10-29
 
 ### Fixes
