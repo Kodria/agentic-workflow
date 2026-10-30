@@ -36,6 +36,18 @@ describe('stripReadOnlyToolCacheArgs', () => {
         expect(() => stripReadOnlyToolCacheArgs('eslint', null as unknown as string[])).toThrow(/args/);
     });
 
+    it('rejects whitespace-only executable', () => {
+        expect(() => stripReadOnlyToolCacheArgs('   ', ['.'])).toThrow(/executable/);
+    });
+
+    it('rejects empty-string arg elements with indexed message', () => {
+        expect(() => stripReadOnlyToolCacheArgs('eslint', ['.', ''])).toThrow(/args\[1\]/);
+    });
+
+    it('rejects non-string arg elements', () => {
+        expect(() => stripReadOnlyToolCacheArgs('eslint', ['.', 1 as unknown as string])).toThrow(/args/);
+    });
+
     it('skips --cache-location operand when --cache present even if location is last', () => {
         expect(stripReadOnlyToolCacheArgs('eslint', ['--cache', '--cache-location'])).toEqual([]);
     });
