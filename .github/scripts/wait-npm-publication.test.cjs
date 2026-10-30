@@ -90,6 +90,6 @@ test('release checks visibility before acceptance without rerunning or weakening
   const needsMatch = releaseJob.match(/needs:\s*\[([^\]]+)\]/);
   assert.ok(needsMatch, 'release job must declare needs');
   const needs = needsMatch[1].split(',').map((name) => name.trim()).filter(Boolean);
-  assert.deepEqual([...needs].sort(), ['test', 'windows-arm-changes', 'windows-arm-hot']);
+  assert.deepEqual([...needs].sort(), ['test', 'windows-shards']);
   assert.match(workflow, /cancel-in-progress: false/);
 });
