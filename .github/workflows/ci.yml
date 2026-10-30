@@ -57,6 +57,12 @@ jobs:
         with:
           node-version: '22'
 
+      # Same structural check published-doctor-evidence runs after npm publish.
+      # It reads release.yml needs; it does not install a published tarball, so
+      # a stale gate fails here instead of after the package is already public.
+      - name: Verify publication visibility guard
+        run: node --test .github/scripts/wait-npm-publication.test.cjs
+
       - name: Install
         working-directory: cli
         run: npm ci
