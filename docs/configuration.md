@@ -277,6 +277,14 @@ Generated output such as `node_modules` would exhaust those limits, so the snaps
 skips a directory when it matches an exclusion rule **and** git confirms that it is
 git-ignored and contains no tracked file (force-added files count as tracked). A matching
 directory that fails either check is hashed as usual. Without git, nothing is skipped.
+Loose files at the project root (for example `.eslintcache`) are always observed.
+
+Before spawning a **structured** sensor whose `executable` is exactly `eslint`, a
+read-only run also drops ESLint tool-cache argv so the tool does not create an
+observed cache file: `--cache` / `--cache=<value>`, and when enablement was present,
+`--cache-location` plus its operand or `--cache-location=<path>`. Other executables
+and ordinary `awm sensors run` (non-read-only) keep those flags. Legacy string `cmd`
+sensors are not rewritten.
 
 By default, directories with these names are candidates at any depth: `node_modules`,
 `.next`, `.turbo`, `dist`, `build`, `coverage`, `.venv`, `target`. A project can extend

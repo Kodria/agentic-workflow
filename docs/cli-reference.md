@@ -402,8 +402,10 @@ The sensor run behind `--verify-sensors` is read-only: a tree snapshot taken bef
 after the run must match. Git-ignored generated directories that hold no tracked file (by
 default `node_modules`, `.next`, `dist`, `coverage`, and similar) are skipped; see
 [Read-only admission observation](configuration.md#read-only-admission-observation-awmadmissionjson).
-When admission blocks on a `not-certified` sensor verdict, `ADMISSION_SENSORS_BLOCKED`
-carries the sensor run's reason and remedy.
+For structured `eslint` sensors, that read-only path also strips ESLint `--cache` /
+`--cache-location` argv so a root `.eslintcache` is not mistaken for a project mutation;
+operator `awm sensors run` keeps those flags. When admission blocks on a `not-certified`
+sensor verdict, `ADMISSION_SENSORS_BLOCKED` carries the sensor run's reason and remedy.
 
 To opt in (when the D-023 suspension is lifted), initialize the matching valid
 unattended plan first with `awm watch --init --plan PLAN_PATH`. Initialization

@@ -27,6 +27,7 @@ import { discoverPresentMarkers } from './compatibility/discovery';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
 import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
+import { stripReadOnlyToolCacheArgs } from './read-only-tool-cache';
 import { reduceVerdict } from './verdict';
 import { resolveSensorProject, softRecoverInvalidProject } from './project';
 import {
@@ -251,6 +252,7 @@ async function runPreparedSlot(
     baseline: ReturnType<typeof readBaseline>,
     cacheEnabled: boolean,
     writeCache: boolean,
+    readOnly: boolean,
 ): Promise<SensorResult> {
     const { execution, cachePlan } = slot;
     // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
@@ -292,7 +294,21 @@ async function runPreparedSlot(
         }
     }
 
-    const raw = await executePrepared(execution, projectCwd);
+    let executionForRun = execution;
+    if (readOnly && execution.command?.kind === 'structured') {
+        const { value } = execution.command;
+        executionForRun = {
+            ...execution,
+            command: {
+                kind: 'structured',
+                value: {
+                    ...value,
+                    args: stripReadOnlyToolCacheArgs(value.executable, value.args),
+                },
+            },
+        };
+    }
+    const raw = await executePrepared(executionForRun, projectCwd);
     if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
         const after = computeCacheInputDigest({
             gitRoot: cachePlan.gitRoot,
@@ -670,6 +686,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         baseline,
         cacheEnabled,
         writeCache,
+        opts.readOnly === true,
     )), resolveConcurrency(activeManifest, prepared.length));
 
     let overall = reduceVerdict(results);
