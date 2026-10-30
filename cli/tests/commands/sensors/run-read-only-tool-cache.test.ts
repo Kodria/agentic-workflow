@@ -225,7 +225,32 @@ describe('runSensors readOnly tool-cache strip (issue #240)', () => {
 
         fs.writeFileSync(path.join(project, '.gitignore'), 'node_modules/\n');
         fs.writeFileSync(path.join(project, 'eslint.config.mjs'), 'export default [{ files: ["**/*.{js,ts}"], rules: {} }];\n');
-        fs.symlinkSync(cliNodeModules, path.join(project, 'node_modules'), 'dir');
+        const modules = path.join(project, 'node_modules');
+        let args: string[];
+        if (process.platform === 'win32') {
+            // npm ships eslint as .cmd; structured resolution only accepts .exe/.com.
+            // Overlay packages via junction into a real project node_modules, then place a
+            // contained eslint.exe (copy of node) in a project-owned .bin — never mutate
+            // the shared cli install. node needs the eslint.js path as argv[1].
+            const bin = path.join(modules, '.bin');
+            fs.mkdirSync(bin, { recursive: true });
+            for (const entry of fs.readdirSync(cliNodeModules, { withFileTypes: true })) {
+                if (entry.name === '.bin') continue;
+                const target = path.join(cliNodeModules, entry.name);
+                const dest = path.join(modules, entry.name);
+                if (entry.isDirectory()) {
+                    fs.symlinkSync(path.resolve(target), path.resolve(dest), 'junction');
+                } else {
+                    fs.copyFileSync(target, dest);
+                }
+            }
+            fs.copyFileSync(process.execPath, path.join(bin, 'eslint.exe'));
+            args = [path.join('node_modules', 'eslint', 'bin', 'eslint.js'), '.', '--cache', '--format', 'json'];
+        } else {
+            // Full tree symlink keeps .bin/eslint realpath inside modulesRoot (cli node_modules).
+            fs.symlinkSync(cliNodeModules, modules, 'dir');
+            args = ['.', '--cache', '--format', 'json'];
+        }
         fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
             schemaVersion: 3,
             mode: 'project-sensors',
@@ -238,7 +263,7 @@ describe('runSensors readOnly tool-cache strip (issue #240)', () => {
                     command: {
                         executable: 'eslint',
                         resolution: 'node-modules-bin',
-                        args: ['.', '--cache', '--format', 'json'],
+                        args,
                     },
                     formatter: 'exit-code',
                 },
