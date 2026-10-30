@@ -43,7 +43,7 @@
       "id": "SRC-DESIGN",
       "path": "docs/plans/2026-10-30-issue-240-readonly-tool-cache-design.md",
       "locator": "## Requirements",
-      "fact": "R1 strip allowlisted --cache and paired --cache-location+operand under readOnly only when executable==='eslint' (DD-8); R2 no strip without readOnly; R3 RF-2.11 unchanged; R5 no false mutation from eslintcache and requires real-eslint evidence; R6 pure non-mutating helper; R7 real mutations still detected; R8 legacy cmd not stripped; R9 non-eslint structured argv unchanged. DD-7: lone --cache-location without --cache in the same argv is not stripped."
+      "fact": "R1 strip eslint --cache / --cache=<value> and paired --cache-location(+operand| =path) under readOnly only when executable==='eslint' (DD-8; Track B equals-form); R2 no strip without readOnly; R3 RF-2.11 unchanged; R5 no false mutation from eslintcache and requires real-eslint evidence; R6 pure non-mutating helper; R7 real mutations still detected; R8 legacy cmd not stripped; R9 non-eslint structured argv unchanged. DD-7: lone --cache-location without --cache in the same argv is not stripped."
     },
     {
       "id": "SRC-RUN",
