@@ -38,7 +38,9 @@ jobs:
             target: linux-arm64
           - os: macos-15-intel
             target: darwin-x64
-          - os: macos-14
+          # macos-14 is in GitHub brownout through 2026-11-02 retirement
+          # (actions/runner-images#13518); macos-15 is the arm64 Sequoia image.
+          - os: macos-15
             target: darwin-arm64
           # x64 stays pinned to the VS2022 image so its compiler does not move
           # under us. `windows-11-arm` only ships VS2026, which node-gyp
