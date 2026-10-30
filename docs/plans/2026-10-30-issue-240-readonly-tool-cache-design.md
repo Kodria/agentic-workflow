@@ -34,7 +34,7 @@ Issue #240 blamed AWM result-cache writes under `.awm/sensors/runs/cache-*.json`
 | ID | Decision | Rationale |
 |----|----------|-----------|
 | DD-1 | CLI strips an allowlist of tool-cache flags only when `readOnly === true`, immediately before spawn. | Fail-closed for admission integrity; operator `sensors run` keeps tool caches. |
-| DD-2 | Allowlist is ESLint-shaped: `--cache`, and `--cache-location` plus its following operand when present. Extensible later; no heuristic “any arg containing cache”. | Covers the reproduced bug without false positives on project argv. |
+| DD-2 | Allowlist is ESLint-shaped: enablement tokens `--cache` or `--cache=<value>`; location tokens `--cache-location` plus following operand, or `--cache-location=<path>`. Do **not** strip unrelated `--cache-*` flags (e.g. `--cache-strategy`). | Covers pack argv and equals-form enablement (Track B QA); avoids colliding with other ESLint cache flags. |
 | DD-3 | Apply strip at the execute boundary (copy of `args` for the spawn), not inside prepare and not in fingerprint/cache digests. | Prepare/RF-2 fingerprints stay operator-faithful; admission does not use result cache. |
 | DD-4 | Keep RF-2.11 / B-R5 unchanged: no AWM result-cache during `readOnly`; do not exclude `.awm` or `.awm/sensors/runs` from the snapshot. | Issue option “exclude CLI cache paths” does not fix `.eslintcache` and weakens #215. |
 | DD-5 | Registry pack adds `--cache-location node_modules/.cache/eslint/` beside every lint `--cache`. | Operator hygiene; cache lives under a default-excluded directory name. |
@@ -46,7 +46,7 @@ Issue #240 blamed AWM result-cache writes under `.awm/sensors/runs/cache-*.json`
 
 ## Requirements
 
-- **R1 — Strip on readOnly (eslint only):** IF `runSensors` runs with `readOnly: true` AND the structured command’s `executable` is exactly `eslint` AND its `args` contain allowlisted tool-cache tokens (`--cache`, and when `--cache` is present in the same argv also `--cache-location` plus its immediate following operand), THEN THE CLI SHALL remove those tokens from the argv used to spawn the tool.
+- **R1 — Strip on readOnly (eslint only):** IF `runSensors` runs with `readOnly: true` AND the structured command’s `executable` is exactly `eslint` AND its `args` contain an allowlisted enablement token (`--cache` or any `--cache=<value>`), THEN THE CLI SHALL remove every enablement token and, when enablement was present in the same argv, also remove location tokens (`--cache-location` plus its immediate following operand, and any `--cache-location=<path>`). THE CLI SHALL NOT remove other `--cache-*` flags such as `--cache-strategy`.
 - **R2 — Operator unchanged:** IF `runSensors` runs without `readOnly`, THEN THE CLI SHALL NOT strip allowlisted tool-cache tokens from structured command args.
 - **R3 — AWM cache policy unchanged:** IF admission invokes sensors with `readOnly: true`, THEN THE CLI SHALL leave `useCache` unset/false and SHALL neither read nor write `.awm/sensors/runs/cache-*.json` for that run (RF-2.11).
 - **R4 — Pack cache location:** WHEN a baseline `js-ts` pack lint variant declares ESLint `--cache`, THE pack SHALL also declare `--cache-location` and `node_modules/.cache/eslint/` as consecutive args after `--cache` (or an equivalent adjacent pair documented in the pack PR).

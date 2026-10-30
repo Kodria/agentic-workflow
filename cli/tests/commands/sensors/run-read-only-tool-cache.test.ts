@@ -129,7 +129,7 @@ describe('runSensors readOnly tool-cache strip (issue #240)', () => {
     it('R5: under readOnly strips eslint --cache so mock does not write .eslintcache', async () => {
         writeProjectDeclared('eslint', ['.', '--cache', '--format', 'json']);
         mockRunStructuredCommand.mockImplementation(async (command: { args: string[] }) => {
-            if (command.args.includes('--cache')) {
+            if (command.args.includes('--cache') || command.args.some((a) => a.startsWith('--cache='))) {
                 fs.writeFileSync(path.join(project, '.eslintcache'), 'cache');
             }
             return ok();
@@ -138,6 +138,23 @@ describe('runSensors readOnly tool-cache strip (issue #240)', () => {
         const out = await load().runSensors({ cwd: project, readOnly: true, all: true });
 
         expect(structuredArgs()).not.toContain('--cache');
+        expect(fs.existsSync(path.join(project, '.eslintcache'))).toBe(false);
+        expect(out.reason).not.toBe('read-only-mutation-detected');
+    });
+
+    it('under readOnly strips eslint --cache=true equals form (Track B B1)', async () => {
+        writeProjectDeclared('eslint', ['.', '--cache=true', '--cache-location=node_modules/.cache/eslint/', '--format', 'json']);
+        mockRunStructuredCommand.mockImplementation(async (command: { args: string[] }) => {
+            if (command.args.includes('--cache') || command.args.some((a) => a.startsWith('--cache='))) {
+                fs.writeFileSync(path.join(project, '.eslintcache'), 'cache');
+            }
+            return ok();
+        });
+
+        const out = await load().runSensors({ cwd: project, readOnly: true, all: true });
+
+        expect(structuredArgs().some((a) => a === '--cache' || a.startsWith('--cache='))).toBe(false);
+        expect(structuredArgs().some((a) => a === '--cache-location' || a.startsWith('--cache-location='))).toBe(false);
         expect(fs.existsSync(path.join(project, '.eslintcache'))).toBe(false);
         expect(out.reason).not.toBe('read-only-mutation-detected');
     });

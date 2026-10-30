@@ -51,4 +51,26 @@ describe('stripReadOnlyToolCacheArgs', () => {
     it('skips --cache-location operand when --cache present even if location is last', () => {
         expect(stripReadOnlyToolCacheArgs('eslint', ['--cache', '--cache-location'])).toEqual([]);
     });
+
+    it('removes --cache=true equals-form enablement for eslint (amended R1/DD-2)', () => {
+        expect(stripReadOnlyToolCacheArgs('eslint', ['.', '--cache=true', '--format', 'json']))
+            .toEqual(['.', '--format', 'json']);
+    });
+
+    it('removes --cache=true and --cache-location= equals form when enablement present', () => {
+        expect(stripReadOnlyToolCacheArgs('eslint', [
+            '.', '--cache=true', '--cache-location=node_modules/.cache/eslint/', '--format', 'json',
+        ])).toEqual(['.', '--format', 'json']);
+    });
+
+    it('does not strip --cache-strategy when enablement present', () => {
+        expect(stripReadOnlyToolCacheArgs('eslint', [
+            '.', '--cache', '--cache-strategy', 'content', '--format', 'json',
+        ])).toEqual(['.', '--cache-strategy', 'content', '--format', 'json']);
+    });
+
+    it('does not strip lone --cache-location= without enablement for eslint (DD-7)', () => {
+        const args = ['.', '--cache-location=/tmp/x', '--format', 'json'];
+        expect(stripReadOnlyToolCacheArgs('eslint', args)).toEqual(args);
+    });
 });
