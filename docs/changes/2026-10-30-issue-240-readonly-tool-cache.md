@@ -16,13 +16,13 @@ links:
   plan: docs/plans/2026-10-30-issue-240-readonly-tool-cache-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/240
 verification:
-  commit: be219757095b7d02645c515b0536640112e9b7b1
+  commit: 1047b78900ef7224992adae17c131b887c978ae8
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:ef00b2f7c6e89a5e00e1855fbeb8fdcc6daa8ba3940f644b50df30fb8cc447e8
+  receipt_digest: sha256:ddd23ecd9e05de441aab8bcc464a221b41ef5b075f99f68cfff2fab3a9917241
 manual_validation:
   - step: En un repo js-ts con lint --cache, borrar .eslintcache y correr awm plan admit … --verify-sensors en frío
     expected: No ADMISSION_SENSORS_BLOCKED por read-only-mutation-detected solo por .eslintcache
