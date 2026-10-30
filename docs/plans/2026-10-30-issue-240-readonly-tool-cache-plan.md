@@ -1,5 +1,6 @@
 # Issue #240 read-only tool-cache strip Implementation Plan
 <!-- awm-qa-complete: 2026-10-30 -->
+<!-- awm-docs-complete: 2026-10-30 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
