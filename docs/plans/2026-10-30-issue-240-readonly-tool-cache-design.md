@@ -6,6 +6,8 @@
 
 **Approach:** Enfoque 1 (brainstorming 2026-10-30). Strip pre-execute on `readOnly` + pack `cache-location`. Do **not** exclude `.awm/sensors/runs` from the read-only snapshot (issue hypothesis rejected after reproduction).
 
+**Status:** amended 2026-10-30 after PR #241 design/plan audit (H1–H3). H1 → DD-8 / R1 / R9 (eslint-only strip). H2 → real-eslint evidence for R5. H3 → issue comment (process, not a code requirement).
+
 **Design artifacts:** none
 
 **Change Record:** `issue-240-readonly-tool-cache` (CLI PR); registry companion record per that repo’s process when the pack PR opens.
@@ -38,19 +40,21 @@ Issue #240 blamed AWM result-cache writes under `.awm/sensors/runs/cache-*.json`
 | DD-5 | Registry pack adds `--cache-location node_modules/.cache/eslint/` beside every lint `--cache`. | Operator hygiene; cache lives under a default-excluded directory name. |
 | DD-6 | Ship CLI first (protects old packs on admit); registry PR second or parallel (operator root litter). | CLI alone satisfies admission for stale packs; pack alone does not satisfy scope “CLI defense”. |
 | DD-7 | `--cache-location` without a preceding/paired `--cache` is not stripped by itself. | Avoid deleting unrelated location-like args; ESLint location is meaningful with `--cache`. |
+| DD-8 | Strip only when the structured command’s `executable === 'eslint'` (exact string; js-ts lint variants). Other executables keep argv unchanged under `readOnly`. | Audit H1: tools such as `rubocop --cache false` would lose `--cache` and treat `false` as a path. |
 
-**Accepted risk:** a future tool that writes a non-allowlisted cache file at an observed path can still trip admission until the allowlist (or pack) is extended. Real source mutations remain detected.
+**Accepted risk:** a future tool that writes a non-allowlisted cache file at an observed path can still trip admission until the allowlist (or pack) is extended. Real source mutations remain detected. Non-eslint tools with different `--cache` semantics are intentionally untouched (DD-8).
 
 ## Requirements
 
-- **R1 — Strip on readOnly:** IF `runSensors` runs with `readOnly: true` AND a structured command’s `args` contain allowlisted tool-cache tokens (`--cache`, and when present `--cache-location` plus its immediate following operand), THEN THE CLI SHALL remove those tokens from the argv used to spawn the tool.
+- **R1 — Strip on readOnly (eslint only):** IF `runSensors` runs with `readOnly: true` AND the structured command’s `executable` is exactly `eslint` AND its `args` contain allowlisted tool-cache tokens (`--cache`, and when `--cache` is present in the same argv also `--cache-location` plus its immediate following operand), THEN THE CLI SHALL remove those tokens from the argv used to spawn the tool.
 - **R2 — Operator unchanged:** IF `runSensors` runs without `readOnly`, THEN THE CLI SHALL NOT strip allowlisted tool-cache tokens from structured command args.
 - **R3 — AWM cache policy unchanged:** IF admission invokes sensors with `readOnly: true`, THEN THE CLI SHALL leave `useCache` unset/false and SHALL neither read nor write `.awm/sensors/runs/cache-*.json` for that run (RF-2.11).
 - **R4 — Pack cache location:** WHEN a baseline `js-ts` pack lint variant declares ESLint `--cache`, THE pack SHALL also declare `--cache-location` and `node_modules/.cache/eslint/` as consecutive args after `--cache` (or an equivalent adjacent pair documented in the pack PR).
-- **R5 — No false mutation from eslint cache:** IF a `readOnly` run’s sensors would pass except for ESLint creating or updating `./.eslintcache` due to `--cache` without an excluded location, THEN after this change THE CLI SHALL NOT report `reason: "read-only-mutation-detected"` solely for that cause.
+- **R5 — No false mutation from eslint cache:** IF a `readOnly` run’s sensors would pass except for ESLint creating or updating `./.eslintcache` due to `--cache` without an excluded location, THEN after this change THE CLI SHALL NOT report `reason: "read-only-mutation-detected"` solely for that cause. Verification SHALL include at least one evidence path that spawns the real `eslint` binary (not only a mock that simulates cache writes).
 - **R6 — Helper purity:** WHEN stripping, THE CLI SHALL NOT mutate the caller’s original `args` array (return a new array / command copy).
 - **R7 — Real mutations still fail:** IF a `readOnly` sensor run creates or modifies an observed project path outside stripped tool-cache behavior (e.g. a source file under the tree), THEN THE CLI SHALL still report `read-only-mutation-detected`.
 - **R8 — Legacy string `cmd`:** WHERE a sensor still uses legacy shell `cmd` (not `StructuredCommand`), THE CLI SHALL NOT attempt tool-cache stripping on that string in this change (admission packs in scope are structured).
+- **R9 — Non-eslint structured commands untouched:** IF `readOnly: true` AND the structured command’s `executable` is not exactly `eslint`, THEN THE CLI SHALL pass `args` through unchanged (including any `--cache` / `--cache-location` tokens).
 
 ## Architecture
 
@@ -59,13 +63,13 @@ plan admit --verify-sensors
   → runSensors({ all: true, readOnly: true })  // useCache unset
   → load admission exclusions + before snapshot
   → prepare sensors (pack live command may still list --cache)
-  → for each execute: if readOnly → stripReadOnlyToolCacheArgs(args) → spawn
+  → for each execute: if readOnly && executable === 'eslint' → stripReadOnlyToolCacheArgs(executable, args) → spawn
   → after snapshot → certify (no root .eslintcache from stripped --cache)
 ```
 
-**CLI module (proposed):** `cli/src/commands/sensors/read-only-tool-cache.ts` exporting `stripReadOnlyToolCacheArgs(args: readonly string[]): string[]` (name may vary; single purpose).
+**CLI module (proposed):** `cli/src/commands/sensors/read-only-tool-cache.ts` exporting `stripReadOnlyToolCacheArgs(executable: string, args: readonly string[]): string[]` — if `executable !== 'eslint'`, return a copy of `args` unchanged; otherwise apply DD-2/DD-7 stripping.
 
-**Wire-up:** `runPreparedSlot` / structured execute path in `run.ts` (or the single call site that passes `command.args` into `runStructuredCommand`), gated on the same `readOnly` flag already used for observation.
+**Wire-up:** `runPreparedSlot` / structured execute path in `run.ts` (or the single call site that passes `command.args` into `runStructuredCommand`), gated on the same `readOnly` flag already used for observation; pass `command.value.executable` into the helper.
 
 **Registry:** edit `sensor-packs/js-ts/pack.json` lint variant commands; bump bundle/catalog versions per registry CONSTITUTION; run `./scripts/check-skill-version-bumps.sh origin/main` if skills change (pack-only PRs follow pack version rules).
 
@@ -73,11 +77,13 @@ plan admit --verify-sensors
 
 **CLI**
 
-- Unit: strip `--cache`; strip `--cache` + `--cache-location` + path; leave unrelated args; idempotent; do not mutate input; do not strip lone `--cache-location` without allowlisted pairing rules per DD-7.
-- `runSensors({ readOnly: true })` with a structured eslint-like command including `--cache`: assert spawn args lack `--cache`; assert no `./.eslintcache`; assert `reason` is not `read-only-mutation-detected` when that was the only write.
-- Without `readOnly`: spawn/mock receives `--cache` unchanged.
+- Unit: for `executable: 'eslint'`, strip `--cache`; strip `--cache` + `--cache-location` + path; leave unrelated args; idempotent; do not mutate input; do not strip lone `--cache-location` without `--cache` (DD-7). For `executable: 'rubocop'` (or any non-`eslint`), leave `--cache false` intact (R9 / H1).
+- `runSensors({ readOnly: true })` with structured `executable: 'eslint'` including `--cache`: assert spawn args lack `--cache`; mock/integration assert no `./.eslintcache`; `reason` is not `read-only-mutation-detected` when that was the only write.
+- Real-eslint evidence (R5 / H2): one test or recorded closure run that invokes the real eslint binary under `readOnly` and asserts no `./.eslintcache` and no `read-only-mutation-detected` from that cause.
+- Without `readOnly`: spawn/mock receives `--cache` unchanged for eslint.
 - RF-2.11 regression: `readOnly` does not create `cache-*.json`.
 - R7: sensor that writes a normal project file under `readOnly` still yields `read-only-mutation-detected`.
+- R9: structured non-eslint command under `readOnly` keeps `--cache` in spawn args.
 
 **Registry**
 
@@ -96,13 +102,13 @@ plan admit --verify-sensors
 
 | PR | Repo | Covers |
 |----|------|--------|
-| 1 | `agentic-workflow` | R1–R3, R5–R8 + CLI tests |
+| 1 | `agentic-workflow` | R1–R3, R5–R9 + CLI tests |
 | 2 | `awm-baseline-registry` | R4 + pack contract / version bumps |
 
 ## Self-review
 
 1. **Placeholders:** none.
-2. **Consistency:** architecture matches R1–R8; DD-4 rejects the issue’s `.awm` exclusion option.
+2. **Consistency:** architecture matches R1–R9; DD-4 rejects the issue’s `.awm` exclusion option; DD-8 answers audit H1.
 3. **Scope:** two PRs, one design; no UI.
-4. **Ambiguity:** allowlist contents, strip locus, DD-7 pairing, legacy `cmd` exclusion, and delivery order are explicit.
-5. **EARS/IDs:** R1–R8 are IF/WHEN/WHERE + SHALL and 1:1 testable.
+4. **Ambiguity:** allowlist contents, eslint executable gate, strip locus, DD-7 pairing, legacy `cmd` exclusion, real-eslint evidence, and delivery order are explicit.
+5. **EARS/IDs:** R1–R9 are IF/WHEN/WHERE + SHALL and 1:1 testable.
