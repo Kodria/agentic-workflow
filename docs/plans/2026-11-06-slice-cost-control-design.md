@@ -45,12 +45,13 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
 - **RF-1.4 — Unresolvable vs empty scope:**
   - IF slice file scope **cannot be resolved** (git failure, missing required `--base` for slice scope, `fileInput` missing/`placeholder` not `{files}`, path escape), THEN THE CLI SHALL report a non-pass outcome with an explicit reason — never `pass`.
   - IF slice file scope **resolves and is empty** after extension filtering (slice touched only non-matching paths, e.g. docs-only), THEN THE CLI SHALL `skip` that sensor with an explicit reason (not `pass`, not a blocking fail). Empty-scope skip SHALL NOT by itself fail the slice sensor gate; other selected sensors still reduce `overall` normally.
-- **RF-1.5 — Authoring surface (structured first):** Pack schema and structured manifests SHALL accept optional sensor-level `sliceCommand` parallel to `changedCommand`. Effective value = project structured override ?? pack default ?? absent. Legacy text `sliceCmd` + `changedExtensions`-style fields, IF supported at all, SHALL be confined to the legacy manifest parser only and MUST NOT be the pack v2 authoring path (D1 — Windows-unsafe shell interpolation is rejected for packs).
+- **RF-1.5 — Authoring surface (structured first):** Pack schema and structured manifests SHALL accept optional **variant-level** `sliceCommand` parallel to `changedCommand`. Effective value = project structured override ?? pack variant default ?? absent. Legacy text `sliceCmd` + `changedExtensions`-style fields, IF supported at all, SHALL be confined to the legacy manifest parser only and MUST NOT be the pack v2 authoring path (D1 — Windows-unsafe shell interpolation is rejected for packs).
 - **RF-1.6 — `fileInput` substitution:** THE CLI SHALL expand `sliceCommand.fileInput` with the same substitution and safety rules as `changedCommand` (argv slots / structured expansion — not shell-string interpolation of filenames).
 - **RF-1.7 — Partial selection:** A `--slice` run remains a non-full selection: THE CLI SHALL NOT write a Change Record receipt for that run (D-025 / existing `isFullSelection` rules), including when some sensors ran via `sliceCommand`.
-- **RF-1.8 — Slice file scope source (D2):** THE slice file list SHALL be the union of paths changed since the **slice base commit** through the current worktree, computed like today's `--changed` resolver (`changed.ts`: merge-base/diff semantics against the provided base, plus staged, unstaged, and untracked) but with base = the controller-supplied slice-start SHA, **not** the branch merge-base alone.
-  - Controllers SHALL pass that SHA into the CLI (normative flag: reuse `--base <sha>` when `--slice` is set, or an equally explicit slice-base option documented in the CLI reference — one public flag, no silent default to branch-wide scope).
-  - IF `--slice` is set and no slice base is provided, THE CLI SHALL fail closed (unresolvable scope per RF-1.4).
+- **RF-1.8 — Slice file scope source (D2 / P1):** THE slice file list SHALL be the union of paths changed since the **slice base commit** through the current worktree, computed like today's `--changed` resolver (`changed.ts`: merge-base/diff semantics against the provided base, plus staged, unstaged, and untracked) but with base = the controller-supplied slice-start SHA, **not** the branch merge-base alone.
+  - Controllers that will execute a `sliceCommand` SHALL pass that SHA (normative flag: reuse `--base <sha>` with `--slice`, or an equally explicit slice-base option — one public flag, no silent default to branch-wide scope).
+  - IF a **selected** sensor would execute `sliceCommand` and no slice base is provided, THAT sensor SHALL be non-pass with an explicit reason (e.g. `slice scope requires --base`) per RF-1.4 — THE CLI SHALL NOT reject the whole `awm sensors run --slice` invocation solely for a missing `--base`.
+  - IF `--slice` is set and **no** selected sensor will execute `sliceCommand`, THE CLI SHALL behave as today (D-025 skip of bare `closureOnly`) **without** requiring `--base`, so published CLI remains compatible with registry skills that still call `--slice` alone until the companion lands.
   - Renames SHALL contribute the new path; deletes SHALL contribute the deleted path; paths outside `packageRoot` SHALL be dropped before `fileInput` extension filtering, with the drop visible in diagnostics.
   - THE design REJECTS “reuse branch-wide `--changed` as slice scope” as the default: that set grows every slice and would defeat scoped cache (D2).
 
@@ -66,13 +67,16 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
 ### RF-3 — Mechanical run evidence (separate from CycleEvidenceV1)
 
 - **RF-3.1 — Dedicated run command (D6):** THE CLI SHALL provide `awm evidence run -- <argv…>` under the existing `awm evidence` namespace, **alongside** (not replacing) `awm evidence capture`. `capture` continues to write `CycleEvidenceV1` cycle observations. `run` writes **MechanicalRunEvidence** receipts (new schema id, distinct type and subdirectory).
-- **RF-3.2 — Shared logical contrast fields:** Sensor/`sliceCommand` executions that produce mechanical run evidence and `awm evidence run` SHALL expose the same contrast fields for reviewers: candidate identity (RF-3.6), argv (redacted), cwd, exit/result summary (bounded), duration, declared/resolved scope when applicable, integrity digest (RF-3.7).
-- **RF-3.3 — Reviewer contrast (registry):** `review-cycle-v1` «Mechanical evidence» and spec/code-quality reviewer prompts SHALL require: consume an authoritative **MechanicalRunEvidence** receipt without re-execution only when candidate, argv, cwd, and obligation match; otherwise execute for real. Widening declared scope versus the receipt SHALL be treated as non-equivalent. Prompts SHALL name MechanicalRunEvidence / `awm evidence run`, not conflate with `CycleEvidenceV1` capsules.
+- **RF-3.2 — Contrast surfaces (P3):** Two contrast paths, not one schema forced onto both:
+  - **`awm evidence run`** SHALL write MechanicalRunEvidence with candidate identity (RF-3.6), argv (redacted), cwd, exit/result summary (bounded), duration, declared/resolved scope when applicable, integrity digest (RF-3.7).
+  - **`awm sensors run` / `sliceCommand`** SHALL NOT write MechanicalRunEvidence. Reviewer contrast for sensors is the sensor result provenance already returned by the run (`cached: true` / fingerprint / digests / status). Re-running the same sensor argv under the same digests yields a cache hit without a second expensive execution. This avoids #240 read-only `.awm` writes during admission and matches fingerprint cache as the sensor evidence substrate.
+- **RF-3.3 — Reviewer contrast (registry):** `review-cycle-v1` «Mechanical evidence» and reviewer prompts SHALL require: for arbitrary commands, consume MechanicalRunEvidence (preferably via `awm evidence verify`, RF-3.9) without re-execution only when verify reports `match`; for sensors, consume current `awm sensors run` provenance / cache hit equivalence without inventing a second receipt format. Prompts SHALL not conflate MechanicalRunEvidence with `CycleEvidenceV1` capsules.
 - **RF-3.4 — Storage and privacy (D6):** MechanicalRunEvidence SHALL live under git-root `.awm/` in a dedicated runtime subtree (e.g. `.awm/evidence/runs/`), self-ignored / 0600 like other runtime evidence, **not** mixed into `CycleEvidenceV1` documents. Argv SHALL redact secret-shaped tokens (at least `--token=`, `--password=`, `--api-key=`, `AUTHORIZATION`-like values; exact patterns listed in CLI docs). Result summary SHALL be size-bounded and SHALL NOT persist full unbounded stdout/stderr bodies. Environment variables that affect tool output are **out of band**: receipts SHALL document that env is not part of equivalence; controllers needing env-sensitive gates MUST re-execute or pass env via explicit argv.
 - **RF-3.5 — No Change Record coupling:** MechanicalRunEvidence alone SHALL NOT write or satisfy a Change Record verification receipt; only full-gate `awm sensors run` hygiene remains that authority.
 - **RF-3.6 — Candidate identity (D7):** Candidate identity on a run receipt SHALL be `headCommit` (or empty if unavailable) **plus** a content digest of the relevant tree state used for the run (worktree input digest or equivalent over the paths that affect the obligation — HEAD alone is insufficient mid-edit). Reviewers SHALL treat receipts whose candidate digest does not match the current candidate as non-equivalent.
 - **RF-3.7 — Integrity binding (D7):** Each MechanicalRunEvidence document SHALL carry an integrity digest over its canonical payload (same family as sensor receipts). Consumers SHALL reject tampered/edited files as absent (RF-E.1).
 - **RF-3.8 — readOnly writes nothing (D8):** WHEN `runSensors({ readOnly: true })` or an equivalent read-only admission/observation path runs, THE CLI SHALL NOT write MechanicalRunEvidence receipts, scoped cache entries, or full cache entries (align with #236 RF-2.11 and #240 read-only `.awm` observation). RED regression required.
+- **RF-3.9 — Mechanical verify command (P4):** THE CLI SHALL provide `awm evidence verify <receipt-path>` that validates integrity, recomputes the current candidate content digest, compares argv/cwd/scope fields as recorded, and exits with a machine-readable `match` or `mismatch` (reason named). Reviewers SHALL use this instead of recomputing digests by hand.
 
 ### RF-4 — Review-round cut (unattended-safe) + ledger CLI support
 
@@ -85,7 +89,7 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
   - **Blocking (never defer):** `class === 'seguridad'` OR `severity === 'blocker'` (covers externally false result and red mechanical gate as reviewer-emitted blockers).
   - **Deferrable on re-review / ceiling:** all other classes/severities.
   Ambiguous or missing `class`/`severity` on a finding that would otherwise defer SHALL be treated as blocking until clarified (fail closed — never silent drop).
-- **RF-4.7 — Ledger deferred/resolved state (CLI, D5):** THE CLI ledger SHALL gain durable deferred/resolved support sufficient for mechanical QA: at minimum `awm ledger add` (or equivalent) can mark an entry deferred with a reason code (e.g. `round-ceiling`, `re-review-defer`), and a resolution action records that a deferred entry was fixed or accepted; `awm ledger list` SHALL filter/report deferred-open vs resolved. Registry skills depend on these APIs; implementation is **CLI-owned**, not registry-only.
+- **RF-4.7 — Ledger deferred/resolved state (CLI, D5 / P5):** THE CLI ledger SHALL gain durable deferred/resolved support sufficient for mechanical QA: at minimum `awm ledger add` (or equivalent) can mark an entry deferred with a reason code (e.g. `round-ceiling`, `re-review-defer`); each entry SHALL carry a **stable unique `id`** (generated at add time); resolution SHALL target that `id` (`awm ledger resolve --id <id>`), not `--signature` alone (signature remains a recurrence grouping key and may repeat). Optional `--all-with-signature` may resolve every deferred-open entry sharing a signature, but the default single resolve is by `id`. `awm ledger list --deferred-open` SHALL report deferred && !resolved. Registry skills depend on these APIs; implementation is **CLI-owned**.
 
 ### RF-5 — Visible duration (durable clocks)
 
@@ -103,7 +107,7 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
 
 - **RF-E.1:** IF a MechanicalRunEvidence receipt fails validation (schema, symlink escape, size bound, integrity mismatch), THEN consumers SHALL treat it as absent and require real execution — never as a pass.
 - **RF-E.2:** IF `sliceCommand` execution times out or exits without a usable result, THEN THE sensor outcome SHALL be non-pass under existing sensor failure kinds; THE CLI SHALL NOT write a reusable scoped or full cache entry for that run (#236 RF-2.4).
-- **RF-E.3:** IF deferred-open ledger entries exist and QA attempts to complete without listing them, THEN QA SHALL fail closed (no `awm-qa-complete`).
+- **RF-E.3 — QA policy (registry) over CLI list API (P6):** IF deferred-open ledger entries exist and QA attempts to complete without listing/resolving them, THEN QA SHALL fail closed (no `awm-qa-complete`). Enforcement is **registry skill behavior** consuming `awm ledger list --deferred-open`; THE CLI SHALL expose that query accurately (RF-4.7) and SHALL NOT itself write `awm-qa-complete`.
 
 ## Architecture
 
@@ -134,8 +138,9 @@ Packs / structured manifest: inputs, closureOnly, sliceCommand
 |---|---|---|
 | `sliceCommand` parse, `--slice --base` scope, unresolvable vs empty | CLI | RF-1, RF-E.2 |
 | Scoped vs full cache isolation; full-gate regression | CLI | RF-2.2, RF-2.3, RF-2.5–2.6 |
-| `awm evidence run` + MechanicalRunEvidence schema/integrity/redaction | CLI | RF-3, RF-E.1 |
-| Ledger deferred/resolved APIs | CLI | RF-4.7, RF-E.3 (API) |
+| `awm evidence run` / `verify` + MechanicalRunEvidence schema/integrity/redaction | CLI | RF-3.1, RF-3.4–3.9, RF-E.1 |
+| Ledger deferred/resolved APIs (`--id`) | CLI | RF-4.7 |
+| QA fail-closed on deferred-open | Registry | RF-E.3, RF-4.5 |
 | CLI reference + D-0xx | CLI | RF-6.4 |
 | Pack/schema/`setup-sensors` for inputs+sliceCommand | Registry | RF-2.4, RF-6.3 |
 | `review-cycle-v1` cut/ceiling/defer mapping; prompts; duration rules | Registry | RF-4.1–4.6, RF-5 |
@@ -197,6 +202,11 @@ Packs / structured manifest: inputs, closureOnly, sliceCommand
 | D9 | RF-1.4: unresolvable → non-pass; empty → skip |
 | D10 | RF-5.1: durations from ledger/receipt clocks only |
 | D11 | RF-2.3 reframed as #236 regression; RF-2.4 remains the authoring gap |
+| P1 | RF-1.8: `--base` required only for sensors executing `sliceCommand`; bare `--slice` stays compatible |
+| P3 | RF-3.2: sensors contrast via cache/provenance; no MechanicalRunEvidence from `sensors run` |
+| P4 | RF-3.9: `awm evidence verify` |
+| P5 | RF-4.7: stable entry `id`; resolve by `--id` |
+| P6 | RF-E.3 owned by registry QA; CLI exposes `--deferred-open` only |
 
 ## Self-review
 
