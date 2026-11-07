@@ -6,7 +6,7 @@ import { SensorManifest, RunOutput, PreparedSensorExecution, SensorResult } from
 import { readBaseline } from './baseline';
 import { applyBaseline, executePrepared } from './result';
 export { applyBaseline };
-import { changedFiles, changedScopeError } from './changed';
+import { changedFiles, changedScopeError, filterByExtension } from './changed';
 // Solo `detectStack` (puro, lee el arbol) — NO `initSensors`, que escribe. `run` es un
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
 import { detectStack } from './detection';
@@ -49,6 +49,7 @@ import {
 import {
     canCacheRawResult,
     computeSensorFingerprint,
+    digestSortedSlicePaths,
     readResultCache,
     toCacheRaw,
     writeResultCache,
@@ -188,10 +189,19 @@ function buildCachePlan(args: {
     assets: string[] | undefined;
     /** Project-declared command when no pack variant exists. */
     command?: StructuredCommand;
+    /** Scoped cache mode (RF-2.2). Defaults to full-gate keys. */
+    cacheMode?: 'full' | 'slice';
+    sliceCommand?: StructuredCommand;
+    /** Resolved slice file paths (post packageRoot + extension filters). */
+    slicePaths?: string[];
 }): CachePlan | null {
     const toolVersion = args.liveState?.toolVersion;
     const runtimeVersion = args.liveState?.runtimeVersion;
     const command = args.variant?.command ?? args.command ?? null;
+    const cacheMode = args.cacheMode ?? 'full';
+    if (cacheMode === 'slice') {
+        if (!args.sliceCommand || !Array.isArray(args.slicePaths)) return null;
+    }
     const fingerprintParts = {
         variantId: args.liveState?.variantId ?? args.variant?.id ?? null,
         command,
@@ -200,6 +210,13 @@ function buildCachePlan(args: {
         inputs: args.inputGlobs,
         toolVersion,
         runtimeVersion,
+        ...(cacheMode === 'slice'
+            ? {
+                cacheMode: 'slice' as const,
+                sliceCommand: args.sliceCommand,
+                slicePathsDigest: digestSortedSlicePaths(args.slicePaths as string[]),
+            }
+            : {}),
     };
     // Cache requires live versions (RF-2.10). Receipt measurements still need a fingerprint
     // when versions are absent so project-declared sensors with inputs do not demote RF-4.6.
@@ -274,11 +291,12 @@ async function runPreparedSlot(
 ): Promise<SensorResult> {
     const { execution, cachePlan } = slot;
     // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
-    // be overridden by a prior cache hit. Slice executions never read full-scope
-    // cache entries (RF-2.2 isolation; scoped keys land in a later slice).
+    // be overridden by a prior cache hit. Full and slice each read/write only their
+    // own key space (fingerprint encodes cacheMode; lookup is same-mode only).
     const synthetic = execution.syntheticStatus !== undefined;
+    const sameModeCache = execution.requestedScope === 'full' || execution.requestedScope === 'slice';
     // RF-2.10: cacheable is false without live versions — still attach measurements below.
-    if (cacheEnabled && cachePlan?.cacheable && !synthetic && execution.requestedScope === 'full') {
+    if (cacheEnabled && cachePlan?.cacheable && !synthetic && sameModeCache) {
         const cached = readResultCache(cachePlan.gitRoot, {
             sensorId: execution.name,
             projectKey: cachePlan.projectKey,
@@ -328,7 +346,9 @@ async function runPreparedSlot(
         };
     }
     const raw = await executePrepared(executionForRun, projectCwd);
-    if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && execution.requestedScope === 'full') {
+    // Scoped writes only for slice executions; full writes only for full (RF-2.2 / RF-2.6).
+    // Top-level writeCache is already false for --changed.
+    if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && sameModeCache) {
         const after = computeCacheInputDigest({
             gitRoot: cachePlan.gitRoot,
             packageRoot: projectCwd,
@@ -700,7 +720,33 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             const ready = (packBoundSensor as { enabled?: boolean }).enabled === false
                 ? { ...withDropNote, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
                 : withDropNote;
-            prepared.push({ execution: ready, cachePlan: null });
+            // Scoped cache plan (RF-2.1/2.2): fingerprint includes mode=slice, sliceCommand,
+            // and digest of resolved paths. Full-gate keys never share this space.
+            let slicePlan: CachePlan | null = null;
+            const sliceInputs = effectiveInputs((packBoundSensor as PackBoundManifestSensor).inputs, variant);
+            const sliceCmd = usableSliceCommand(variant);
+            if (sliceInputs && sliceCmd && ready.syntheticStatus === undefined && !('error' in sliceScope && sliceScope.error)) {
+                const slicePaths = filterByExtension(
+                    'files' in sliceScope ? sliceScope.files : [],
+                    sliceCmd.fileInput?.extensions,
+                );
+                if (slicePaths.length > 0) {
+                    slicePlan = buildCachePlan({
+                        gitRoot,
+                        packageRoot: projectCwd,
+                        manifestPath: configured.manifestPath,
+                        sensorId: name,
+                        inputGlobs: sliceInputs,
+                        variant,
+                        liveState,
+                        assets: (packBoundSensor as PackBoundManifestSensor).assets ?? variant?.assets,
+                        cacheMode: 'slice',
+                        sliceCommand: sliceCmd,
+                        slicePaths,
+                    });
+                }
+            }
+            prepared.push({ execution: ready, cachePlan: slicePlan });
             continue;
         }
 

@@ -88,6 +88,15 @@ export function canCacheRawResult(result: SensorResult): boolean {
     return result.errors.length > 0;
 }
 
+/** Digest of sorted resolved slice paths (RF-2.1 / RF-2.2 scoped fingerprint). */
+export function digestSortedSlicePaths(paths: string[]): string {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) {
+        throw new Error('slice paths must be string[]');
+    }
+    const sorted = [...paths].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return `sha256:${crypto.createHash('sha256').update(sorted.join('\0')).digest('hex')}`;
+}
+
 export function computeSensorFingerprint(parts: {
     variantId: string | null;
     command: unknown;
@@ -96,10 +105,27 @@ export function computeSensorFingerprint(parts: {
     inputs: string[];
     toolVersion: string | null | undefined;
     runtimeVersion: string | null | undefined;
+    /**
+     * Cache key space marker. `'slice'` entries MUST also carry `sliceCommand` and
+     * `slicePathsDigest` so a scoped hit can never collide with a full-gate key (RF-2.2).
+     */
+    cacheMode?: 'full' | 'slice';
+    sliceCommand?: unknown;
+    slicePathsDigest?: string;
 }, opts?: { allowMissingLiveVersions?: boolean }): string | null {
     if (!parts || typeof parts !== 'object') throw new Error('fingerprint parts must be an object');
     if (typeof parts.cliVersion !== 'string' || parts.cliVersion.length === 0) throw new Error('cliVersion must be a nonempty string');
     if (!Array.isArray(parts.inputs) || parts.inputs.some((g) => typeof g !== 'string')) throw new Error('inputs must be string[]');
+    const mode = parts.cacheMode ?? 'full';
+    if (mode !== 'full' && mode !== 'slice') throw new Error('cacheMode must be "full" or "slice"');
+    if (mode === 'slice') {
+        if (parts.sliceCommand === undefined || parts.sliceCommand === null) {
+            throw new Error('slice fingerprint requires sliceCommand');
+        }
+        if (typeof parts.slicePathsDigest !== 'string' || !parts.slicePathsDigest.startsWith('sha256:')) {
+            throw new Error('slice fingerprint requires slicePathsDigest');
+        }
+    }
     const allowMissing = opts?.allowMissingLiveVersions === true;
     const toolOk = typeof parts.toolVersion === 'string' && parts.toolVersion.length > 0;
     const runtimeOk = typeof parts.runtimeVersion === 'string' && parts.runtimeVersion.length > 0;
@@ -112,6 +138,13 @@ export function computeSensorFingerprint(parts: {
         inputs: [...parts.inputs].sort(),
         toolVersion: toolOk ? parts.toolVersion : null,
         runtimeVersion: runtimeOk ? parts.runtimeVersion : null,
+        ...(mode === 'slice'
+            ? {
+                cacheMode: 'slice' as const,
+                sliceCommand: parts.sliceCommand,
+                slicePathsDigest: parts.slicePathsDigest,
+            }
+            : {}),
     });
     return `sha256:${crypto.createHash('sha256').update(canonical).digest('hex')}`;
 }
