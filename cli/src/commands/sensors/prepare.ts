@@ -237,25 +237,91 @@ function projectApplicabilityMet(sensor: ProjectDeclaredSensor, paths: string[] 
 function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecution {
     const sensor = input.sensor as ProjectDeclaredSensor;
     const requestedScope = resolveRequestedScope(input.requestedScope);
-    if (!projectApplicabilityMet(sensor, input.applicabilityPaths)) {
-        return {
-            name: input.name,
-            ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
-            requestedScope,
-            effectiveScope: 'full',
-            syntheticStatus: 'inconclusive',
-            syntheticReason: 'not-applicable: applicability-not-met',
-            certification: 'project-declared',
-        };
-    }
-    return {
+    const common = {
         name: input.name,
-        command: { kind: 'structured', value: sensor.command },
         formatter: sensor.formatter || 'exit-code',
         ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
         requestedScope,
+        certification: 'project-declared' as const,
+    };
+    if (!projectApplicabilityMet(sensor, input.applicabilityPaths)) {
+        return {
+            ...common,
+            effectiveScope: 'full',
+            syntheticStatus: 'inconclusive',
+            syntheticReason: 'not-applicable: applicability-not-met',
+        };
+    }
+    if (requestedScope === 'slice') {
+        if (!input.changed) {
+            return { ...common, effectiveScope: 'slice', syntheticStatus: 'inconclusive', syntheticReason: 'slice scope requires --base' };
+        }
+        if (input.changed.error) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: `slice scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!sensor.sliceCommand?.fileInput) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'sliceCommand is not usable',
+            };
+        }
+        const files = filterByExtension(input.changed.files, sensor.sliceCommand.fileInput.extensions);
+        if (files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                files: 0,
+                syntheticStatus: 'skipped',
+                syntheticReason: 'slice scope empty after filters',
+                ...(input.changed.files.length > 0 ? { scopeReason: 'extension or packageRoot filters removed every slice path' } : {}),
+            };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(sensor.sliceCommand, files) },
+            effectiveScope: 'slice',
+            files: files.length,
+        };
+    }
+    if (requestedScope === 'changed' && input.changed) {
+        if (input.changed.error) {
+            return {
+                ...common,
+                command: { kind: 'structured', value: sensor.command },
+                effectiveScope: 'full',
+                scopeReason: `changed scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!sensor.changedCommand?.fileInput) {
+            return {
+                ...common,
+                command: { kind: 'structured', value: sensor.command },
+                effectiveScope: 'full',
+                scopeReason: 'sensor does not support changed scope',
+            };
+        }
+        const files = filterByExtension(input.changed.files, sensor.changedCommand.fileInput.extensions);
+        if (files.length === 0) {
+            return { ...common, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(sensor.changedCommand, files) },
+            effectiveScope: 'changed',
+            files: files.length,
+        };
+    }
+    return {
+        ...common,
+        command: { kind: 'structured', value: sensor.command },
         effectiveScope: 'full',
-        certification: 'project-declared',
     };
 }
 
@@ -296,6 +362,9 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
         ...timeout(input.projectTimeout ?? packSensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, packSensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,
     };
+    // RF-1.5: project structured override ?? pack variant default ?? absent
+    const sliceCommand = packSensor.sliceCommand?.fileInput ? packSensor.sliceCommand : variant.sliceCommand;
+    const changedCommand = packSensor.changedCommand?.fileInput ? packSensor.changedCommand : variant.changedCommand;
     if (requestedScope === 'slice') {
         if (!input.changed) {
             return {
@@ -313,7 +382,7 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
                 syntheticReason: `slice scope could not be resolved: ${input.changed.error}`,
             };
         }
-        if (!variant.sliceCommand?.fileInput) {
+        if (!sliceCommand?.fileInput) {
             return {
                 ...common,
                 effectiveScope: 'slice',
@@ -321,7 +390,7 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
                 syntheticReason: 'sliceCommand is not usable',
             };
         }
-        const files = filterByExtension(input.changed.files, variant.sliceCommand.fileInput.extensions);
+        const files = filterByExtension(input.changed.files, sliceCommand.fileInput.extensions);
         if (files.length === 0) {
             return {
                 ...common,
@@ -334,15 +403,15 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
         }
         return {
             ...common,
-            command: { kind: 'structured', value: expandFileInput(variant.sliceCommand, files) },
+            command: { kind: 'structured', value: expandFileInput(sliceCommand, files) },
             effectiveScope: 'slice',
             files: files.length,
         };
     }
     if (requestedScope !== 'changed' || !input.changed) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full' };
     if (input.changed.error) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: `changed scope could not be resolved: ${input.changed.error}` };
-    if (!variant.changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };
-    const files = filterByExtension(input.changed.files, variant.changedCommand.fileInput?.extensions);
+    if (!changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };
+    const files = filterByExtension(input.changed.files, changedCommand.fileInput?.extensions);
     if (files.length === 0) return { ...common, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
-    return { ...common, command: { kind: 'structured', value: expandFileInput(variant.changedCommand, files) }, effectiveScope: 'changed', files: files.length };
+    return { ...common, command: { kind: 'structured', value: expandFileInput(changedCommand, files) }, effectiveScope: 'changed', files: files.length };
 }

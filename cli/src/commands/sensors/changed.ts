@@ -65,12 +65,14 @@ export function changedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
     try {
         // `HEAD` means "everything not yet committed" — no merge-base needed, and it
         // is the right default for a gate that runs before the work is committed.
+        // Inclusive name-only diffs (RF-1.8): deletes contribute the deleted path;
+        // renames contribute the new path. Do not use `--diff-filter=d` (excludes deletes).
         if (base !== 'HEAD') {
             const from = mergeBase(base, cwd);
-            out = out.concat(git(['diff', '--name-only', '--diff-filter=d', from, 'HEAD'], cwd).split('\n'));
+            out = out.concat(git(['diff', '--name-only', from, 'HEAD'], cwd).split('\n'));
         }
-        out = out.concat(git(['diff', '--name-only', '--diff-filter=d', 'HEAD'], cwd).split('\n'));
-        out = out.concat(git(['diff', '--name-only', '--diff-filter=d', '--cached'], cwd).split('\n'));
+        out = out.concat(git(['diff', '--name-only', 'HEAD'], cwd).split('\n'));
+        out = out.concat(git(['diff', '--name-only', '--cached'], cwd).split('\n'));
         out = out.concat(git(['ls-files', '--others', '--exclude-standard'], cwd).split('\n'));
     } catch (e) {
         return { files: [], error: (e as Error).message.split('\n')[0] };

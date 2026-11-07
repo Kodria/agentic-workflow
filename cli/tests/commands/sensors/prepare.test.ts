@@ -81,6 +81,47 @@ describe('prepareV2Sensor', () => {
         expect(() => prepareV2Sensor({ ...v2Input(), requestedScope: 'sideways' as unknown as 'changed' }))
             .toThrow('requested scope must be "full", "changed", or "slice"');
     });
+
+    test('project sliceCommand override wins over pack variant (RF-1.5)', () => {
+        const packSlice = {
+            executable: 'pack-slice',
+            resolution: 'path' as const,
+            args: ['--mutate', '{files}'],
+            fileInput: { placeholder: '{files}' as const, extensions: ['.ts'] },
+        };
+        const projectSlice = {
+            executable: 'project-slice',
+            resolution: 'path' as const,
+            args: ['run', '{files}'],
+            fileInput: { placeholder: '{files}' as const, extensions: ['.ts'] },
+        };
+        const input = v2Input({
+            requestedScope: 'slice',
+            changed: { files: ['src/a.ts'] },
+            sensor: {
+                enabled: true,
+                variantId: 'eslint-live',
+                command: fullCommand,
+                sliceCommand: projectSlice,
+                initializedCompatibility: {
+                    state: 'certified' as const,
+                    reason: 'test',
+                    variantId: 'eslint-live',
+                    toolVersion: '1.0.0',
+                    runtimeVersion: '1.0.0',
+                    certifiedRange: '>=1.0.0',
+                    evidence: [],
+                },
+            },
+        });
+        input.liveSensor!.variants[0].sliceCommand = packSlice;
+        const prepared = prepareV2Sensor(input);
+        expect(prepared.effectiveScope).toBe('slice');
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'project-slice', resolution: 'path', args: ['run', 'src/a.ts'] },
+        });
+    });
 });
 
 describe('prepareLegacySensor', () => {
@@ -172,6 +213,29 @@ describe('prepareV2Sensor: project-declared entries (S2)', () => {
         expect(prepared.command).toBeUndefined();
         expect(prepared.syntheticStatus).toBe('inconclusive');
         expect(prepared.syntheticReason).toBe('not-applicable: applicability-not-met');
+        expect(prepared.certification).toBe('project-declared');
+    });
+
+    test('project-declared sliceCommand executes under requestedScope slice (RF-1.5)', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor({
+                closureOnly: true,
+                sliceCommand: {
+                    executable: 'node',
+                    resolution: 'path',
+                    args: ['scripts/slice.js', '{files}'],
+                    fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+                },
+            }),
+            requestedScope: 'slice',
+            changed: { files: ['src/a.ts', 'README.md'] },
+        });
+        expect(prepared.effectiveScope).toBe('slice');
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'node', resolution: 'path', args: ['scripts/slice.js', 'src/a.ts'] },
+        });
         expect(prepared.certification).toBe('project-declared');
     });
 });

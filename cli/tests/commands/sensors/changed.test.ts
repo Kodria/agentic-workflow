@@ -46,11 +46,20 @@ describe('changedFiles', () => {
         expect(changedFiles(dir).files).not.toContain('dist/bundle.js');
     });
 
-    it('omits deleted files — a sensor cannot read a path that is gone', () => {
+    it('includes deleted paths in the scope (RF-1.8)', () => {
         const dir = make();
         fs.rmSync(path.join(dir, 'base.ts'));
 
-        expect(changedFiles(dir).files).not.toContain('base.ts');
+        expect(changedFiles(dir).files).toContain('base.ts');
+    });
+
+    it('rename contributes the new path and still surfaces under an inclusive filter (RF-1.8)', () => {
+        const dir = make();
+        const run = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+        run(['mv', 'base.ts', 'renamed.ts']);
+        run(['add', '-A']);
+        const files = changedFiles(dir).files;
+        expect(files).toContain('renamed.ts');
     });
 
     it('compares against the merge base, not the branch tip', () => {

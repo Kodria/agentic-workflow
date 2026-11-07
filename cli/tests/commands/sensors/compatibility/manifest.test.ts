@@ -490,6 +490,53 @@ describe('sensor manifest contract', () => {
             });
         });
 
+        it('accepts project structured sliceCommand override on pack-bound and project-declared (RF-1.5)', () => {
+            const sliceCommand = {
+                executable: 'stryker',
+                resolution: 'node-modules-bin',
+                args: ['run', '--mutate', '{files}'],
+                fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+            };
+            const packBound = {
+                ...validV2Manifest().sensors.lint,
+                sliceCommand,
+            };
+            const project = projectSensor({ sliceCommand, closureOnly: true });
+            const parsed = parseSensorManifest({
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                pack: 'js-ts',
+                source: { registry: 'baseline' },
+                sensors: { lint: packBound, custom: project },
+            }, 'sensors.json');
+            expect(parsed).toMatchObject({
+                kind: 'v3',
+                pack: {
+                    sensors: {
+                        lint: { sliceCommand },
+                        custom: { sliceCommand, source: 'project', closureOnly: true },
+                    },
+                },
+            });
+        });
+
+        it('rejects project sliceCommand without fileInput (RF-1.5)', () => {
+            const bad = {
+                executable: 'stryker',
+                resolution: 'node-modules-bin',
+                args: ['run'],
+            };
+            expect(() => parseSensorManifest({
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                pack: 'js-ts',
+                source: { registry: 'baseline' },
+                sensors: {
+                    lint: { ...validV2Manifest().sensors.lint, sliceCommand: bad },
+                },
+            }, 'sensors.json')).toThrow(/sliceCommand must declare fileInput/);
+        });
+
         it('treats omitted closureOnly as false and does not invent inputs (RF-1.8)', () => {
             const parsed = parseSensorManifest(v3WithPackAndProject(), 'sensors.json');
             expect(parsed).toMatchObject({ kind: 'v3' });

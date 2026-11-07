@@ -172,8 +172,12 @@ function sliceMissingBaseExecution(name: string): PreparedSensorExecution {
     };
 }
 
-function usableSliceCommand(variant: SensorVariant | undefined): StructuredCommand | undefined {
-    const command = variant?.sliceCommand;
+/** Effective sliceCommand = project structured override ?? pack variant (RF-1.5). */
+function usableSliceCommand(
+    variant: SensorVariant | undefined,
+    projectOverride?: StructuredCommand,
+): StructuredCommand | undefined {
+    const command = projectOverride?.fileInput ? projectOverride : variant?.sliceCommand;
     if (!command?.fileInput) return undefined;
     return command;
 }
@@ -602,7 +606,50 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             const fast = projectEntry.fast ?? false;
             if (!shouldRun(fast, opts)) continue;
             if (opts.slice && effectiveClosureOnly(projectEntry, undefined)) {
-                prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+                const projectSlice = usableSliceCommand(undefined, projectEntry.sliceCommand);
+                if (!projectSlice) {
+                    prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+                    continue;
+                }
+                if (typeof opts.base !== 'string' || opts.base.trim() === '') {
+                    prepared.push({ execution: sliceMissingBaseExecution(name), cachePlan: null });
+                    continue;
+                }
+                const rawSlice = resolveSliceChanged();
+                const contained = rawSlice.error
+                    ? { files: [] as string[], dropped: 0 }
+                    : filterPathsInsidePackageRoot(rawSlice.files, projectCwd, gitRoot);
+                const sliceScope = rawSlice.error
+                    ? { files: [] as string[], error: rawSlice.error }
+                    : { files: contained.files };
+                const markers = [
+                    ...(projectEntry.applicability?.allFiles ?? []),
+                    ...(projectEntry.applicability?.anyFiles ?? []),
+                ];
+                const applicabilityPaths = markers.length > 0
+                    ? discoverPresentMarkers(projectCwd, markers)
+                    : undefined;
+                const execution = prepareV2Sensor({
+                    name,
+                    sensor: projectEntry,
+                    requestedScope: 'slice',
+                    changed: sliceScope,
+                    projectTimeout: projectEntry.timeout,
+                    applicabilityPaths,
+                });
+                const withDropNote = contained.dropped > 0
+                    ? {
+                        ...execution,
+                        scopeReason: [
+                            execution.scopeReason,
+                            `dropped ${contained.dropped} path(s) outside packageRoot`,
+                        ].filter(Boolean).join('; '),
+                    }
+                    : execution;
+                const disabled = projectEntry.enabled === false
+                    ? { ...withDropNote, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
+                    : withDropNote;
+                prepared.push({ execution: disabled, cachePlan: null });
                 continue;
             }
             const markers = [
@@ -685,7 +732,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             : undefined;
 
         if (opts.slice && effectiveClosureOnly(packBoundSensor as { closureOnly?: boolean }, liveSensor)) {
-            if (!usableSliceCommand(variant)) {
+            const projectSliceOverride = (packBoundSensor as PackBoundManifestSensor).sliceCommand;
+            if (!usableSliceCommand(variant, projectSliceOverride)) {
                 prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
                 continue;
             }
@@ -724,7 +772,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             // and digest of resolved paths. Full-gate keys never share this space.
             let slicePlan: CachePlan | null = null;
             const sliceInputs = effectiveInputs((packBoundSensor as PackBoundManifestSensor).inputs, variant);
-            const sliceCmd = usableSliceCommand(variant);
+            const sliceCmd = usableSliceCommand(variant, projectSliceOverride);
             if (sliceInputs && sliceCmd && ready.syntheticStatus === undefined && !('error' in sliceScope && sliceScope.error)) {
                 const slicePaths = filterByExtension(
                     'files' in sliceScope ? sliceScope.files : [],
