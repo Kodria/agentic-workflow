@@ -8,6 +8,7 @@ import {
     type SensorManifestV2,
     type V3ManifestSensor,
 } from './compatibility/manifest';
+import { toSafeRepoRel } from './inputs-digest';
 import type { PreparedSensorExecution, SensorConfig } from './types';
 
 export type PrepareRunOptions = {
@@ -40,6 +41,11 @@ function resolveRequestedScope(value: unknown): RequestedScope {
  *
  * When `gitRoot` is provided, `files` are treated as git-root-relative (the
  * `changedFiles` contract); otherwise they are treated as package-relative.
+ *
+ * Containment uses `toSafeRepoRel` (realpath both sides) so Windows cannot
+ * false-throw when `run.ts` passes a native-realpath'd gitRoot beside a
+ * non-native packageRoot — the same native vs non-native pitfall documented
+ * in `inputs-digest.ts`.
  */
 export function filterPathsInsidePackageRoot(
     files: string[],
@@ -51,12 +57,11 @@ export function filterPathsInsidePackageRoot(
     const packageAbs = path.resolve(packageRoot);
     let packageRootRel = '';
     if (typeof gitRoot === 'string' && gitRoot.trim() !== '') {
-        const gitAbs = path.resolve(gitRoot);
-        const rel = path.relative(gitAbs, packageAbs).split(path.sep).join('/');
-        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        try {
+            packageRootRel = toSafeRepoRel(gitRoot, packageRoot, 'packageRoot');
+        } catch {
             throw new Error('packageRoot must be inside gitRoot');
         }
-        packageRootRel = rel;
     }
     const kept: string[] = [];
     let dropped = 0;

@@ -1,4 +1,13 @@
-import { prepareLegacySensor, prepareV2Sensor, validateRunOptions, type PrepareV2SensorInput } from '../../../src/commands/sensors/prepare';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import {
+    filterPathsInsidePackageRoot,
+    prepareLegacySensor,
+    prepareV2Sensor,
+    validateRunOptions,
+    type PrepareV2SensorInput,
+} from '../../../src/commands/sensors/prepare';
 import type { ProjectDeclaredSensor } from '../../../src/commands/sensors/compatibility/manifest';
 import type { SensorVariant } from '../../../src/commands/sensors/compatibility/types';
 
@@ -275,5 +284,43 @@ describe('prepareV2Sensor: que versiones ejecutan', () => {
         expect(prepared.syntheticReason).toBe(`${state}: ${reason}`);
         expect(prepared.command).toBeUndefined();
         expect(prepared.certification).toBeUndefined();
+    });
+});
+
+describe('filterPathsInsidePackageRoot', () => {
+    it('realpaths mixed gitRoot/packageRoot forms so equal roots stay inside (Windows native vs resolve)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-filter-pkg-'));
+        try {
+            const nativeRoot = fs.realpathSync.native(root);
+            // Same directory, non-canonical forms — mirrors run.ts (native gitRoot)
+            // beside configured.packageRoot (resolve / non-native realpath).
+            const mixedPackage = path.join(nativeRoot, '.', path.sep);
+            const kept = filterPathsInsidePackageRoot(
+                ['src/a.ts', 'outside/../src/b.ts', '/abs.ts'],
+                mixedPackage,
+                nativeRoot,
+            );
+            expect(kept).toEqual({ files: ['src/a.ts'], dropped: 2 });
+            expect(() => filterPathsInsidePackageRoot(['x.ts'], path.join(os.tmpdir(), 'awm-escape-pkg'), nativeRoot))
+                .toThrow(/packageRoot must be inside gitRoot/);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('strips the packageRoot prefix when the package is a git subdirectory', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-filter-sub-'));
+        const pkg = path.join(root, 'cli');
+        fs.mkdirSync(pkg);
+        try {
+            const kept = filterPathsInsidePackageRoot(
+                ['cli/src/a.ts', 'docs/readme.md', 'cli'],
+                pkg,
+                root,
+            );
+            expect(kept).toEqual({ files: ['src/a.ts'], dropped: 2 });
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 });
