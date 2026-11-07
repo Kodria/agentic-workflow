@@ -49,6 +49,75 @@ describe('awm evidence verify (RF-3.9 / P7, RF-E.1)', () => {
     expect(body.reason).toMatch(/argv|expected/i);
   });
 
+  test('S4-NQ-2: empty expectArgv array → mismatch fail-closed', async () => {
+    const receiptPath = await writeReceipt();
+    const verified = runEvidenceVerify({ root, receiptPath, expectArgv: [] });
+    expect(verified.code).toBe(2);
+    expect(JSON.parse(verified.stdout)).toEqual(expect.objectContaining({
+      status: 'mismatch',
+      reason: expect.stringMatching(/argv|expected/i),
+    }));
+  });
+
+  test('S4-BQ-1: glob --paths scope — edit under matched files → verify mismatch (not vacuous false-match)', async () => {
+    const argv = defaultArgv();
+    const run = await runEvidenceRun({ root, argv, declaredScope: ['*.txt'] });
+    expect(run.code).toBe(0);
+    expect(run.receiptPath).toBeDefined();
+    const receipt = JSON.parse(fs.readFileSync(run.receiptPath!, 'utf8'));
+    expect(receipt.scope.resolved.length).toBeGreaterThan(0);
+    expect(receipt.scope.resolved).toEqual(expect.arrayContaining(['tracked.txt']));
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed-under-glob\n');
+    const verified = runEvidenceVerify({ root, receiptPath: run.receiptPath!, expectArgv: argv });
+    expect(verified.code).toBe(2);
+    expect(JSON.parse(verified.stdout).reason).toMatch(/contentDigest|candidate/i);
+  });
+
+  test('S4-BQ-1: unresolved glob scope refuses the run (fail closed)', async () => {
+    const run = await runEvidenceRun({
+      root,
+      argv: defaultArgv(),
+      declaredScope: ['does-not-match-*.xyz'],
+    });
+    expect(run.code).toBe(2);
+    expect(run.stderr).toMatch(/scope|empty|unresolved|vacuous/i);
+    expect(fs.existsSync(path.join(root, '.awm', 'evidence', 'runs'))
+      ? fs.readdirSync(path.join(root, '.awm', 'evidence', 'runs')).filter((n) => n.endsWith('.json'))
+      : []).toEqual([]);
+  });
+
+  test('S4-NQ-1: run --cwd <sub> then verify without override matches via receipt cwd', async () => {
+    const sub = path.join(root, 'pkg');
+    fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(sub, 'nested.txt'), 'n\n');
+    git(root, ['add', 'pkg']);
+    git(root, ['commit', '-qm', 'nested']);
+    const argv = defaultArgv();
+    const run = await runEvidenceRun({ root, argv, cwd: 'pkg' });
+    expect(run.code).toBe(0);
+    const receipt = JSON.parse(fs.readFileSync(run.receiptPath!, 'utf8'));
+    expect(fs.realpathSync(receipt.cwd)).toBe(fs.realpathSync(sub));
+    const verified = runEvidenceVerify({ root, receiptPath: run.receiptPath!, expectArgv: argv });
+    expect(verified.code).toBe(0);
+    expect(JSON.parse(verified.stdout)).toEqual({ status: 'match' });
+  });
+
+  test('S4-NQ-1: verify --cwd override that disagrees with receipt → cwd mismatch', async () => {
+    const sub = path.join(root, 'pkg');
+    fs.mkdirSync(sub);
+    const argv = defaultArgv();
+    const run = await runEvidenceRun({ root, argv, cwd: 'pkg' });
+    expect(run.code).toBe(0);
+    const verified = runEvidenceVerify({
+      root,
+      receiptPath: run.receiptPath!,
+      expectArgv: argv,
+      expectCwd: '.',
+    });
+    expect(verified.code).toBe(2);
+    expect(JSON.parse(verified.stdout).reason).toMatch(/cwd/i);
+  });
+
   test('reports mismatch after a contentDigest-affecting edit', async () => {
     const argv = defaultArgv();
     const receiptPath = await writeReceipt(argv);

@@ -10,6 +10,7 @@ import {
   readMechanicalRunEvidenceFile,
   redactMechanicalArgv,
   resolveHeadCommit,
+  resolveScopePaths,
   sealMechanicalRunEvidence,
   writeMechanicalRunEvidence,
 } from '../../core/evidence/mechanical-run';
@@ -103,7 +104,7 @@ export function registerEvidenceCommand(program: Command): void {
   evidence.command('run')
     .description('run a command and write a MechanicalRunEvidence receipt (not CycleEvidenceV1)')
     .option('--cwd <dir>', 'working directory (absolute or repo-relative)', '.')
-    .option('--paths <globs...>', 'optional declared scope paths recorded on the receipt')
+    .option('--paths <patterns...>', 'optional picomatch globs / repo-rel paths expanded into the content digest (empty expansion fails closed)')
     .argument('<cmd...>', 'command after --')
     .action(async (cmd: string[], opts: { cwd?: string; paths?: string[] }) => {
       const result = await runEvidenceRun({ root: process.cwd(), argv: cmd, cwd: opts.cwd, declaredScope: opts.paths });
@@ -114,13 +115,15 @@ export function registerEvidenceCommand(program: Command): void {
 
   evidence.command('verify')
     .description('verify a MechanicalRunEvidence receipt against the current candidate (requires -- <expected argv…>)')
+    .option('--cwd <dir>', 'expected cwd override (default: re-resolve receipt.cwd under the repo root)')
     .argument('<receipt-path>', 'path to a MechanicalRunEvidence JSON file')
     .argument('[expectCmd...]', 'expected argv after -- (required; omit → mismatch)')
-    .action((receiptPath: string, expectCmd: string[]) => {
+    .action((receiptPath: string, expectCmd: string[], opts: { cwd?: string }) => {
       const result = runEvidenceVerify({
         root: process.cwd(),
         receiptPath,
         expectArgv: expectCmd,
+        ...(opts.cwd !== undefined ? { expectCwd: opts.cwd } : {}),
       });
       process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -240,7 +243,14 @@ export async function runEvidenceRun(input: {
     const rootReal = fs.realpathSync(input.root);
     const cwd = resolveRunCwd(rootReal, input.cwd);
     const declared = Array.isArray(input.declaredScope) ? input.declaredScope : [];
-    const resolved = Array.isArray(input.resolvedScope) ? input.resolvedScope : declared;
+    // Expand globs to real repo-rel paths before digesting (S4-BQ-1). Caller-supplied
+    // resolvedScope (already expanded) wins; otherwise expand declared patterns.
+    let resolved: string[] = [];
+    if (Array.isArray(input.resolvedScope) && input.resolvedScope.length > 0) {
+      resolved = resolveScopePaths(rootReal, input.resolvedScope);
+    } else if (declared.length > 0) {
+      resolved = resolveScopePaths(rootReal, declared);
+    }
     const started = Date.now();
     const ranAt = new Date(started).toISOString();
     const child = await captureChild(input.argv, cwd);
@@ -298,19 +308,31 @@ export function runEvidenceVerify(input: {
       if (/integrity/i.test(message)) return mismatch('integrity');
       return mismatch('absent');
     }
-    const expectedCwd = input.expectCwd !== undefined ? resolveRunCwd(rootReal, input.expectCwd) : rootReal;
     let recordedCwd: string;
     try {
       recordedCwd = fs.realpathSync(evidence.cwd);
     } catch {
       return mismatch('cwd');
     }
+    // S4-NQ-1: default expected cwd to the receipt's cwd (re-resolved), not repo root —
+    // so `evidence run --cwd <sub>` round-trips through CLI verify without a false cwd mismatch.
+    const expectedCwd = input.expectCwd !== undefined ? resolveRunCwd(rootReal, input.expectCwd) : recordedCwd;
     if (recordedCwd !== expectedCwd) return mismatch('cwd');
     const expected = redactMechanicalArgv(input.expectArgv);
     if (expected.length !== evidence.argv.length || expected.some((token, i) => token !== evidence.argv[i])) {
       return mismatch('argv');
     }
-    const scopePaths = evidence.scope.resolved.length > 0 ? evidence.scope.resolved : undefined;
+    let scopePaths: string[] | undefined;
+    if (evidence.scope.resolved.length > 0) {
+      scopePaths = evidence.scope.resolved;
+    } else if (evidence.scope.declared.length > 0) {
+      // Legacy/partial receipts: re-expand declared patterns; vacuous → mismatch.
+      try {
+        scopePaths = resolveScopePaths(rootReal, evidence.scope.declared);
+      } catch {
+        return mismatch('scope');
+      }
+    }
     const currentDigest = computeCandidateContentDigest(rootReal, scopePaths);
     if (currentDigest !== evidence.candidate.contentDigest) return mismatch('contentDigest');
     return { code: 0, stdout: `${JSON.stringify({ status: 'match' })}\n`, stderr: '' };

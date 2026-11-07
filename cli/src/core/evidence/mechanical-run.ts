@@ -10,13 +10,22 @@
  * band** — they are not hashed into contentDigest and are not compared by
  * verify. Controllers that need env-sensitive gates MUST re-execute or pass
  * env via explicit argv.
+ *
+ * Scope (S4-BQ-1): `--paths` patterns are picomatch globs expanded against the
+ * candidate worktree before digesting. An empty expansion (vacuous scope) fails
+ * closed — never an empty-set SHA-256 that would false-match after edits.
  */
+/// <reference path="../../types/picomatch-posix.d.ts" />
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import picomatch from 'picomatch/posix';
 import { writeFileAtomicDurable } from '../atomic-file';
 import { execGit } from '../changes/git-env';
 import { redactArgv, redactText } from '../journal/redact';
+
+/** Same picomatch options as sensor input digests (`dot` + POSIX classes). */
+const SCOPE_MATCH_OPTIONS = { dot: true, posix: true } as const;
 
 export const MECHANICAL_RUN_SCHEMA = 'mechanical-run-evidence/v1' as const;
 export const RESULT_SUMMARY_MAX_BYTES = 4096;
@@ -252,22 +261,51 @@ function hashPathContribution(root: string, repoRel: string): string {
 }
 
 /**
+ * Expand declared scope patterns (exact paths and/or picomatch globs) to real
+ * repo-relative candidate paths. Fails closed when the expansion is empty (S4-BQ-1).
+ */
+export function resolveScopePaths(root: string, patterns: readonly string[]): string[] {
+  if (typeof root !== 'string' || root.length === 0) throw new Error('scope root must be a non-empty string');
+  if (!Array.isArray(patterns) || patterns.length === 0) {
+    throw new Error('scope patterns must be a non-empty string[]');
+  }
+  if (patterns.some((p) => typeof p !== 'string' || p.length === 0 || p.includes('\0'))) {
+    throw new Error('scope patterns must be non-empty strings');
+  }
+  const rootReal = fs.realpathSync(root);
+  const candidates = listCandidatePaths(rootReal).map((p) => p.split(path.sep).join('/'));
+  const matchers = patterns.map((pattern) => {
+    const norm = pattern.split(path.sep).join('/');
+    return picomatch(norm, { ...SCOPE_MATCH_OPTIONS });
+  });
+  const matched = new Set<string>();
+  for (const repoRel of candidates) {
+    if (matchers.some((m) => m(repoRel))) matched.add(repoRel);
+  }
+  if (matched.size === 0) {
+    throw new Error('scope expansion is empty (vacuous/unresolved --paths); refusing empty-set contentDigest');
+  }
+  return [...matched].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
  * Worktree content digest for candidate identity (RF-3.6). Shared by
  * `evidence run` (seal) and `evidence verify` (recompute). Env is intentionally
- * excluded (see module header).
+ * excluded (see module header). When `scopePaths` is provided it is treated as
+ * already-resolved repo-rel paths OR as patterns to expand (via resolveScopePaths);
+ * empty expansion fails closed (S4-BQ-1).
  */
 export function computeCandidateContentDigest(root: string, scopePaths?: readonly string[]): string {
   if (typeof root !== 'string' || root.length === 0) throw new Error('contentDigest root must be a non-empty string');
   const rootReal = fs.realpathSync(root);
-  let paths = listCandidatePaths(rootReal);
-  if (scopePaths !== undefined) {
-    if (!Array.isArray(scopePaths) || scopePaths.some((p) => typeof p !== 'string')) {
-      throw new Error('scopePaths must be string[]');
-    }
-    const allowed = new Set(scopePaths.map((p) => p.split(path.sep).join('/')));
-    paths = paths.filter((p) => allowed.has(p.split(path.sep).join('/')));
+  let paths: string[];
+  if (scopePaths === undefined) {
+    paths = listCandidatePaths(rootReal).map((p) => p.split(path.sep).join('/'));
+  } else {
+    // Expand globs / validate non-empty intersection with the candidate set.
+    paths = resolveScopePaths(rootReal, scopePaths);
   }
-  paths = [...paths].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  paths = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const hash = crypto.createHash('sha256');
   for (const repoRel of paths) {
     hash.update(`${repoRel}\0${hashPathContribution(rootReal, repoRel)}\0`);

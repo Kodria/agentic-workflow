@@ -148,4 +148,16 @@ describe('contentDigest helper shared by run+verify (RF-3.6)', () => {
     fs.writeFileSync(path.join(root, '.awm', 'evidence', 'runs', 'noise.json'), '{"x":1}\n');
     expect(computeCandidateContentDigest(root)).toBe(before);
   });
+
+  test('S4-BQ-1: glob scope expands to real paths so edits change the digest', () => {
+    const before = computeCandidateContentDigest(root, ['*.txt']);
+    expect(before).toMatch(/^sha256:[a-f0-9]{64}$/);
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'edited\n');
+    expect(computeCandidateContentDigest(root, ['*.txt'])).not.toBe(before);
+  });
+
+  test('S4-BQ-1: vacuous/unresolved scope fails closed (no empty-set digest)', () => {
+    expect(() => computeCandidateContentDigest(root, ['no-such-*.xyz'])).toThrow(/scope|empty|unresolved|vacuous/i);
+    expect(() => computeCandidateContentDigest(root, ['literally-missing.txt'])).toThrow(/scope|empty|unresolved|vacuous/i);
+  });
 });
