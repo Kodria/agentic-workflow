@@ -28,20 +28,20 @@ verification:
     typecheck: pass
   receipt_digest: sha256:5ab5a36db7331005e11232ba60d72299fc4110c8dfe75e77e3908e7dfa800e85
 manual_validation:
-  - step: From a clean clone of this branch, build CLI (`npm --prefix cli run build`) and run `node cli/dist/src/index.js sensors run --slice` with no sliceCommand in the project pack
-    expected: Bare closureOnly sensors skip as in 9.22.x; command does not fail solely for missing --base
-  - step: Add a temporary closureOnly sensor with structured sliceCommand+fileInput; run `--slice` without `--base`, then with `--base <sha>` after touching matching files
-    expected: Without base → that sensor non-pass naming missing base; with base → argv includes scoped files; empty extension filter → skipped not pass
-  - step: After a scoped pass with inputs, run a full-gate `sensors run` on the same sensor
-    expected: Full gate does not report cached:true from the scoped entry; second identical full run may hit full cache when inputs unchanged
-  - step: `node cli/dist/src/index.js evidence run -- printf ok` then `evidence verify <receipt> -- printf ok` and again without expected argv
-    expected: With argv → match; omit argv → mismatch fail-closed
-  - step: `ledger add` two deferred entries with the same signature; `resolve --id` the first; `list --deferred-open`
-    expected: Distinct ids; first resolved; second still listed open
+  - step: "From a clean clone of this branch, build CLI (npm --prefix cli run build) and run node cli/dist/src/index.js sensors run --slice with no sliceCommand in the project pack"
+    expected: "Bare closureOnly sensors skip as in 9.22.x; command does not fail solely for missing --base"
+  - step: "Add a temporary closureOnly sensor with structured sliceCommand+fileInput; run --slice without --base, then with --base <sha> after touching matching files"
+    expected: "Without base that sensor is non-pass naming missing base; with base argv includes scoped files; empty extension filter is skipped not pass"
+  - step: "After a scoped pass with inputs, run a full-gate sensors run on the same sensor"
+    expected: "Full gate does not report cached true from the scoped entry; second identical full run may hit full cache when inputs unchanged"
+  - step: "node cli/dist/src/index.js evidence run -- printf ok then evidence verify <receipt> -- printf ok and again without expected argv"
+    expected: "With argv match; omit argv mismatch fail-closed"
+  - step: "ledger add two deferred entries with the same signature; resolve --id the first; list --deferred-open"
+    expected: "Distinct ids; first resolved; second still listed open"
 risks:
-  - Published npm is still 9.22.2 until this lands and publishes; registry skills must wait for minCliVersion bump (companion plan).
-  - Projects that relied on undocumented --diff-filter=d omission of deletes now see deleted paths in --changed/--slice scope (RF-1.8); argv may grow for delete-heavy diffs.
-rollback: Revert this branch's merge commit (or `git revert` the merge) and republish the previous CLI tag; discard any `.awm/evidence/runs/` receipts and deferred ledger resolve lines written only by the new commands.
+  - "Published npm is still 9.22.2 until this lands and publishes; registry skills must wait for minCliVersion bump (companion plan)."
+  - "Projects that relied on undocumented omit-deletes in changed scope now see deleted paths in --changed/--slice scope (RF-1.8); argv may grow for delete-heavy diffs."
+rollback: "Revert this branch merge commit (or git revert the merge) and republish the previous CLI tag; discard .awm/evidence/runs receipts and deferred ledger resolve lines written only by the new commands."
 ---
 
 ## Qué se hizo
