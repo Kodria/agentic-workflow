@@ -12,8 +12,9 @@ function git(cwd: string, args: string[]): string {
   });
 }
 
-describe('awm evidence verify (RF-3.9, RF-E.1)', () => {
+describe('awm evidence verify (RF-3.9 / P7, RF-E.1)', () => {
   let root: string;
+  const defaultArgv = () => [process.execPath, '-e', 'process.exit(0)'];
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-verify-'));
@@ -25,23 +26,34 @@ describe('awm evidence verify (RF-3.9, RF-E.1)', () => {
 
   afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
-  async function writeReceipt(argv: string[] = [process.execPath, '-e', 'process.exit(0)']): Promise<string> {
+  async function writeReceipt(argv: string[] = defaultArgv()): Promise<string> {
     const result = await runEvidenceRun({ root, argv });
     expect(result.receiptPath).toMatch(/\.json$/);
     return result.receiptPath!;
   }
 
-  test('reports match on unchanged tree/argv/cwd and exits 0', async () => {
-    const receiptPath = await writeReceipt();
-    const verified = runEvidenceVerify({ root, receiptPath });
+  test('reports match on unchanged tree/cwd + matching expected argv and exits 0', async () => {
+    const argv = defaultArgv();
+    const receiptPath = await writeReceipt(argv);
+    const verified = runEvidenceVerify({ root, receiptPath, expectArgv: argv });
     expect(verified.code).toBe(0);
     expect(JSON.parse(verified.stdout)).toEqual({ status: 'match' });
   });
 
-  test('reports mismatch after a contentDigest-affecting edit', async () => {
+  test('omit expected argv → mismatch fail-closed (never match on tree/cwd alone) (RF-3.9 / P7)', async () => {
     const receiptPath = await writeReceipt();
-    fs.writeFileSync(path.join(root, 'tracked.txt'), 'beta\n');
     const verified = runEvidenceVerify({ root, receiptPath });
+    expect(verified.code).toBe(2);
+    const body = JSON.parse(verified.stdout);
+    expect(body.status).toBe('mismatch');
+    expect(body.reason).toMatch(/argv|expected/i);
+  });
+
+  test('reports mismatch after a contentDigest-affecting edit', async () => {
+    const argv = defaultArgv();
+    const receiptPath = await writeReceipt(argv);
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'beta\n');
+    const verified = runEvidenceVerify({ root, receiptPath, expectArgv: argv });
     expect(verified.code).toBe(2);
     const body = JSON.parse(verified.stdout);
     expect(body.status).toBe('mismatch');
@@ -62,11 +74,12 @@ describe('awm evidence verify (RF-3.9, RF-E.1)', () => {
   });
 
   test('tampered integrity is treated as absent/mismatch, never match (RF-E.1)', async () => {
-    const receiptPath = await writeReceipt();
+    const argv = defaultArgv();
+    const receiptPath = await writeReceipt(argv);
     const raw = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
     raw.exitCode = 42; // break integrity without resealing
     fs.writeFileSync(receiptPath, JSON.stringify(raw, null, 2) + '\n');
-    const verified = runEvidenceVerify({ root, receiptPath });
+    const verified = runEvidenceVerify({ root, receiptPath, expectArgv: argv });
     expect(verified.code).toBe(2);
     const body = JSON.parse(verified.stdout);
     expect(body.status).toBe('mismatch');
@@ -74,10 +87,11 @@ describe('awm evidence verify (RF-3.9, RF-E.1)', () => {
   });
 
   test('symlink receipt path fails closed as mismatch/absent', async () => {
-    const receiptPath = await writeReceipt();
+    const argv = defaultArgv();
+    const receiptPath = await writeReceipt(argv);
     const link = path.join(root, 'receipt-link.json');
     fs.symlinkSync(receiptPath, link);
-    const verified = runEvidenceVerify({ root, receiptPath: link });
+    const verified = runEvidenceVerify({ root, receiptPath: link, expectArgv: argv });
     expect(verified.code).toBe(2);
     const body = JSON.parse(verified.stdout);
     expect(body.status).toBe('mismatch');

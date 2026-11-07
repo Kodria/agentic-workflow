@@ -113,14 +113,14 @@ export function registerEvidenceCommand(program: Command): void {
     });
 
   evidence.command('verify')
-    .description('verify a MechanicalRunEvidence receipt against the current candidate')
+    .description('verify a MechanicalRunEvidence receipt against the current candidate (requires -- <expected argv…>)')
     .argument('<receipt-path>', 'path to a MechanicalRunEvidence JSON file')
-    .argument('[expectCmd...]', 'optional expected argv after -- for argv contrast')
+    .argument('[expectCmd...]', 'expected argv after -- (required; omit → mismatch)')
     .action((receiptPath: string, expectCmd: string[]) => {
       const result = runEvidenceVerify({
         root: process.cwd(),
         receiptPath,
-        ...(expectCmd.length > 0 ? { expectArgv: expectCmd } : {}),
+        expectArgv: expectCmd,
       });
       process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -265,7 +265,10 @@ export async function runEvidenceRun(input: {
 
 export type EvidenceVerifyResult = { code: 0 | 2; stdout: string; stderr: string };
 
-/** Contrast a MechanicalRunEvidence receipt with the current candidate (RF-3.9 / RF-E.1). */
+/**
+ * Contrast a MechanicalRunEvidence receipt with the current candidate (RF-3.9 / P7 / RF-E.1).
+ * Expected argv after `--` is mandatory: omit or empty → mismatch fail-closed (never match on tree/cwd alone).
+ */
 export function runEvidenceVerify(input: {
   root: string;
   receiptPath: string;
@@ -280,6 +283,10 @@ export function runEvidenceVerify(input: {
   try {
     if (!input || typeof input.root !== 'string' || typeof input.receiptPath !== 'string') {
       return mismatch('absent');
+    }
+    // P7 / RF-3.9: caller-supplied expected argv is required before any tree/cwd match.
+    if (!Array.isArray(input.expectArgv) || input.expectArgv.length === 0) {
+      return mismatch('expected argv required');
     }
     const rootReal = fs.realpathSync(input.root);
     let evidence;
@@ -299,11 +306,9 @@ export function runEvidenceVerify(input: {
       return mismatch('cwd');
     }
     if (recordedCwd !== expectedCwd) return mismatch('cwd');
-    if (input.expectArgv !== undefined) {
-      const expected = redactMechanicalArgv(input.expectArgv);
-      if (expected.length !== evidence.argv.length || expected.some((token, i) => token !== evidence.argv[i])) {
-        return mismatch('argv');
-      }
+    const expected = redactMechanicalArgv(input.expectArgv);
+    if (expected.length !== evidence.argv.length || expected.some((token, i) => token !== evidence.argv[i])) {
+      return mismatch('argv');
     }
     const scopePaths = evidence.scope.resolved.length > 0 ? evidence.scope.resolved : undefined;
     const currentDigest = computeCandidateContentDigest(rootReal, scopePaths);
