@@ -19,8 +19,8 @@ export type PreparedSensorExecution = {
     formatter?: string;
     timeoutMs: number;
     timeoutSource: 'project' | 'pack' | 'fallback';
-    requestedScope: 'full' | 'changed';
-    effectiveScope: 'full' | 'changed';
+    requestedScope: 'full' | 'changed' | 'slice';
+    effectiveScope: 'full' | 'changed' | 'slice';
     scopeReason?: string;
     files?: number;
     syntheticStatus?: 'pass' | 'skipped' | 'inconclusive';
@@ -91,8 +91,8 @@ export type ExecutionEvidence = {
     timeoutMs: number;
     timeoutSource: 'project' | 'pack' | 'fallback';
     elapsedMs: number;
-    requestedScope: 'full' | 'changed';
-    effectiveScope: 'full' | 'changed';
+    requestedScope: 'full' | 'changed' | 'slice';
+    effectiveScope: 'full' | 'changed' | 'slice';
     files?: number;
     scopeReason?: string;
 };
@@ -176,12 +176,13 @@ export type SensorResult = {
      */
     incomplete?: string;
     /**
-     * Set to 'changed' when this sensor ran against the diff rather than the whole
-     * tree. Makes a scoped result self-describing: a `pass` here means "clean over
-     * the changed files", which is a weaker claim than an unscoped `pass`, and the
-     * reader must be able to tell them apart without knowing which flags were used.
+     * Set when this sensor ran against a partial file scope rather than the whole
+     * tree. `changed` is `--changed`; `slice` is `--slice` with `sliceCommand`.
+     * A `pass` here means "clean over that scoped set", which is a weaker claim
+     * than an unscoped `pass`, and the reader must be able to tell them apart
+     * without knowing which flags were used.
      */
-    scope?: 'changed';
+    scope?: 'changed' | 'slice';
     /** New findings (not in baseline). Present only when a baseline is applied. */
     newCount?: number;
     /** Findings suppressed by the baseline. Present only when a baseline is applied. */

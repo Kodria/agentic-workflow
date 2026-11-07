@@ -79,7 +79,7 @@ describe('prepareV2Sensor', () => {
 
     test('rejects an invalid requested scope before preparing a command', () => {
         expect(() => prepareV2Sensor({ ...v2Input(), requestedScope: 'sideways' as unknown as 'changed' }))
-            .toThrow('requested scope must be "full" or "changed"');
+            .toThrow('requested scope must be "full", "changed", or "slice"');
     });
 });
 

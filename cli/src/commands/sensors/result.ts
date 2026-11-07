@@ -59,7 +59,7 @@ function validatePrepared(prepared: PreparedSensorExecution): void {
     if (!prepared || typeof prepared !== 'object' || typeof prepared.name !== 'string' || prepared.name === '') throw new Error('prepared sensor requires a nonempty name');
     if (!Number.isSafeInteger(prepared.timeoutMs) || prepared.timeoutMs <= 0) throw new Error('prepared sensor timeoutMs must be a positive safe integer');
     if (!['project', 'pack', 'fallback'].includes(prepared.timeoutSource)) throw new Error('prepared sensor timeoutSource is invalid');
-    if (!['full', 'changed'].includes(prepared.requestedScope) || !['full', 'changed'].includes(prepared.effectiveScope)) throw new Error('prepared sensor scope is invalid');
+    if (!['full', 'changed', 'slice'].includes(prepared.requestedScope) || !['full', 'changed', 'slice'].includes(prepared.effectiveScope)) throw new Error('prepared sensor scope is invalid');
     if (prepared.files !== undefined && (!Number.isSafeInteger(prepared.files) || prepared.files < 0)) throw new Error('prepared sensor files must be a non-negative safe integer');
     if (prepared.command !== undefined && (prepared.command.kind !== 'legacy' && prepared.command.kind !== 'structured')) throw new Error('prepared sensor command kind is invalid');
 }
@@ -67,7 +67,9 @@ function validatePrepared(prepared: PreparedSensorExecution): void {
 function scoped(result: SensorResult, prepared: PreparedSensorExecution): SensorResult {
     return {
         ...result,
-        ...(prepared.effectiveScope === 'changed' ? { scope: 'changed' as const } : {}),
+        ...(prepared.effectiveScope === 'changed' || prepared.effectiveScope === 'slice'
+            ? { scope: prepared.effectiveScope }
+            : {}),
     };
 }
 
@@ -83,7 +85,9 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
     const withEvidence = (result: Omit<SensorResult, 'execution'>): SensorResult => ({
         ...result,
         ...(prepared.certification ? { certification: prepared.certification } : {}),
-        ...(prepared.effectiveScope === 'changed' ? { scope: 'changed' as const } : {}),
+        ...(prepared.effectiveScope === 'changed' || prepared.effectiveScope === 'slice'
+            ? { scope: prepared.effectiveScope }
+            : {}),
         execution,
     });
     const format = formatterFor(prepared.name, prepared.formatter);

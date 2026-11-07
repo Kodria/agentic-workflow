@@ -1,3 +1,4 @@
+import path from 'path';
 import { changedScopeError, applyChangedCmd, filterByExtension, type ChangedFiles } from './changed';
 import { resolveTimeout } from './compatibility/timeout';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
@@ -18,7 +19,7 @@ export type PrepareRunOptions = {
     ignoreBaseline?: boolean;
     base?: string;
     readOnly?: boolean;
-    /** Operator `--slice` gate: skip `closureOnly` sensors (RF-5.10). */
+    /** Operator `--slice` gate: skip bare `closureOnly`; run opted-in `sliceCommand`. */
     slice?: boolean;
     /** When true, read/write the fingerprint result cache (RF-2.11). */
     useCache?: boolean;
@@ -28,8 +29,73 @@ type RequestedScope = PreparedSensorExecution['requestedScope'];
 
 function resolveRequestedScope(value: unknown): RequestedScope {
     if (value === undefined) return 'full';
-    if (value === 'full' || value === 'changed') return value;
-    throw new Error('requested scope must be "full" or "changed"');
+    if (value === 'full' || value === 'changed' || value === 'slice') return value;
+    throw new Error('requested scope must be "full", "changed", or "slice"');
+}
+
+/**
+ * Keep only paths that stay inside `packageRoot`. Absolute paths and `..`
+ * escapes are dropped (RF-1.4 / RF-1.8). Returns package-root-relative posix
+ * paths for argv expansion.
+ *
+ * When `gitRoot` is provided, `files` are treated as git-root-relative (the
+ * `changedFiles` contract); otherwise they are treated as package-relative.
+ */
+export function filterPathsInsidePackageRoot(
+    files: string[],
+    packageRoot: string,
+    gitRoot?: string,
+): { files: string[]; dropped: number } {
+    if (!Array.isArray(files)) throw new Error('files must be an array');
+    if (typeof packageRoot !== 'string' || packageRoot.trim() === '') throw new Error('packageRoot must be a nonempty string');
+    const packageAbs = path.resolve(packageRoot);
+    let packageRootRel = '';
+    if (typeof gitRoot === 'string' && gitRoot.trim() !== '') {
+        const gitAbs = path.resolve(gitRoot);
+        const rel = path.relative(gitAbs, packageAbs).split(path.sep).join('/');
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            throw new Error('packageRoot must be inside gitRoot');
+        }
+        packageRootRel = rel;
+    }
+    const kept: string[] = [];
+    let dropped = 0;
+    for (const file of files) {
+        if (typeof file !== 'string' || file.trim() === '') {
+            dropped += 1;
+            continue;
+        }
+        if (path.isAbsolute(file)) {
+            dropped += 1;
+            continue;
+        }
+        const normalized = file.replace(/\\/g, '/');
+        if (normalized.split('/').some(part => part === '..' || part === '')) {
+            dropped += 1;
+            continue;
+        }
+        if (packageRootRel === '') {
+            const abs = path.resolve(packageAbs, normalized);
+            const rel = path.relative(packageAbs, abs).split(path.sep).join('/');
+            if (rel.startsWith('..') || path.isAbsolute(rel)) {
+                dropped += 1;
+                continue;
+            }
+            kept.push(rel);
+            continue;
+        }
+        if (normalized === packageRootRel) {
+            dropped += 1;
+            continue;
+        }
+        const prefix = `${packageRootRel}/`;
+        if (!normalized.startsWith(prefix)) {
+            dropped += 1;
+            continue;
+        }
+        kept.push(normalized.slice(prefix.length));
+    }
+    return { files: kept, dropped };
 }
 
 export type PrepareLegacySensorInput = {
@@ -73,6 +139,9 @@ export function validateRunOptions(opts: PrepareRunOptions): void {
     }
     if (opts.slice && opts.slow) {
         throw new Error('refusing to combine --slice with --slow: use a full gate for closureOnly/slow sensors');
+    }
+    if (opts.slice && opts.changed) {
+        throw new Error('refusing to combine --slice with --changed: use one selection mode per run');
     }
 }
 
@@ -227,6 +296,49 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
         ...timeout(input.projectTimeout ?? packSensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, packSensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,
     };
+    if (requestedScope === 'slice') {
+        if (!input.changed) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'slice scope requires --base',
+            };
+        }
+        if (input.changed.error) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: `slice scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!variant.sliceCommand?.fileInput) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'sliceCommand is not usable',
+            };
+        }
+        const files = filterByExtension(input.changed.files, variant.sliceCommand.fileInput.extensions);
+        if (files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                files: 0,
+                syntheticStatus: 'skipped',
+                syntheticReason: 'slice scope empty after filters',
+                ...(input.changed.files.length > 0 ? { scopeReason: 'extension or packageRoot filters removed every slice path' } : {}),
+            };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(variant.sliceCommand, files) },
+            effectiveScope: 'slice',
+            files: files.length,
+        };
+    }
     if (requestedScope !== 'changed' || !input.changed) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full' };
     if (input.changed.error) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: `changed scope could not be resolved: ${input.changed.error}` };
     if (!variant.changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };

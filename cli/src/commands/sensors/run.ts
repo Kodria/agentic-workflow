@@ -26,7 +26,7 @@ import {
 import { discoverPresentMarkers } from './compatibility/discovery';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
 import { listRegistries } from '../../core/registries';
-import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
+import { filterPathsInsidePackageRoot, prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { stripReadOnlyToolCacheArgs } from './read-only-tool-cache';
 import { reduceVerdict } from './verdict';
 import { resolveSensorProject, softRecoverInvalidProject } from './project';
@@ -159,6 +159,24 @@ function sliceSkipExecution(name: string, requestedScope: PreparedSensorExecutio
     };
 }
 
+function sliceMissingBaseExecution(name: string): PreparedSensorExecution {
+    return {
+        name,
+        timeoutMs: 1,
+        timeoutSource: 'fallback',
+        requestedScope: 'slice',
+        effectiveScope: 'slice',
+        syntheticStatus: 'inconclusive',
+        syntheticReason: 'slice scope requires --base',
+    };
+}
+
+function usableSliceCommand(variant: SensorVariant | undefined): StructuredCommand | undefined {
+    const command = variant?.sliceCommand;
+    if (!command?.fileInput) return undefined;
+    return command;
+}
+
 function buildCachePlan(args: {
     gitRoot: string;
     packageRoot: string;
@@ -256,10 +274,11 @@ async function runPreparedSlot(
 ): Promise<SensorResult> {
     const { execution, cachePlan } = slot;
     // RF-2.2/2.6/6.1: synthetic skip/disabled/inconclusive prepare results must not
-    // be overridden by a prior cache hit.
+    // be overridden by a prior cache hit. Slice executions never read full-scope
+    // cache entries (RF-2.2 isolation; scoped keys land in a later slice).
     const synthetic = execution.syntheticStatus !== undefined;
     // RF-2.10: cacheable is false without live versions — still attach measurements below.
-    if (cacheEnabled && cachePlan?.cacheable && !synthetic) {
+    if (cacheEnabled && cachePlan?.cacheable && !synthetic && execution.requestedScope === 'full') {
         const cached = readResultCache(cachePlan.gitRoot, {
             sensorId: execution.name,
             projectKey: cachePlan.projectKey,
@@ -518,6 +537,13 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const prepared: PreparedSlot[] = [];
     const cacheEnabled = opts.useCache === true && !opts.ignoreBaseline && !opts.readOnly;
     const writeCache = cacheEnabled && requestedScope === 'full';
+    // Lazily resolve slice file scope only when a selected sensor will execute sliceCommand.
+    let sliceChanged: ReturnType<typeof changedFiles> | null = null;
+    const resolveSliceChanged = (): ReturnType<typeof changedFiles> => {
+        if (sliceChanged) return sliceChanged;
+        sliceChanged = changedFiles(manifestDir, opts.base as string);
+        return sliceChanged;
+    };
     // Realpath so Windows git toplevel / Node path forms agree before cache digests.
     const gitRootRaw = resolveGitRoot(manifestDir) ?? manifestDir;
     let gitRoot = gitRootRaw;
@@ -632,8 +658,49 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             : (entry as { fast?: boolean }).fast ?? false;
         if (!shouldRun(fast, opts)) continue;
 
+        const variantId = parsed.kind !== 'legacy' ? (packBoundSensor as PackBoundManifestSensor).variantId : undefined;
+        const variant = parsed.kind !== 'legacy'
+            ? (liveSensor?.variants.find((candidate) => candidate.id === variantId)
+                ?? liveSensor?.variants.find((candidate) => candidate.id === liveState?.variantId))
+            : undefined;
+
         if (opts.slice && effectiveClosureOnly(packBoundSensor as { closureOnly?: boolean }, liveSensor)) {
-            prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+            if (!usableSliceCommand(variant)) {
+                prepared.push({ execution: sliceSkipExecution(name, requestedScope), cachePlan: null });
+                continue;
+            }
+            if (typeof opts.base !== 'string' || opts.base.trim() === '') {
+                prepared.push({ execution: sliceMissingBaseExecution(name), cachePlan: null });
+                continue;
+            }
+            const rawSlice = resolveSliceChanged();
+            const contained = rawSlice.error
+                ? { files: [] as string[], dropped: 0 }
+                : filterPathsInsidePackageRoot(rawSlice.files, projectCwd, gitRoot);
+            const sliceScope = rawSlice.error
+                ? { files: [] as string[], error: rawSlice.error }
+                : { files: contained.files };
+            const execution = prepareV2Sensor({
+                name,
+                sensor: packBoundSensor as PackBoundManifestSensor,
+                liveSensor,
+                liveState,
+                requestedScope: 'slice',
+                changed: sliceScope,
+            });
+            const withDropNote = contained.dropped > 0
+                ? {
+                    ...execution,
+                    scopeReason: [
+                        execution.scopeReason,
+                        `dropped ${contained.dropped} path(s) outside packageRoot`,
+                    ].filter(Boolean).join('; '),
+                }
+                : execution;
+            const ready = (packBoundSensor as { enabled?: boolean }).enabled === false
+                ? { ...withDropNote, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
+                : withDropNote;
+            prepared.push({ execution: ready, cachePlan: null });
             continue;
         }
 
@@ -660,9 +727,6 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         // `--no-cache`, so schema-2 receipts still carry digests (RF-4.3 / RF-2.9).
         let cachePlan: CachePlan | null = null;
         if (parsed.kind !== 'legacy') {
-            const variantId = (packBoundSensor as PackBoundManifestSensor).variantId;
-            const variant = liveSensor?.variants.find((candidate) => candidate.id === variantId)
-                ?? liveSensor?.variants.find((candidate) => candidate.id === liveState?.variantId);
             const inputs = effectiveInputs((packBoundSensor as PackBoundManifestSensor).inputs, variant);
             if (inputs) {
                 cachePlan = buildCachePlan({
