@@ -244,6 +244,8 @@ function hashContribution(gitRootReal: string, repoRel: string): DigestContribut
             continue;
         }
         if (!st.isFile()) return absentContribution(repoRel, 'not-file');
+        // Sensor cache inputs fail-closed on oversize (bounded cache keys). Mechanical
+        // run evidence streams large files instead (A3) — different threat/budget model.
         if (st.size > MAX_DIGEST_FILE_BYTES) return absentContribution(repoRel, 'oversize');
         const content = fs.readFileSync(current);
         return {

@@ -8,17 +8,27 @@ jest.mock('../../../src/commands/sensors/exec', () => ({
 }));
 
 const mockChangedFiles = jest.fn();
+const mockChangedDeletedFiles = jest.fn();
 jest.mock('../../../src/commands/sensors/changed', () => {
     const actual = jest.requireActual('../../../src/commands/sensors/changed');
-    return { ...actual, changedFiles: (...args: any[]) => mockChangedFiles(...args) };
+    return {
+        ...actual,
+        changedFiles: (...args: any[]) => mockChangedFiles(...args),
+        changedDeletedFiles: (...args: any[]) => mockChangedDeletedFiles(...args),
+    };
 });
 
 const { ok } = require('./exec-fixtures');
 
-function project(sensors: Record<string, unknown>): string {
+function project(sensors: Record<string, unknown>, files: string[] = ['src/a.ts']): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-changed-run-'));
     fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.awm', 'sensors.json'), JSON.stringify({ pack: 'js-ts', sensors }));
+    for (const rel of files) {
+        const abs = path.join(dir, rel);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        if (!fs.existsSync(abs)) fs.writeFileSync(abs, `// ${rel}\n`);
+    }
     return dir;
 }
 
@@ -43,7 +53,9 @@ describe('runSensors --changed', () => {
         jest.resetModules();
         mockRunCommand.mockReset();
         mockChangedFiles.mockReset();
+        mockChangedDeletedFiles.mockReset();
         mockRunCommand.mockResolvedValue(ok(''));
+        mockChangedDeletedFiles.mockReturnValue({ files: [] });
         // CLAUDE.md: no test may reach the real ~/.awm.
         fakeAwmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
         prevAwmHome = process.env.AWM_HOME;
@@ -113,12 +125,35 @@ describe('runSensors --changed', () => {
     it('hands the sensor only the extensions it declared it can take', async () => {
         // Without this, editing a README turns the lint gate red: eslint given a .md
         // fails rather than skipping it.
-        dir = project({ lint: { ...LINT, changedExtensions: ['.ts', '.tsx'] } });
+        dir = project({ lint: { ...LINT, changedExtensions: ['.ts', '.tsx'] } }, ['README.md', 'logo.png', 'src/a.ts']);
         mockChangedFiles.mockReturnValue({ files: ['README.md', 'logo.png', 'src/a.ts'] });
 
         await load().runSensors({ cwd: dir, changed: true });
 
         expect(cmds()).toEqual([`eslint --format json 'src/a.ts'`]);
+    });
+
+    it('RF-1.8: deleted .ts paths never enter --changed argv; scopeReason notes the omit', async () => {
+        dir = project({ lint: { ...LINT, changedExtensions: ['.ts'] } }, ['src/a.ts']);
+        mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
+        mockChangedDeletedFiles.mockReturnValue({ files: ['src/gone.ts'] });
+
+        const out = await load().runSensors({ cwd: dir, changed: true });
+
+        expect(cmds()).toEqual([`eslint --format json 'src/a.ts'`]);
+        expect(cmds().join('\n')).not.toContain('src/gone.ts');
+        expect(out.sensors.find((s: any) => s.name === 'lint').execution?.scopeReason)
+            .toMatch(/omitted 1 deleted path\(s\) from argv/i);
+    });
+
+    it('RF-1.8: non-existent paths in the changed list are dropped before argv', async () => {
+        dir = project({ lint: { ...LINT, changedExtensions: ['.ts'] } }, ['src/a.ts']);
+        mockChangedFiles.mockReturnValue({ files: ['src/a.ts', 'src/missing.ts'] });
+
+        await load().runSensors({ cwd: dir, changed: true });
+
+        expect(cmds()).toEqual([`eslint --format json 'src/a.ts'`]);
+        expect(cmds().join('\n')).not.toContain('src/missing.ts');
     });
 
     it('records a clean synthetic pass when the filter empties the scope, rather than running repo-wide', async () => {

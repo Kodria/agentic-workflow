@@ -238,7 +238,7 @@ export function parseStructuredCommand(input: unknown, source: unknown, location
 
 function parseVariant(input: unknown, source: unknown, location: string): SensorVariant {
     const value = record(input, source, location);
-    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'changedCommand', 'assets', 'formatter', 'probe', 'policyRef', 'inputs'], source, location);
+    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'changedCommand', 'sliceCommand', 'assets', 'formatter', 'probe', 'policyRef', 'inputs'], source, location);
     const certifiedRange = text(value.certifiedRange, source, `${location}.certifiedRange`);
     if (semver.validRange(certifiedRange) === null) invalid(source, `${location}.certifiedRange must be a valid semver range`);
     if (typeof value.priority !== 'number' || !Number.isSafeInteger(value.priority)) invalid(source, `${location}.priority must be a safe integer`);
@@ -266,6 +266,8 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     }
     const changedCommand = 'changedCommand' in value ? parseStructuredCommand(value.changedCommand, source) : undefined;
     if (changedCommand && !changedCommand.fileInput) invalid(source, `${location}.changedCommand must declare fileInput`);
+    const sliceCommand = 'sliceCommand' in value ? parseStructuredCommand(value.sliceCommand, source) : undefined;
+    if (sliceCommand && !sliceCommand.fileInput) invalid(source, `${location}.sliceCommand must declare fileInput`);
     const inputs = 'inputs' in value ? parseSensorInputs(value.inputs, source, `${location}.inputs`) : undefined;
     return {
         id: id(value.id, source, `${location}.id`),
@@ -280,6 +282,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
         ...(changedCommand ? { changedCommand } : {}),
+        ...(sliceCommand ? { sliceCommand } : {}),
         ...(inputs ? { inputs } : {}),
     };
 }

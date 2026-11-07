@@ -1,4 +1,5 @@
-import { changedScopeError, applyChangedCmd, filterByExtension, type ChangedFiles } from './changed';
+import path from 'path';
+import { changedScopeError, applyChangedCmd, filterByExtension, filterExistingFiles, type ChangedFiles } from './changed';
 import { resolveTimeout } from './compatibility/timeout';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
 import {
@@ -7,6 +8,7 @@ import {
     type SensorManifestV2,
     type V3ManifestSensor,
 } from './compatibility/manifest';
+import { toSafeRepoRel } from './inputs-digest';
 import type { PreparedSensorExecution, SensorConfig } from './types';
 
 export type PrepareRunOptions = {
@@ -18,7 +20,7 @@ export type PrepareRunOptions = {
     ignoreBaseline?: boolean;
     base?: string;
     readOnly?: boolean;
-    /** Operator `--slice` gate: skip `closureOnly` sensors (RF-5.10). */
+    /** Operator `--slice` gate: skip bare `closureOnly`; run opted-in `sliceCommand`. */
     slice?: boolean;
     /** When true, read/write the fingerprint result cache (RF-2.11). */
     useCache?: boolean;
@@ -28,8 +30,77 @@ type RequestedScope = PreparedSensorExecution['requestedScope'];
 
 function resolveRequestedScope(value: unknown): RequestedScope {
     if (value === undefined) return 'full';
-    if (value === 'full' || value === 'changed') return value;
-    throw new Error('requested scope must be "full" or "changed"');
+    if (value === 'full' || value === 'changed' || value === 'slice') return value;
+    throw new Error('requested scope must be "full", "changed", or "slice"');
+}
+
+/**
+ * Keep only paths that stay inside `packageRoot`. Absolute paths and `..`
+ * escapes are dropped (RF-1.4 / RF-1.8). Returns package-root-relative posix
+ * paths for argv expansion.
+ *
+ * When `gitRoot` is provided, `files` are treated as git-root-relative (the
+ * `changedFiles` contract); otherwise they are treated as package-relative.
+ *
+ * Containment uses `toSafeRepoRel` (realpath both sides) so Windows cannot
+ * false-throw when `run.ts` passes a native-realpath'd gitRoot beside a
+ * non-native packageRoot — the same native vs non-native pitfall documented
+ * in `inputs-digest.ts`.
+ */
+export function filterPathsInsidePackageRoot(
+    files: string[],
+    packageRoot: string,
+    gitRoot?: string,
+): { files: string[]; dropped: number } {
+    if (!Array.isArray(files)) throw new Error('files must be an array');
+    if (typeof packageRoot !== 'string' || packageRoot.trim() === '') throw new Error('packageRoot must be a nonempty string');
+    const packageAbs = path.resolve(packageRoot);
+    let packageRootRel = '';
+    if (typeof gitRoot === 'string' && gitRoot.trim() !== '') {
+        try {
+            packageRootRel = toSafeRepoRel(gitRoot, packageRoot, 'packageRoot');
+        } catch {
+            throw new Error('packageRoot must be inside gitRoot');
+        }
+    }
+    const kept: string[] = [];
+    let dropped = 0;
+    for (const file of files) {
+        if (typeof file !== 'string' || file.trim() === '') {
+            dropped += 1;
+            continue;
+        }
+        if (path.isAbsolute(file)) {
+            dropped += 1;
+            continue;
+        }
+        const normalized = file.replace(/\\/g, '/');
+        if (normalized.split('/').some(part => part === '..' || part === '')) {
+            dropped += 1;
+            continue;
+        }
+        if (packageRootRel === '') {
+            const abs = path.resolve(packageAbs, normalized);
+            const rel = path.relative(packageAbs, abs).split(path.sep).join('/');
+            if (rel.startsWith('..') || path.isAbsolute(rel)) {
+                dropped += 1;
+                continue;
+            }
+            kept.push(rel);
+            continue;
+        }
+        if (normalized === packageRootRel) {
+            dropped += 1;
+            continue;
+        }
+        const prefix = `${packageRootRel}/`;
+        if (!normalized.startsWith(prefix)) {
+            dropped += 1;
+            continue;
+        }
+        kept.push(normalized.slice(prefix.length));
+    }
+    return { files: kept, dropped };
 }
 
 export type PrepareLegacySensorInput = {
@@ -38,6 +109,10 @@ export type PrepareLegacySensorInput = {
     packTimeout?: number;
     requestedScope?: RequestedScope;
     changed?: ChangedFiles;
+    /** When set, drop non-existent paths before argv expansion. */
+    worktreeRoot?: string;
+    /** Deleted paths for RF-1.8 diagnostics — never expanded into argv. */
+    deletedFiles?: string[];
 };
 
 export type PrepareV2SensorInput = {
@@ -51,7 +126,38 @@ export type PrepareV2SensorInput = {
     changed?: ChangedFiles;
     /** Project paths used to evaluate optional project-sensor applicability. */
     applicabilityPaths?: string[];
+    /** When set, drop non-existent paths before argv expansion. */
+    worktreeRoot?: string;
+    /** Deleted paths for RF-1.8 diagnostics — never expanded into argv. */
+    deletedFiles?: string[];
 };
+
+/** Extension-filter then drop missing paths; note omitted deletes for diagnostics. */
+function argvFilesForScope(
+    files: string[],
+    extensions: string[] | undefined,
+    worktreeRoot: string | undefined,
+    deletedFiles: string[] | undefined,
+): { files: string[]; scopeReason?: string; deletedForDigest: string[] } {
+    let scoped = filterByExtension(files, extensions);
+    const notes: string[] = [];
+    if (typeof worktreeRoot === 'string' && worktreeRoot.trim() !== '') {
+        const existing = filterExistingFiles(worktreeRoot, scoped);
+        if (existing.omitted > 0) {
+            notes.push(`omitted ${existing.omitted} missing path(s) from argv`);
+        }
+        scoped = existing.files;
+    }
+    const deletedForDigest = filterByExtension(deletedFiles ?? [], extensions);
+    if (deletedForDigest.length > 0) {
+        notes.push(`omitted ${deletedForDigest.length} deleted path(s) from argv`);
+    }
+    return {
+        files: scoped,
+        ...(notes.length > 0 ? { scopeReason: notes.join('; ') } : {}),
+        deletedForDigest,
+    };
+}
 
 export function validateRunOptions(opts: PrepareRunOptions): void {
     if (!opts || typeof opts !== 'object' || Array.isArray(opts)) throw new Error('run options must be an object');
@@ -73,6 +179,9 @@ export function validateRunOptions(opts: PrepareRunOptions): void {
     }
     if (opts.slice && opts.slow) {
         throw new Error('refusing to combine --slice with --slow: use a full gate for closureOnly/slow sensors');
+    }
+    if (opts.slice && opts.changed) {
+        throw new Error('refusing to combine --slice with --changed: use one selection mode per run');
     }
 }
 
@@ -120,19 +229,32 @@ export function prepareLegacySensor(input: PrepareLegacySensorInput): PreparedSe
         const { command: _command, ...prepared } = fullLegacy(input);
         return { ...prepared, effectiveScope: 'changed', syntheticStatus: 'inconclusive', syntheticReason: 'changedCmd has no {files} placeholder' };
     }
-    const files = filterByExtension(input.changed.files, input.config.changedExtensions);
-    if (files.length === 0) {
+    const scoped = argvFilesForScope(
+        input.changed.files,
+        input.config.changedExtensions,
+        input.worktreeRoot,
+        input.deletedFiles,
+    );
+    if (scoped.files.length === 0) {
         const { command: _command, ...prepared } = fullLegacy(input);
-        return { ...prepared, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
+        return {
+            ...prepared,
+            effectiveScope: 'changed',
+            files: 0,
+            syntheticStatus: 'pass',
+            syntheticReason: 'no changed files in scope',
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
     }
     return {
         name: input.name,
-        command: { kind: 'legacy', value: applyChangedCmd(input.config.changedCmd, files) },
+        command: { kind: 'legacy', value: applyChangedCmd(input.config.changedCmd, scoped.files) },
         ...(input.config.formatter ? { formatter: input.config.formatter } : {}),
         ...timeout(input.config.timeout, input.packTimeout, input.config.fast ?? false),
         requestedScope,
         effectiveScope: 'changed',
-        files: files.length,
+        files: scoped.files.length,
+        ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
     };
 }
 
@@ -168,25 +290,115 @@ function projectApplicabilityMet(sensor: ProjectDeclaredSensor, paths: string[] 
 function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecution {
     const sensor = input.sensor as ProjectDeclaredSensor;
     const requestedScope = resolveRequestedScope(input.requestedScope);
-    if (!projectApplicabilityMet(sensor, input.applicabilityPaths)) {
-        return {
-            name: input.name,
-            ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
-            requestedScope,
-            effectiveScope: 'full',
-            syntheticStatus: 'inconclusive',
-            syntheticReason: 'not-applicable: applicability-not-met',
-            certification: 'project-declared',
-        };
-    }
-    return {
+    const common = {
         name: input.name,
-        command: { kind: 'structured', value: sensor.command },
         formatter: sensor.formatter || 'exit-code',
         ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
         requestedScope,
+        certification: 'project-declared' as const,
+    };
+    if (!projectApplicabilityMet(sensor, input.applicabilityPaths)) {
+        return {
+            ...common,
+            effectiveScope: 'full',
+            syntheticStatus: 'inconclusive',
+            syntheticReason: 'not-applicable: applicability-not-met',
+        };
+    }
+    if (requestedScope === 'slice') {
+        if (!input.changed) {
+            return { ...common, effectiveScope: 'slice', syntheticStatus: 'inconclusive', syntheticReason: 'slice scope requires --base' };
+        }
+        if (input.changed.error) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: `slice scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!sensor.sliceCommand?.fileInput) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'sliceCommand is not usable',
+            };
+        }
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sensor.sliceCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                files: 0,
+                syntheticStatus: 'skipped',
+                syntheticReason: 'slice scope empty after filters',
+                scopeReason: [
+                    input.changed.files.length > 0 || (input.deletedFiles?.length ?? 0) > 0
+                        ? 'extension or packageRoot filters removed every slice path'
+                        : undefined,
+                    scoped.scopeReason,
+                ].filter(Boolean).join('; ') || undefined,
+            };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(sensor.sliceCommand, scoped.files) },
+            effectiveScope: 'slice',
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
+    }
+    if (requestedScope === 'changed' && input.changed) {
+        if (input.changed.error) {
+            return {
+                ...common,
+                command: { kind: 'structured', value: sensor.command },
+                effectiveScope: 'full',
+                scopeReason: `changed scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!sensor.changedCommand?.fileInput) {
+            return {
+                ...common,
+                command: { kind: 'structured', value: sensor.command },
+                effectiveScope: 'full',
+                scopeReason: 'sensor does not support changed scope',
+            };
+        }
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sensor.changedCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'changed',
+                files: 0,
+                syntheticStatus: 'pass',
+                syntheticReason: 'no changed files in scope',
+                ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+            };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(sensor.changedCommand, scoped.files) },
+            effectiveScope: 'changed',
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
+    }
+    return {
+        ...common,
+        command: { kind: 'structured', value: sensor.command },
         effectiveScope: 'full',
-        certification: 'project-declared',
     };
 }
 
@@ -227,10 +439,87 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
         ...timeout(input.projectTimeout ?? packSensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, packSensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,
     };
+    // RF-1.5: project structured override ?? pack variant default ?? absent
+    const sliceCommand = packSensor.sliceCommand?.fileInput ? packSensor.sliceCommand : variant.sliceCommand;
+    const changedCommand = packSensor.changedCommand?.fileInput ? packSensor.changedCommand : variant.changedCommand;
+    if (requestedScope === 'slice') {
+        if (!input.changed) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'slice scope requires --base',
+            };
+        }
+        if (input.changed.error) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: `slice scope could not be resolved: ${input.changed.error}`,
+            };
+        }
+        if (!sliceCommand?.fileInput) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                syntheticStatus: 'inconclusive',
+                syntheticReason: 'sliceCommand is not usable',
+            };
+        }
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sliceCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'slice',
+                files: 0,
+                syntheticStatus: 'skipped',
+                syntheticReason: 'slice scope empty after filters',
+                scopeReason: [
+                    input.changed.files.length > 0 || (input.deletedFiles?.length ?? 0) > 0
+                        ? 'extension or packageRoot filters removed every slice path'
+                        : undefined,
+                    scoped.scopeReason,
+                ].filter(Boolean).join('; ') || undefined,
+            };
+        }
+        return {
+            ...common,
+            command: { kind: 'structured', value: expandFileInput(sliceCommand, scoped.files) },
+            effectiveScope: 'slice',
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
+    }
     if (requestedScope !== 'changed' || !input.changed) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full' };
     if (input.changed.error) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: `changed scope could not be resolved: ${input.changed.error}` };
-    if (!variant.changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };
-    const files = filterByExtension(input.changed.files, variant.changedCommand.fileInput?.extensions);
-    if (files.length === 0) return { ...common, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
-    return { ...common, command: { kind: 'structured', value: expandFileInput(variant.changedCommand, files) }, effectiveScope: 'changed', files: files.length };
+    if (!changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };
+    const scoped = argvFilesForScope(
+        input.changed.files,
+        changedCommand.fileInput?.extensions,
+        input.worktreeRoot,
+        input.deletedFiles,
+    );
+    if (scoped.files.length === 0) {
+        return {
+            ...common,
+            effectiveScope: 'changed',
+            files: 0,
+            syntheticStatus: 'pass',
+            syntheticReason: 'no changed files in scope',
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
+    }
+    return {
+        ...common,
+        command: { kind: 'structured', value: expandFileInput(changedCommand, scoped.files) },
+        effectiveScope: 'changed',
+        files: scoped.files.length,
+        ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+    };
 }

@@ -1,15 +1,38 @@
 import { Command } from 'commander';
-import { addEntry, listEntries, recurring, archiveLedger, detectBranch } from '../../core/ledger/store';
-import { DEFECT_CLASS } from '../../core/ledger/types';
-import type { LedgerEntry, Polarity, LedgerClass, Severity } from '../../core/ledger/types';
+import {
+    addEntry, listEntries, listDeferredOpen, resolveById, resolveAllWithSignature,
+    recurring, archiveLedger, detectBranch,
+} from '../../core/ledger/store';
+import { DEFECT_CLASS, DEFERRED_REASONS, RESOLVED_HOWS } from '../../core/ledger/types';
+import type {
+    LedgerEntry, Polarity, LedgerClass, Severity, DeferredReason, ResolvedHow,
+} from '../../core/ledger/types';
 
 interface AddOpts {
     branch?: string; polarity: Polarity; class: LedgerClass; signature: string;
-    severity: Severity; desc: string; ref?: string; phase?: string; sourceSkill?: string; defectClass?: string;
+    severity: Severity; desc: string; ref?: string; phase?: string; sourceSkill?: string;
+    defectClass?: string; deferred?: string;
+}
+
+interface ResolveOpts {
+    branch?: string;
+    id?: string;
+    allWithSignature?: string;
+    how: string;
 }
 
 function archiveLabel(): string {
     return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
+}
+
+function parseDeferredReason(value: string): DeferredReason {
+    if ((DEFERRED_REASONS as readonly string[]).includes(value)) return value as DeferredReason;
+    throw new Error(`--deferred requires one of: ${DEFERRED_REASONS.join(' | ')}`);
+}
+
+function parseResolvedHow(value: string): ResolvedHow {
+    if ((RESOLVED_HOWS as readonly string[]).includes(value)) return value as ResolvedHow;
+    throw new Error(`--how requires one of: ${RESOLVED_HOWS.join(' | ')}`);
 }
 
 // R1a's own retro: across this session, reviewer subagents repeatedly verified
@@ -37,6 +60,7 @@ export function registerLedgerCommand(program: Command): void {
         .option('--phase <phase>', 'lifecycle phase', 'unknown')
         .option('--source-skill <skill>', 'emitting skill', 'unknown')
         .option('--defect-class <id>', 'reusable lowercase kebab-case defect class')
+        .option('--deferred <reason>', `mark deferred: ${DEFERRED_REASONS.join(' | ')}`)
         .option('--branch <branch>', 'override branch (default: git current branch)')
         .action((opts: AddOpts) => {
             if (opts.defectClass !== undefined && !DEFECT_CLASS.test(opts.defectClass)) {
@@ -50,8 +74,9 @@ export function registerLedgerCommand(program: Command): void {
             }
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);
+            const now = new Date().toISOString();
             const entry: LedgerEntry = {
-                ts: new Date().toISOString(),
+                ts: now,
                 branch,
                 phase: opts.phase ?? 'unknown',
                 source_skill: opts.sourceSkill ?? 'unknown',
@@ -62,6 +87,9 @@ export function registerLedgerCommand(program: Command): void {
                 desc: opts.desc,
                 ref: opts.ref,
                 defectClass: opts.defectClass,
+                ...(opts.deferred !== undefined
+                    ? { deferred: { at: now, reason: parseDeferredReason(opts.deferred) } }
+                    : {}),
             };
             addEntry(cwd, entry);
         });
@@ -70,10 +98,37 @@ export function registerLedgerCommand(program: Command): void {
         .command('list')
         .description('print the current branch ledger as JSON')
         .option('--branch <branch>', 'override branch (default: git current branch)')
-        .action((opts: { branch?: string }) => {
+        .option('--deferred-open', 'only deferred entries that are not yet resolved')
+        .action((opts: { branch?: string; deferredOpen?: boolean }) => {
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);
-            process.stdout.write(JSON.stringify(listEntries(cwd, branch), null, 2) + '\n');
+            const entries = opts.deferredOpen ? listDeferredOpen(cwd, branch) : listEntries(cwd, branch);
+            process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
+        });
+
+    ledger
+        .command('resolve')
+        .description('mark a deferred ledger entry resolved by --id (or every deferred-open share of --all-with-signature)')
+        .option('--id <id>', 'stable entry id assigned at add time')
+        .option('--all-with-signature <signature>', 'resolve every deferred-open entry with this signature')
+        .requiredOption('--how <how>', `resolution: ${RESOLVED_HOWS.join(' | ')}`)
+        .option('--branch <branch>', 'override branch (default: git current branch)')
+        .action((opts: ResolveOpts) => {
+            const how = parseResolvedHow(opts.how);
+            const hasId = opts.id !== undefined;
+            const hasAll = opts.allWithSignature !== undefined;
+            if (hasId === hasAll) {
+                throw new Error('resolve requires exactly one of --id or --all-with-signature');
+            }
+            const cwd = process.cwd();
+            const branch = opts.branch ?? detectBranch(cwd);
+            if (hasId) {
+                const updated = resolveById(cwd, branch, opts.id!, how);
+                process.stdout.write(JSON.stringify(updated, null, 2) + '\n');
+                return;
+            }
+            const updated = resolveAllWithSignature(cwd, branch, opts.allWithSignature!, how);
+            process.stdout.write(JSON.stringify(updated, null, 2) + '\n');
         });
 
     ledger

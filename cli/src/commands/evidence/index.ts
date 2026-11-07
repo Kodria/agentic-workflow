@@ -1,14 +1,26 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import { Command } from 'commander';
 import { captureCycleEvidence } from '../../core/evidence/capture';
 import { writeCycleEvidence } from '../../core/evidence/store';
+import {
+  assertSafeRepoRel,
+  boundResultSummary,
+  computeCandidateContentDigest,
+  readMechanicalRunEvidenceFile,
+  redactMechanicalArgv,
+  resolveHeadCommit,
+  resolveScopePaths,
+  sealMechanicalRunEvidence,
+  writeMechanicalRunEvidence,
+} from '../../core/evidence/mechanical-run';
 import { readJournal } from '../../core/journal/store';
 import { detectBranch, listEntries } from '../../core/ledger/store';
 import type { JournalState } from '../../core/journal/types';
 import { classifyPlanState, type PlanState } from '../../core/dashboard/plan-state';
 import type { CycleEvidencePlanState } from '../../core/evidence/types';
+import { isWindowsNative } from '../../core/paths';
 
 function assertRepoRelativePlan(value: unknown): string {
   if (typeof value !== 'string' || !value || value.startsWith('--') || path.isAbsolute(value)
@@ -80,7 +92,7 @@ function planState(root: string, planPath: string, journal: JournalState): Cycle
 }
 
 export function registerEvidenceCommand(program: Command): void {
-  const evidence = program.command('evidence').description('durable privacy-preserving cycle observations');
+  const evidence = program.command('evidence').description('durable privacy-preserving cycle observations and mechanical run receipts');
   evidence.command('capture')
     .description('capture one local cycle observation')
     .option('--plan <path>', 'repo-relative plan path')
@@ -89,6 +101,35 @@ export function registerEvidenceCommand(program: Command): void {
     .action((opts: { plan?: unknown; prProvider?: unknown; prNumber?: unknown }) => {
       const result = runEvidenceCapture(process.cwd(), opts.plan, { prProvider: opts.prProvider, prNumber: opts.prNumber });
       if (result.code === 0) process.stdout.write(result.stdout); else { process.stderr.write(`awm evidence capture: ${result.error}\n`); process.exitCode = 2; }
+    });
+
+  evidence.command('run')
+    .description('run a command and write a MechanicalRunEvidence receipt (not CycleEvidenceV1)')
+    .option('--cwd <dir>', 'working directory (absolute or repo-relative)', '.')
+    .option('--paths <patterns...>', 'optional picomatch globs / repo-rel paths expanded into the content digest (empty expansion fails closed)')
+    .argument('<cmd...>', 'command after --')
+    .action(async (cmd: string[], opts: { cwd?: string; paths?: string[] }) => {
+      const result = await runEvidenceRun({ root: process.cwd(), argv: cmd, cwd: opts.cwd, declaredScope: opts.paths });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.code;
+    });
+
+  evidence.command('verify')
+    .description('verify a MechanicalRunEvidence receipt against the current candidate (requires -- <expected argv…>)')
+    .option('--cwd <dir>', 'expected cwd override (default: re-resolve receipt.cwd under the repo root)')
+    .argument('<receipt-path>', 'path to a MechanicalRunEvidence JSON file')
+    .argument('[expectCmd...]', 'expected argv after -- (required; omit → mismatch)')
+    .action((receiptPath: string, expectCmd: string[], opts: { cwd?: string }) => {
+      const result = runEvidenceVerify({
+        root: process.cwd(),
+        receiptPath,
+        expectArgv: expectCmd,
+        ...(opts.cwd !== undefined ? { expectCwd: opts.cwd } : {}),
+      });
+      process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.code;
     });
 }
 
@@ -139,4 +180,246 @@ export function runEvidenceCapture(root: string, plan: unknown, overrides?: { re
     const saved = writeCycleEvidence(root, captureCycleEvidence({ root, repositoryIdentity: repositoryIdentity(root, overrides?.repositoryIdentity), planPath, journal: read.state, gates: firstEvaluationGates(read.state), ledger: overrides?.ledger ?? listEntries(root, branch), pr, planState: planState(root, planPath, read.state) }));
     return { code: 0, stdout: `${saved.cycleId}\n` };
   } catch (error) { return { code: 2, stdout: '', error: (error as Error).message }; }
+}
+
+const MAX_CAPTURE_BYTES = 64 * 1024;
+/** Align with sensor fallback (non-fast) timeout; kill hung evidence children. */
+const DEFAULT_EVIDENCE_TIMEOUT_MS = 120_000;
+
+function resolveRunCwd(root: string, cwdOption: string | undefined): string {
+  const rootReal = fs.realpathSync(root);
+  if (cwdOption === undefined || cwdOption === '.' || cwdOption === '') return rootReal;
+  const candidate = path.isAbsolute(cwdOption) ? cwdOption : path.join(rootReal, cwdOption);
+  const real = fs.realpathSync(candidate);
+  const rel = path.relative(rootReal, real);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('--cwd must resolve under the repository root');
+  return real;
+}
+
+/** Kill the whole process tree (align with sensors/exec.ts::killTree). */
+function killTree(pid: number, signal: NodeJS.Signals): void {
+  if (isWindowsNative()) {
+    try { execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ }); } catch { /* ignore */ }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try { process.kill(pid, signal); } catch { /* already dead */ }
+  }
+}
+
+function captureChild(
+  argv: string[],
+  cwd: string,
+  timeoutMs: number = DEFAULT_EVIDENCE_TIMEOUT_MS,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  if (!Array.isArray(argv) || argv.length === 0) throw new Error('command argv is required');
+  if (argv.some((a) => typeof a !== 'string' || a.includes('\0'))) throw new Error('argv is invalid');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be a positive safe integer');
+  const [exe, ...args] = argv;
+  return new Promise((resolve) => {
+    // detached on POSIX so pgid === pid and killTree reaches grandchildren (B2).
+    // Windows CreateProcess can throw synchronously for overlong argv (~32k);
+    // treat that like the async 'error' path (exit 127) so callers still seal.
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(exe!, args, {
+        cwd,
+        shell: false,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: !isWindowsNative(),
+      });
+    } catch {
+      resolve({ exitCode: 127, stdout: '', stderr: '' });
+      return;
+    }
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    const take = (chunks: Buffer[], seen: { n: number }, chunk: Buffer): void => {
+      if (seen.n >= MAX_CAPTURE_BYTES) return;
+      const piece = chunk.subarray(0, MAX_CAPTURE_BYTES - seen.n);
+      chunks.push(Buffer.from(piece));
+      seen.n += piece.length;
+    };
+    const stdoutSeen = { n: 0 };
+    const stderrSeen = { n: 0 };
+    child.stdout?.on('data', (chunk: Buffer) => { take(stdoutChunks, stdoutSeen, chunk); stdoutBytes = stdoutSeen.n; });
+    child.stderr?.on('data', (chunk: Buffer) => { take(stderrChunks, stderrSeen, chunk); stderrBytes = stderrSeen.n; });
+    const finish = (exitCode: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks, stderrBytes).toString('utf8'),
+      });
+    };
+    let killTimer: ReturnType<typeof setTimeout> = setTimeout(() => {}, 0);
+    clearTimeout(killTimer);
+    const timer = setTimeout(() => {
+      const pid = child.pid;
+      if (pid !== undefined) killTree(pid, 'SIGTERM');
+      killTimer = setTimeout(() => {
+        if (pid !== undefined) killTree(pid, 'SIGKILL');
+        finish(124);
+      }, 1_000);
+    }, timeoutMs);
+    child.on('error', () => finish(127));
+    child.on('exit', (code, signal) => {
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        finish(124);
+        return;
+      }
+      finish(typeof code === 'number' && code >= 0 && code <= 255 ? code : 1);
+    });
+  });
+}
+
+export type EvidenceRunResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+  receiptPath?: string;
+};
+
+/** Execute argv and persist MechanicalRunEvidence (RF-3.1 / RF-3.4 / RF-5.1). */
+export async function runEvidenceRun(input: {
+  root: string;
+  argv: string[];
+  cwd?: string;
+  declaredScope?: string[];
+  resolvedScope?: string[];
+  /** Bounded child timeout (default 120s, aligned with sensor fallback). */
+  timeoutMs?: number;
+}): Promise<EvidenceRunResult> {
+  try {
+    if (!input || typeof input.root !== 'string' || input.root.length === 0) throw new Error('root is required');
+    if (!Array.isArray(input.argv) || input.argv.length === 0) throw new Error('argv is required');
+    const rootReal = fs.realpathSync(input.root);
+    const cwd = resolveRunCwd(rootReal, input.cwd);
+    const declared = Array.isArray(input.declaredScope) ? input.declaredScope : [];
+    // Resolve + validate scope BEFORE spawning (fail closed, no side effects).
+    // Caller-supplied resolvedScope is treated as already-expanded literals
+    // (exact membership — do not re-picomatch). Declared patterns expand once.
+    let resolved: string[] = [];
+    if (Array.isArray(input.resolvedScope) && input.resolvedScope.length > 0) {
+      const unique = new Set<string>();
+      for (let i = 0; i < input.resolvedScope.length; i++) {
+        const raw = input.resolvedScope[i];
+        if (typeof raw !== 'string') throw new Error(`scope.resolved[${i}] must be a string`);
+        unique.add(assertSafeRepoRel(raw.split(path.sep).join('/'), `scope.resolved[${i}]`));
+      }
+      if (unique.size === 0) {
+        throw new Error('scope expansion is empty (vacuous/unresolved --paths); refusing empty-set contentDigest');
+      }
+      resolved = [...unique].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    } else if (declared.length > 0) {
+      resolved = resolveScopePaths(rootReal, declared);
+    }
+    // Seal candidate contentDigest BEFORE mutation (RF-3.6) — argv must not
+    // rewrite the identity the receipt claims to observe.
+    const contentDigest = computeCandidateContentDigest(rootReal, resolved.length > 0 ? resolved : undefined);
+    const headCommit = resolveHeadCommit(rootReal);
+    const started = Date.now();
+    const ranAt = new Date(started).toISOString();
+    const child = await captureChild(input.argv, cwd, input.timeoutMs ?? DEFAULT_EVIDENCE_TIMEOUT_MS);
+    const durationMs = Math.max(0, Date.now() - started);
+    const sealed = sealMechanicalRunEvidence({
+      ranAt,
+      durationMs,
+      candidate: { headCommit, contentDigest },
+      argv: redactMechanicalArgv(input.argv),
+      cwd,
+      exitCode: child.exitCode,
+      resultSummary: boundResultSummary(child.stdout, child.stderr),
+      scope: { declared, resolved },
+    });
+    const receiptPath = writeMechanicalRunEvidence(rootReal, sealed);
+    return { code: child.exitCode, stdout: `${receiptPath}\n`, stderr: '', receiptPath };
+  } catch (error) {
+    return { code: 2, stdout: '', stderr: `awm evidence run: ${(error as Error).message}\n` };
+  }
+}
+
+export type EvidenceVerifyResult = { code: 0 | 2; stdout: string; stderr: string };
+
+/**
+ * Contrast a MechanicalRunEvidence receipt with the current candidate (RF-3.9 / P7 / RF-E.1).
+ * Expected argv after `--` is mandatory: omit or empty → mismatch fail-closed (never match on tree/cwd alone).
+ */
+export function runEvidenceVerify(input: {
+  root: string;
+  receiptPath: string;
+  expectArgv?: string[];
+  expectCwd?: string;
+}): EvidenceVerifyResult {
+  const mismatch = (reason: string): EvidenceVerifyResult => ({
+    code: 2,
+    stdout: `${JSON.stringify({ status: 'mismatch', reason })}\n`,
+    stderr: '',
+  });
+  try {
+    if (!input || typeof input.root !== 'string' || typeof input.receiptPath !== 'string') {
+      return mismatch('absent');
+    }
+    // P7 / RF-3.9: caller-supplied expected argv is required before any tree/cwd match.
+    if (!Array.isArray(input.expectArgv) || input.expectArgv.length === 0) {
+      return mismatch('expected argv required');
+    }
+    const rootReal = fs.realpathSync(input.root);
+    let evidence;
+    try {
+      evidence = readMechanicalRunEvidenceFile(input.receiptPath);
+    } catch (error) {
+      const message = (error as Error).message;
+      if (/symlink/i.test(message)) return mismatch('symlink');
+      if (/integrity/i.test(message)) return mismatch('integrity');
+      return mismatch('absent');
+    }
+    let recordedCwd: string;
+    try {
+      recordedCwd = fs.realpathSync(evidence.cwd);
+    } catch {
+      return mismatch('cwd');
+    }
+    // S4-NQ-1: default expected cwd to the receipt's cwd (re-resolved), not repo root —
+    // so `evidence run --cwd <sub>` round-trips through CLI verify without a false cwd mismatch.
+    const expectedCwd = input.expectCwd !== undefined ? resolveRunCwd(rootReal, input.expectCwd) : recordedCwd;
+    if (recordedCwd !== expectedCwd) return mismatch('cwd');
+    const expected = redactMechanicalArgv(input.expectArgv);
+    if (expected.length !== evidence.argv.length || expected.some((token, i) => token !== evidence.argv[i])) {
+      return mismatch('argv');
+    }
+    let scopePaths: string[] | undefined;
+    if (evidence.scope.declared.length > 0) {
+      // Always re-expand declared patterns. A new matching file after the receipt
+      // was sealed must mismatch on scope set drift before contentDigest compare (A2).
+      let currentResolved: string[];
+      try {
+        currentResolved = resolveScopePaths(rootReal, evidence.scope.declared);
+      } catch {
+        return mismatch('scope');
+      }
+      const sealed = [...evidence.scope.resolved].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      const now = [...currentResolved].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      if (sealed.length !== now.length || sealed.some((p, i) => p !== now[i])) {
+        return mismatch('scope');
+      }
+      scopePaths = evidence.scope.resolved.length > 0 ? evidence.scope.resolved : currentResolved;
+    } else if (evidence.scope.resolved.length > 0) {
+      scopePaths = evidence.scope.resolved;
+    }
+    const currentDigest = computeCandidateContentDigest(rootReal, scopePaths);
+    if (currentDigest !== evidence.candidate.contentDigest) return mismatch('contentDigest');
+    return { code: 0, stdout: `${JSON.stringify({ status: 'match' })}\n`, stderr: '' };
+  } catch (error) {
+    return mismatch(/integrity/i.test((error as Error).message) ? 'integrity' : 'absent');
+  }
 }

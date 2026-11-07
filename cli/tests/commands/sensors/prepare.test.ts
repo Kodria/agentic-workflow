@@ -1,4 +1,13 @@
-import { prepareLegacySensor, prepareV2Sensor, validateRunOptions, type PrepareV2SensorInput } from '../../../src/commands/sensors/prepare';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import {
+    filterPathsInsidePackageRoot,
+    prepareLegacySensor,
+    prepareV2Sensor,
+    validateRunOptions,
+    type PrepareV2SensorInput,
+} from '../../../src/commands/sensors/prepare';
 import type { ProjectDeclaredSensor } from '../../../src/commands/sensors/compatibility/manifest';
 import type { SensorVariant } from '../../../src/commands/sensors/compatibility/types';
 
@@ -79,7 +88,48 @@ describe('prepareV2Sensor', () => {
 
     test('rejects an invalid requested scope before preparing a command', () => {
         expect(() => prepareV2Sensor({ ...v2Input(), requestedScope: 'sideways' as unknown as 'changed' }))
-            .toThrow('requested scope must be "full" or "changed"');
+            .toThrow('requested scope must be "full", "changed", or "slice"');
+    });
+
+    test('project sliceCommand override wins over pack variant (RF-1.5)', () => {
+        const packSlice = {
+            executable: 'pack-slice',
+            resolution: 'path' as const,
+            args: ['--mutate', '{files}'],
+            fileInput: { placeholder: '{files}' as const, extensions: ['.ts'] },
+        };
+        const projectSlice = {
+            executable: 'project-slice',
+            resolution: 'path' as const,
+            args: ['run', '{files}'],
+            fileInput: { placeholder: '{files}' as const, extensions: ['.ts'] },
+        };
+        const input = v2Input({
+            requestedScope: 'slice',
+            changed: { files: ['src/a.ts'] },
+            sensor: {
+                enabled: true,
+                variantId: 'eslint-live',
+                command: fullCommand,
+                sliceCommand: projectSlice,
+                initializedCompatibility: {
+                    state: 'certified' as const,
+                    reason: 'test',
+                    variantId: 'eslint-live',
+                    toolVersion: '1.0.0',
+                    runtimeVersion: '1.0.0',
+                    certifiedRange: '>=1.0.0',
+                    evidence: [],
+                },
+            },
+        });
+        input.liveSensor!.variants[0].sliceCommand = packSlice;
+        const prepared = prepareV2Sensor(input);
+        expect(prepared.effectiveScope).toBe('slice');
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'project-slice', resolution: 'path', args: ['run', 'src/a.ts'] },
+        });
     });
 });
 
@@ -174,6 +224,29 @@ describe('prepareV2Sensor: project-declared entries (S2)', () => {
         expect(prepared.syntheticReason).toBe('not-applicable: applicability-not-met');
         expect(prepared.certification).toBe('project-declared');
     });
+
+    test('project-declared sliceCommand executes under requestedScope slice (RF-1.5)', () => {
+        const prepared = prepareV2Sensor({
+            name: 'iac-format',
+            sensor: projectSensor({
+                closureOnly: true,
+                sliceCommand: {
+                    executable: 'node',
+                    resolution: 'path',
+                    args: ['scripts/slice.js', '{files}'],
+                    fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+                },
+            }),
+            requestedScope: 'slice',
+            changed: { files: ['src/a.ts', 'README.md'] },
+        });
+        expect(prepared.effectiveScope).toBe('slice');
+        expect(prepared.command).toEqual({
+            kind: 'structured',
+            value: { executable: 'node', resolution: 'path', args: ['scripts/slice.js', 'src/a.ts'] },
+        });
+        expect(prepared.certification).toBe('project-declared');
+    });
 });
 
 // El bloqueo que esto arregla: `compatible-unverified` significa que la herramienta esta,
@@ -211,5 +284,43 @@ describe('prepareV2Sensor: que versiones ejecutan', () => {
         expect(prepared.syntheticReason).toBe(`${state}: ${reason}`);
         expect(prepared.command).toBeUndefined();
         expect(prepared.certification).toBeUndefined();
+    });
+});
+
+describe('filterPathsInsidePackageRoot', () => {
+    it('realpaths mixed gitRoot/packageRoot forms so equal roots stay inside (Windows native vs resolve)', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-filter-pkg-'));
+        try {
+            const nativeRoot = fs.realpathSync.native(root);
+            // Same directory, non-canonical forms — mirrors run.ts (native gitRoot)
+            // beside configured.packageRoot (resolve / non-native realpath).
+            const mixedPackage = path.join(nativeRoot, '.', path.sep);
+            const kept = filterPathsInsidePackageRoot(
+                ['src/a.ts', 'outside/../src/b.ts', '/abs.ts'],
+                mixedPackage,
+                nativeRoot,
+            );
+            expect(kept).toEqual({ files: ['src/a.ts'], dropped: 2 });
+            expect(() => filterPathsInsidePackageRoot(['x.ts'], path.join(os.tmpdir(), 'awm-escape-pkg'), nativeRoot))
+                .toThrow(/packageRoot must be inside gitRoot/);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('strips the packageRoot prefix when the package is a git subdirectory', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-filter-sub-'));
+        const pkg = path.join(root, 'cli');
+        fs.mkdirSync(pkg);
+        try {
+            const kept = filterPathsInsidePackageRoot(
+                ['cli/src/a.ts', 'docs/readme.md', 'cli'],
+                pkg,
+                root,
+            );
+            expect(kept).toEqual({ files: ['src/a.ts'], dropped: 2 });
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 });

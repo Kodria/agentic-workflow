@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { changedFiles, applyChangedCmd, filterByExtension } from '../../../src/commands/sensors/changed';
+import { changedFiles, changedDeletedFiles, applyChangedCmd, filterByExtension } from '../../../src/commands/sensors/changed';
 
 /** A throwaway repo. Real git, not a mock: the whole value of this module is that its
  *  understanding of "changed" matches git's, which a mock would define into existence. */
@@ -46,11 +46,33 @@ describe('changedFiles', () => {
         expect(changedFiles(dir).files).not.toContain('dist/bundle.js');
     });
 
-    it('omits deleted files — a sensor cannot read a path that is gone', () => {
+    it('omits deleted paths from the default file list used for argv (RF-1.8)', () => {
+        // Sensors cannot read a path that is gone — deletes must never reach tool argv.
+        // RF-1.8 accounting lives on changedDeletedFiles / digests, not this list.
         const dir = make();
         fs.rmSync(path.join(dir, 'base.ts'));
 
         expect(changedFiles(dir).files).not.toContain('base.ts');
+        expect(changedDeletedFiles(dir).files).toContain('base.ts');
+    });
+
+    it('changedDeletedFiles lists only deletes for digest/diagnostics (RF-1.8)', () => {
+        const dir = make();
+        fs.appendFileSync(path.join(dir, 'base.ts'), 'export const b = 2;\n');
+        fs.writeFileSync(path.join(dir, 'new.ts'), 'export const n = 1;\n');
+        fs.rmSync(path.join(dir, 'base.ts'));
+
+        expect(changedDeletedFiles(dir).files).toEqual(['base.ts']);
+        expect(changedDeletedFiles(dir).files).not.toContain('new.ts');
+    });
+
+    it('rename contributes the new path and still surfaces under an inclusive filter (RF-1.8)', () => {
+        const dir = make();
+        const run = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+        run(['mv', 'base.ts', 'renamed.ts']);
+        run(['add', '-A']);
+        const files = changedFiles(dir).files;
+        expect(files).toContain('renamed.ts');
     });
 
     it('compares against the merge base, not the branch tip', () => {

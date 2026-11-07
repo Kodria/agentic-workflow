@@ -46,9 +46,9 @@ export function registerSensorsCommand(program: Command): void {
         .option('--fast', 'run fast sensors only (tsc, lint)')
         .option('--slow', 'run slow sensors only (semgrep, mutation)')
         .option('--all', 'run all sensors regardless of speed')
-        .option('--slice', 'run every selected sensor except pack/project closureOnly (slice DONE gate)')
+        .option('--slice', 'run every selected sensor except bare closureOnly; opted-in sliceCommand runs on slice file scope')
         .option('--changed', 'scope sensors that support it to the files changed vs --base')
-        .option('--base <ref>', 'comparison point for --changed (default: HEAD, i.e. uncommitted work)')
+        .option('--base <ref>', 'comparison point for --changed (default: HEAD); with --slice + sliceCommand, the slice-start SHA')
         .option('--no-cache', 'ignore fingerprint result cache and execute every selected sensor')
         .action(async (opts) => {
             // R2.2b: the receipt belongs to the manifest that runs (the one `runSensors` resolves from this cwd), not to the cwd.
