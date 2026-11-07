@@ -107,13 +107,20 @@ export function computeIntegrityDigest(body: MechanicalRunBody): string {
   return sha256Prefixed(canonicalBody(body));
 }
 
-/** Safe repo-relative path (no abs, drive, `..`, empty segments). Used for sealed scope + run preflight. */
+/** Safe repo-relative path (no abs, drive, `..`, empty segments). Used for sealed scope + run preflight.
+ * Leading `./` (and other `.` segments) are normalized away so declared globs like `./hello.txt` work. */
 export function assertSafeRepoRel(value: string, label: string): string {
-  if (typeof value !== 'string' || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)
-    || value.split('/').some((part) => part === '' || part === '.' || part === '..')) {
+  if (typeof value !== 'string' || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)) {
     throw new Error(`${label} must be a safe relative path`);
   }
-  return value;
+  const parts: string[] = [];
+  for (const part of value.split('/')) {
+    if (part === '' || part === '..') throw new Error(`${label} must be a safe relative path`);
+    if (part === '.') continue;
+    parts.push(part);
+  }
+  if (parts.length === 0) throw new Error(`${label} must be a safe relative path`);
+  return parts.join('/');
 }
 
 function validateScope(value: unknown): MechanicalRunScope {

@@ -6,6 +6,7 @@ import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
 import { posixOnly } from '../../helpers/platform';
 import {
   MECHANICAL_RUN_SCHEMA,
+  assertSafeRepoRel,
   computeCandidateContentDigest,
   computeIntegrityDigest,
   redactMechanicalArgv,
@@ -46,6 +47,24 @@ function sealed(overrides: Partial<MechanicalRunEvidence> = {}): MechanicalRunEv
   const body = validBody(overrides);
   return { ...body, integrityDigest: computeIntegrityDigest(body) };
 }
+
+describe('assertSafeRepoRel (declared/resolved scope safety)', () => {
+  test('accepts ./hello.txt after normalizing the ./ prefix (B1)', () => {
+    expect(assertSafeRepoRel('./hello.txt', 'scope.declared[0]')).toBe('hello.txt');
+  });
+
+  test('accepts ./globs used as declared patterns (B1)', () => {
+    expect(assertSafeRepoRel('./**/*.ts', 'scope.declared[0]')).toBe('**/*.ts');
+    expect(assertSafeRepoRel('./src/**/*.ts', 'scope.declared[1]')).toBe('src/**/*.ts');
+  });
+
+  test('still rejects .. and absolute escapes (B1)', () => {
+    expect(() => assertSafeRepoRel('../hello.txt', 'scope.declared[0]')).toThrow(/safe relative path/);
+    expect(() => assertSafeRepoRel('foo/../hello.txt', 'scope.declared[0]')).toThrow(/safe relative path/);
+    expect(() => assertSafeRepoRel('/etc/passwd', 'scope.resolved[0]')).toThrow(/safe relative path/);
+    expect(() => assertSafeRepoRel('C:/Windows/System32', 'scope.resolved[0]')).toThrow(/safe relative path/);
+  });
+});
 
 describe('MechanicalRunEvidence schema / integrity (RF-3.1, RF-3.6, RF-3.7, RF-E.1)', () => {
   test('accepts a sealed receipt with candidate headCommit + contentDigest', () => {
