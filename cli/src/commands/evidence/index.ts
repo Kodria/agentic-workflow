@@ -220,13 +220,21 @@ function captureChild(
   const [exe, ...args] = argv;
   return new Promise((resolve) => {
     // detached on POSIX so pgid === pid and killTree reaches grandchildren (B2).
-    const child = spawn(exe!, args, {
-      cwd,
-      shell: false,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: !isWindowsNative(),
-    });
+    // Windows CreateProcess can throw synchronously for overlong argv (~32k);
+    // treat that like the async 'error' path (exit 127) so callers still seal.
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(exe!, args, {
+        cwd,
+        shell: false,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: !isWindowsNative(),
+      });
+    } catch {
+      resolve({ exitCode: 127, stdout: '', stderr: '' });
+      return;
+    }
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let stdoutBytes = 0;

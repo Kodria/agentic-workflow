@@ -87,15 +87,20 @@ describe('awm evidence run (RF-3.1, RF-3.4, RF-3.5, RF-5.1)', () => {
   });
 
   test('bounds resultSummary and does not persist full unbounded stdout (RF-3.4)', async () => {
-    const blob = 'Z'.repeat(50_000);
-    await runEvidenceRun({
+    // Generate the large stdout inside the child — do not embed 50k chars in
+    // argv (Windows CreateProcess command-line limit ~32k; spawn throws sync
+    // and evidence run returns without a receipt).
+    const result = await runEvidenceRun({
       root,
-      argv: [process.execPath, '-e', `process.stdout.write(${JSON.stringify(blob)}); process.exit(0)`],
+      argv: [process.execPath, '-e', "process.stdout.write('Z'.repeat(50000)); process.exit(0)"],
     });
+    expect(result.code).toBe(0);
     const files = listMechanicalRuns(root);
+    expect(files).toHaveLength(1);
     const receipt = JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'runs', files[0]!), 'utf8'));
     expect(typeof receipt.resultSummary).toBe('string');
     expect(Buffer.byteLength(receipt.resultSummary, 'utf8')).toBeLessThanOrEqual(4096);
+    expect(receipt.resultSummary).not.toContain('Z'.repeat(5000));
   });
 
   test('non-zero command exit still writes a receipt with that exitCode', async () => {
