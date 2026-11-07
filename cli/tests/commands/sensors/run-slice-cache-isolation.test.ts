@@ -55,6 +55,8 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
     let project: string;
     let home: string;
     const version = '10.0.0';
+    const ENV_KEYS = ['HOME', 'AWM_HOME'] as const;
+    const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
     function writeFixture() {
         project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-slice-cache-'));
@@ -159,12 +161,15 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         mockRunCommand.mockResolvedValue(ok());
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
         mockChangedDeletedFiles.mockReturnValue({ files: [] });
+        for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
         writeFixture();
     });
 
     afterEach(() => {
-        delete process.env.HOME;
-        delete process.env.AWM_HOME;
+        for (const key of ENV_KEYS) {
+            if (savedEnv[key] === undefined) delete process.env[key];
+            else process.env[key] = savedEnv[key];
+        }
         if (project) fs.rmSync(project, { recursive: true, force: true });
         if (home) fs.rmSync(home, { recursive: true, force: true });
     });

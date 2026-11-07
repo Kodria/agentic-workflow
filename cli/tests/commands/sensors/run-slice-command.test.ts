@@ -34,6 +34,8 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
     let project: string;
     let home: string;
     const version = '10.0.0';
+    const ENV_KEYS = ['HOME', 'AWM_HOME'] as const;
+    const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
     function writeFixture(opts: { mutationSliceCommand?: typeof SLICE_COMMAND | false } = {}) {
         const includeSlice = opts.mutationSliceCommand !== false;
@@ -154,12 +156,15 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         mockChangedDeletedFiles.mockReturnValue({ files: [] });
         mockRunStructuredCommand.mockResolvedValue(ok());
         mockRunCommand.mockResolvedValue(ok());
+        for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
         writeFixture();
     });
 
     afterEach(() => {
-        delete process.env.HOME;
-        delete process.env.AWM_HOME;
+        for (const key of ENV_KEYS) {
+            if (savedEnv[key] === undefined) delete process.env[key];
+            else process.env[key] = savedEnv[key];
+        }
         if (project) fs.rmSync(project, { recursive: true, force: true });
         if (home) fs.rmSync(home, { recursive: true, force: true });
     });
