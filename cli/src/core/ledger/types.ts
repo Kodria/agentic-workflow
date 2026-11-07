@@ -49,6 +49,19 @@ export type LedgerParseResult =
     | { ok: true; entry: LedgerEntry }
     | { ok: false; source: string; reason: LedgerParseReason };
 
+/** Append-only resolution line folded onto the matching entry by id (CQ-S5-2). */
+export const LEDGER_RESOLVE_KIND = 'ledger-resolve' as const;
+
+export interface LedgerResolveRecord {
+    kind: typeof LEDGER_RESOLVE_KIND;
+    id: string;
+    resolved: LedgerResolved;
+}
+
+export type LedgerResolveParseResult =
+    | { ok: true; record: LedgerResolveRecord }
+    | { ok: false; reason: 'not-resolve' | 'invalid-resolve' };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -87,6 +100,21 @@ function parseResolved(value: unknown): LedgerResolved | 'invalid' | undefined {
     if (typeof value.at !== 'string' || value.at.length === 0) return 'invalid';
     if (!isResolvedHow(value.how)) return 'invalid';
     return { at: value.at, how: value.how };
+}
+
+/** Parses an append-only resolve line. Non-resolve objects return not-resolve (caller may try entry parse). */
+export function parseLedgerResolveRecord(input: unknown): LedgerResolveParseResult {
+    if (!isRecord(input) || input.kind !== LEDGER_RESOLVE_KIND) {
+        return { ok: false, reason: 'not-resolve' };
+    }
+    if (typeof input.id !== 'string' || input.id.length === 0) {
+        return { ok: false, reason: 'invalid-resolve' };
+    }
+    const resolved = parseResolved(input.resolved);
+    if (resolved === undefined || resolved === 'invalid') {
+        return { ok: false, reason: 'invalid-resolve' };
+    }
+    return { ok: true, record: { kind: LEDGER_RESOLVE_KIND, id: input.id, resolved } };
 }
 
 /** Validates the durable JSONL boundary. Missing defectClass/id/deferred/resolved is deliberately legacy-valid. */

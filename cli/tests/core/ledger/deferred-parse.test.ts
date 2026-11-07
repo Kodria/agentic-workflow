@@ -1,4 +1,4 @@
-import { parseLedgerEntry } from '../../../src/core/ledger/types';
+import { LEDGER_RESOLVE_KIND, parseLedgerEntry, parseLedgerResolveRecord } from '../../../src/core/ledger/types';
 
 function base(over: Record<string, unknown> = {}): Record<string, unknown> {
     return {
@@ -100,5 +100,26 @@ describe('ledger deferred/resolved parse (RF-4.7)', () => {
     test('rejects resolved that is not an object', () => {
         const parsed = parseLedgerEntry(base({ id: 'id-7', resolved: true }), 'line 1');
         expect(parsed).toMatchObject({ ok: false, reason: 'invalid-resolved' });
+    });
+
+    test('parseLedgerResolveRecord accepts append-only resolve lines', () => {
+        const parsed = parseLedgerResolveRecord({
+            kind: LEDGER_RESOLVE_KIND,
+            id: 'id-1',
+            resolved: { at: '2026-06-06T02:00:00.000Z', how: 'fixed' },
+        });
+        expect(parsed).toMatchObject({
+            ok: true,
+            record: { kind: LEDGER_RESOLVE_KIND, id: 'id-1', resolved: { how: 'fixed' } },
+        });
+    });
+
+    test('parseLedgerResolveRecord rejects bad how and non-resolve objects', () => {
+        expect(parseLedgerResolveRecord(base({ id: 'entry' }))).toMatchObject({ ok: false, reason: 'not-resolve' });
+        expect(parseLedgerResolveRecord({
+            kind: LEDGER_RESOLVE_KIND,
+            id: 'id-1',
+            resolved: { at: '2026-06-06T02:00:00.000Z', how: 'yolo' },
+        })).toMatchObject({ ok: false, reason: 'invalid-resolve' });
     });
 });

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { Command } from 'commander';
 import { registerLedgerCommand } from '../../../src/commands/ledger';
-import { listDeferredOpen, listEntries } from '../../../src/core/ledger/store';
+import { ledgerPath, listDeferredOpen, listEntries } from '../../../src/core/ledger/store';
 
 function mkTmp(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ledger-defer-'));
@@ -141,5 +141,42 @@ describe('awm ledger deferred/resolved CLI (RF-4.7)', () => {
         expect(() => run(['resolve', '--branch', 'feat-x', '--how', 'fixed'], cwd))
             .toThrow(/--id|--all-with-signature/i);
         expect(listDeferredOpen(cwd, 'feat-x')).toHaveLength(2);
+    });
+
+    test('resolve --id preserves a bad JSONL sibling line (CQ-S5-2)', () => {
+        addDeferred(cwd, 'keep-me', 'round-ceiling', 'deferred finding next to garbage');
+        const id = listEntries(cwd, 'feat-x')[0].id!;
+        const file = ledgerPath(cwd, 'feat-x');
+        const before = fs.readFileSync(file, 'utf-8');
+        const garbage = 'NOT JSON sibling that must survive resolve\n';
+        fs.writeFileSync(file, before + garbage);
+
+        run(['resolve', '--branch', 'feat-x', '--id', id, '--how', 'fixed'], cwd);
+
+        const after = fs.readFileSync(file, 'utf-8');
+        expect(after).toContain('NOT JSON sibling that must survive resolve');
+        expect(listEntries(cwd, 'feat-x')).toEqual([
+            expect.objectContaining({ id, resolved: expect.objectContaining({ how: 'fixed' }) }),
+        ]);
+        expect(listDeferredOpen(cwd, 'feat-x')).toEqual([]);
+    });
+
+    test('resolve --all-with-signature preserves shape-invalid sibling lines (CQ-S5-2)', () => {
+        addDeferred(cwd, 'shared', 'round-ceiling', 'first deferred for preserve test');
+        addDeferred(cwd, 'shared', 're-review-defer', 'second deferred for preserve test');
+        const file = ledgerPath(cwd, 'feat-x');
+        const invalidShape = JSON.stringify({
+            ts: 't', branch: 'feat-x', phase: 'p', source_skill: 's',
+            polarity: 'finding', class: 'logica', signature: 'no-desc', severity: 'minor',
+        });
+        fs.appendFileSync(file, invalidShape + '\n');
+
+        run(['resolve', '--branch', 'feat-x', '--all-with-signature', 'shared', '--how', 'accepted'], cwd);
+
+        const raw = fs.readFileSync(file, 'utf-8');
+        expect(raw).toContain('"signature":"no-desc"');
+        expect(listEntries(cwd, 'feat-x').filter(e => e.signature === 'shared'))
+            .toHaveLength(2);
+        expect(listEntries(cwd, 'feat-x').every(e => e.signature !== 'shared' || e.resolved?.how === 'accepted')).toBe(true);
     });
 });
