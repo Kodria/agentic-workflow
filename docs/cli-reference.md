@@ -244,6 +244,51 @@ values, or secrets. Both PR options must be supplied together. A missing,
 corrupt, or still-active journal is an explicit error rather than an inferred
 result.
 
+`CycleEvidenceV1` (this command) is separate from MechanicalRunEvidence
+(`awm evidence run` / `verify` below). Do not treat a cycle capsule as a run
+receipt, or the reverse.
+
+### `awm evidence run`
+
+Run an arbitrary command and write a **MechanicalRunEvidence** receipt under
+`.awm/evidence/runs/` (gitignored). Sensors do **not** use this path:
+`awm sensors run` / `sliceCommand` keep contrast on sensor provenance
+(`cached`, fingerprint, digests). Use `evidence run` for reviewer-bound
+mechanical gates that are not sensor executions. The contract is tool-agnostic —
+any argv works; fixtures may use a stub.
+
+```
+awm evidence run [--cwd <dir>] [--paths <patterns...>] -- <cmd...>
+```
+
+| Flag / args | Description |
+|---|---|
+| `--cwd <dir>` | Working directory (absolute or repo-relative; default `.`). |
+| `--paths <patterns...>` | Optional picomatch globs / repo-relative paths whose content digest binds the candidate. Empty expansion after resolve fails closed. |
+| `-- <cmd...>` | Command argv after `--` (required). |
+
+Stdout prints the receipt path (and machine-readable fields). Integrity,
+redaction, size bounds, and symlink escape rules apply; a receipt that fails
+validation is treated as absent by consumers — never as a pass.
+
+### `awm evidence verify`
+
+Contrast a MechanicalRunEvidence receipt against the current candidate without
+re-executing the command.
+
+```
+awm evidence verify [--cwd <dir>] <receipt-path> -- <expected argv...>
+```
+
+| Flag / args | Description |
+|---|---|
+| `--cwd <dir>` | Expected cwd override (default: re-resolve the receipt's `cwd` under the repo root). |
+| `<receipt-path>` | Path to a MechanicalRunEvidence JSON file. |
+| `-- <expected argv...>` | **Required.** Caller-supplied expected argv compared to the receipt's redacted argv. Omitting expected argv fails closed as `mismatch` (never `match` on tree/cwd alone). |
+
+Exits with machine-readable `match` or `mismatch` (reason named). Reviewers
+should prefer this over recomputing digests by hand.
+
 ### `awm agent list`
 
 List every supported provider and this machine's enabled/default state.
@@ -954,7 +999,7 @@ Coverage inspection is portable across native Windows, macOS, and Linux. It open
 
 ### `awm sensors run`
 
-Run the sensors in the manifest. With no flag, runs **all** sensors (the full completion gate). Selection flags scope the run; `--slice` is the per-slice DONE gate (see [D-025](decisions.md#d-025)):
+Run the sensors in the manifest. With no flag, runs **all** sensors (the full completion gate). Selection flags scope the run; `--slice` is the per-slice DONE gate (see [D-025](decisions.md#d-025), extended by [D-026](decisions.md#d-026)):
 
 ```
 awm sensors run [--fast | --slow | --all | --slice] [--changed] [--base <ref>] [--no-cache]
@@ -967,11 +1012,28 @@ Stdout is always a JSON verdict object (there is no `--json` flag on this comman
 | `--fast` | Fast sensors only (tsc, lint) — what the per-edit hook runs. |
 | `--slow` | Slow sensors only (semgrep, mutation). |
 | `--all` | All sensors regardless of speed. |
-| `--slice` | Every selected enabled applicable sensor whose effective `closureOnly` is not true; skips `closureOnly` sensors with a synthetic `skipped` reason. Makes `isFullSelection` false — **no Change Record receipt**. Combined with `--fast` means the intersection (fast ∧ not closureOnly). `--slice` cannot be combined with `--all` or `--slow` (the CLI refuses those invocations). |
+| `--slice` | Every selected enabled applicable sensor whose effective `closureOnly` is not true, plus any `closureOnly` sensor that opts in with a usable structured `sliceCommand` (see below). Bare `closureOnly` without `sliceCommand` is still skipped with a synthetic `skipped` reason. Makes `isFullSelection` false — **no Change Record receipt**. Combined with `--fast` means the intersection (fast ∧ (not closureOnly ∨ has sliceCommand)). `--slice` cannot be combined with `--all` or `--slow` (the CLI refuses those invocations). |
 | `--changed` | Argv-scope opted-in sensors to files changed vs `--base` (not the digest cache). |
+| `--base <ref>` | Comparison point for `--changed` (default: HEAD). With `--slice`, when a selected sensor will execute `sliceCommand`, this is the **required** slice-start SHA for that sensor's file scope — not a silent branch-wide default. |
 | `--no-cache` | Ignore fingerprint result-cache hits and execute every selected sensor that would otherwise run. Alone, does not make the selection partial for receipt purposes. |
 
-> The completion gate for QA, docs, finishing, and Change Record is the **full** run (no `--slice` / `--fast` xor `--slow` / `--changed`). Do not use `--slow` or `--slice` as that gate — `--slow` skips lint/typecheck; `--slice` skips `closureOnly` sensors and never writes a receipt.
+#### `sliceCommand` (structured opt-in on `--slice`)
+
+Packs / project manifests may declare an optional structured `sliceCommand` on a
+variant (same shape as `changedCommand`: argv template + `fileInput` with
+`placeholder: '{files}'` and optional `extensions`). The contract is
+tool-agnostic — any command argv works; fixtures may use a stub. Effective
+value = project structured override ?? pack variant default ?? absent.
+
+| Situation under `--slice` | Outcome |
+|---|---|
+| `closureOnly` + usable `sliceCommand` | Execute `sliceCommand` with slice file-scope paths substituted via `fileInput` (same safety rules as `changedCommand` — argv slots, not shell interpolation). Full-gate (no `--slice`) still runs the normal command; `sliceCommand` never replaces it. |
+| `closureOnly` without `sliceCommand` | Skip (D-025 preserved). |
+| Selected sensor would run `sliceCommand` but `--base` is missing / scope cannot be resolved / `fileInput` unusable | That sensor is **non-pass** with an explicit reason (e.g. slice scope requires `--base`). The whole `awm sensors run --slice` invocation is **not** rejected solely for a missing `--base`. |
+| Slice file scope resolves and is **empty** after extension filtering (e.g. docs-only slice) | That sensor is `skip` with an explicit reason — not `pass`, not a blocking fail by itself. Other selected sensors still reduce `overall` normally. |
+| `--slice` and no selected sensor will execute `sliceCommand` | Behaves as D-025 (skip bare `closureOnly`) **without** requiring `--base`. |
+
+> The completion gate for QA, docs, finishing, and Change Record is the **full** run (no `--slice` / `--fast` xor `--slow` / `--changed`). Do not use `--slow` or `--slice` as that gate — `--slow` skips lint/typecheck; `--slice` never writes a Change Record receipt even when some sensors ran via `sliceCommand`.
 
 `awm sensors run` never changes what it measures. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. Its one write is the local [sensor receipt](#sensor-receipt) below, a side effect that changes neither stdout nor the exit code. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
 
@@ -1003,9 +1065,11 @@ Operator `awm sensors run` (unless `--no-cache`) may reuse a prior raw result wh
 
 **Cache hit semantics:** a hit restores the stored raw (pre-baseline) result, then the CLI applies the current `.awm/sensors.baseline.json` so reported status can change without re-exec when baseline membership changes. Stdout JSON marks each cached sensor with `cached: true` and provenance: origin commit when known, `originDirty` (true when the entry was written while the worktree was dirty relative to HEAD under the existing dirty rules), input digest, and fingerprint id. The CLI does not claim a tool re-executed when the status was cached.
 
-**Fingerprint and always-measured paths:** the cache key includes a `sensorFingerprint` over effective `variantId` (when pack-bound), command (and changedCommand when present), **live** tool/runtime versions from this run's `liveState` (not solely init-time stamps), `cliVersion`, and the effective `inputs` list. If a required live version cannot be obtained, that sensor neither reads nor writes the cache. The input digest always measures (repo-root normalized): `.awm/sensors.json`; pack assets of the effective variant; `requirements.configFiles` when present; `package.json` when the variant uses package-manager / package-script resolution or declares `packageJsonFields`; and lockfiles present at the package root. `.awm/sensors.baseline.json` is **not** in the cache digest (baseline is re-applied every run) but remains in the validate always-measured set.
+**Fingerprint and always-measured paths:** the cache key includes a `sensorFingerprint` over effective `variantId` (when pack-bound), command (and changedCommand / sliceCommand when present for that scope mode), **live** tool/runtime versions from this run's `liveState` (not solely init-time stamps), `cliVersion`, and the effective `inputs` list. If a required live version cannot be obtained, that sensor neither reads nor writes the cache. The input digest always measures (repo-root normalized): `.awm/sensors.json`; pack assets of the effective variant; `requirements.configFiles` when present; `package.json` when the variant uses package-manager / package-script resolution or declares `packageJsonFields`; and lockfiles present at the package root. `.awm/sensors.baseline.json` is **not** in the cache digest (baseline is re-applied every run) but remains in the validate always-measured set.
 
-**What may be stored (`failureKind`):** the interpreter tags `fail` with `failureKind: 'findings' | 'missing-binary' | 'exit-code'`. Only raw `pass`, or raw `fail` with `failureKind === 'findings'` and at least one finding, is written. `missing-binary`, `exit-code`, inconclusive, skipped, crash/timeout, and findings-less fails are never cached. `--changed` keeps argv scoping and must not write a full-scope cache entry (`requestedScope === 'full'` only). Callers such as `preflight --verify-sensors`, admission `readOnly`, and `awm sensors baseline` / `ignoreBaseline` leave cache use off.
+**Scoped ⟂ full isolation (D-026):** when `--slice` executes `sliceCommand`, the CLI may read/write a **scoped** cache entry whose key includes an explicit `scope=slice` marker, the sliceCommand fingerprint components, and the resolved slice file-scope digest. Full-gate runs (`requestedScope === 'full'`) never read or write scoped entries, and a scoped pass never surfaces as `cached: true` on a full-gate run. Full-gate reuse follows existing full-scope digest rules only: when effective `inputs` are unchanged, `cached: true` is allowed and docs/finish must not force expensive re-exec with `--no-cache` solely because context files outside those `inputs` changed. `--changed` still must not write a full-scope cache entry.
+
+**What may be stored (`failureKind`):** the interpreter tags `fail` with `failureKind: 'findings' | 'missing-binary' | 'exit-code'`. Only raw `pass`, or raw `fail` with `failureKind === 'findings'` and at least one finding, is written. `missing-binary`, `exit-code`, inconclusive, skipped, crash/timeout, and findings-less fails are never cached. `--changed` keeps argv scoping and must not write a full-scope cache entry (`requestedScope === 'full'` only). Callers such as `preflight --verify-sensors`, admission `readOnly`, and `awm sensors baseline` / `ignoreBaseline` leave cache use off. Scoped and full cache writes are also skipped on timeout / unusable `sliceCommand` results.
 
 #### Sensor receipt
 
@@ -1325,11 +1389,14 @@ A persistent, per-branch findings ledger — ephemeral working memory for `harne
 
 ### `awm ledger add`
 
-Append one finding or win to the current branch's ledger.
+Append one finding or win to the current branch's ledger. Every entry receives a
+**stable unique `id`** at add time (used by `resolve --id`; `signature` remains
+the recurrence grouping key and may repeat).
 
 ```
 awm ledger add --polarity <p> --class <c> --signature <slug> --severity <s> --desc <text>
-               [--ref <ref>] [--phase <phase>] [--source-skill <skill>] [--defect-class <id>] [--branch <branch>]
+               [--ref <ref>] [--phase <phase>] [--source-skill <skill>] [--defect-class <id>]
+               [--deferred <reason>] [--branch <branch>]
 ```
 
 | Flag | Required | Description |
@@ -1343,12 +1410,36 @@ awm ledger add --polarity <p> --class <c> --signature <slug> --severity <s> --de
 | `--phase <phase>` | no | Lifecycle phase (default `unknown`). |
 | `--source-skill <skill>` | no | Emitting skill (default `unknown`). |
 | `--defect-class <id>` | no | Reusable lowercase kebab-case class for empirical coverage; invalid values fail before ledger I/O. |
+| `--deferred <reason>` | no | Mark the entry deferred at add time. Reasons: `round-ceiling` \| `re-review-defer`. |
 
 > Capture is best-effort: skill prose tells agents to skip silently if `awm` isn't on `PATH`.
 
 ### `awm ledger list`
 
 Print the current branch's ledger as JSON.
+
+```
+awm ledger list [--deferred-open] [--branch <branch>]
+```
+
+| Flag | Description |
+|---|---|
+| `--deferred-open` | Only entries that are deferred and not yet resolved. QA / review skills consume this filter; the CLI reports accurately and does not itself write completion markers. |
+
+### `awm ledger resolve`
+
+Mark a deferred ledger entry resolved. Default single resolve is by stable
+`--id` (not `--signature` alone).
+
+```
+awm ledger resolve --how <how> (--id <id> | --all-with-signature <signature>) [--branch <branch>]
+```
+
+| Flag | Description |
+|---|---|
+| `--how <how>` | Resolution: `fixed` \| `accepted`. |
+| `--id <id>` | Resolve exactly one deferred entry by the id assigned at add time. |
+| `--all-with-signature <signature>` | Resolve every deferred-open entry sharing this signature. Exactly one of `--id` or `--all-with-signature` is required. |
 
 ### `awm ledger recurring`
 

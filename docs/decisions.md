@@ -30,6 +30,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-023](#d-023) | 2026-09-29 | Custodia durable (`awm watch`) suspendida para todos los providers | Vigente |
 | [D-024](#d-024) | 2026-10-20 | Qué se versiona bajo `.awm/` (bloque gestionado en `.gitignore`) | Vigente |
 | [D-025](#d-025) | 2026-10-27 | Ciclo `--slice` + `closureOnly`; selección parcial nunca es evidencia de cierre | Vigente |
+| [D-026](#d-026) | 2026-11-07 | `sliceCommand` + cache scoped⟂full + evidencia mecánica + ledger deferred (extiende D-025) | Vigente |
 
 ---
 
@@ -641,3 +642,18 @@ fingerprints) o un `.awm/` bare ignora la config que el equipo necesita.
 - El wording de skills vive en el companion plan del registry: `awm-baseline-registry` → `docs/plans/2026-10-27-sensor-execution-optimization-registry-plan.md` (tras publicar el CLI que parsea `inputs` / `closureOnly`).
 
 **Si esto se revierte:** volvería el costo de mutation (u otros `closureOnly`) en cada slice, o se aceptaría evidencia parcial como cierre — ambos fallan el contrato de #236 / RF-5.
+
+## D-026
+
+**`sliceCommand` estructurado extiende D-025; cache scoped ⟂ full; full gate sigue siendo la única evidencia de Change Record / finish; findings deferred exigen consumo QA vía ledger.**
+
+D-025 definió el ciclo `--slice` + `closureOnly` (omitir sensores caros en el loop de slice). Esta decisión añade el opt-in estructurado `sliceCommand` (misma forma que `changedCommand` / `fileInput`) para correr un comando con alcance de archivos del slice en vez de omitir el sensor; aísla la cache scoped de la full; introduce receipts `MechanicalRunEvidence` vía `awm evidence run` / `verify` (distintos de `CycleEvidenceV1`); y da al ledger estado deferred/resolved con `id` estable para que QA consuma findings aplazados sin inventar un segundo store. El contrato es agnóstico de herramienta: fixtures pueden usar un stub; no se fija un mutator ni un lenguaje concreto.
+
+**Implica:**
+- Con `--slice`, un sensor `closureOnly` con `sliceCommand` usable corre sobre el alcance de archivos del slice (base = `--base <sha>` del inicio del slice). Sin `sliceCommand`, se omite como en D-025. `--base` solo es obligatorio cuando algún sensor seleccionado va a ejecutar `sliceCommand`; bare `--slice` sigue siendo compatible.
+- Alcance irresoluble (falta `--base`, `fileInput` inválido, error de resolución) → non-pass con razón explícita. Alcance vacío tras filtros de extensión → `skip` con razón (no `pass`); ese skip solo no tumba el gate del slice.
+- Entradas de cache con `scope=slice` nunca satisfacen ni se leen en full gate; un pass scoped nunca aparece como `cached: true` en un full-gate run. Docs / finish / Change Record siguen exigiendo full-gate `awm sensors run` (sin `--slice` / filtros parciales); reuse de cache full-scope cuando el digest de `inputs` coincide — no forzar re-exec caro con `--no-cache` si el digest full no cambió.
+- `awm sensors run` / `sliceCommand` no escriben `MechanicalRunEvidence`; el contraste de sensores usa provenance/`cached`/fingerprint. Comandos arbitrarios usan `awm evidence run` + `awm evidence verify` (argv esperado obligatorio tras `--`).
+- Findings de review deferred van al ledger (`--deferred`, `resolve --id`, `list --deferred-open`); QA debe consumir deferred-open vía ese estado (política registry); el CLI no escribe `awm-qa-complete`.
+
+**Si esto se revierte:** o se vuelve a omitir siempre el sensor caro en cada slice (sin opt-in scoped), o un pass scoped / evidencia parcial se aceptaría como cierre — ambos rompen #246 / RF-6.4 y el aislamiento RF-2.2.
