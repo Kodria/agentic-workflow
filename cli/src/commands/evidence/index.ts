@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { captureCycleEvidence } from '../../core/evidence/capture';
 import { writeCycleEvidence } from '../../core/evidence/store';
 import {
+  assertSafeRepoRel,
   boundResultSummary,
   computeCandidateContentDigest,
   readMechanicalRunEvidenceFile,
@@ -181,6 +182,8 @@ export function runEvidenceCapture(root: string, plan: unknown, overrides?: { re
 }
 
 const MAX_CAPTURE_BYTES = 64 * 1024;
+/** Align with sensor fallback (non-fast) timeout; kill hung evidence children. */
+const DEFAULT_EVIDENCE_TIMEOUT_MS = 120_000;
 
 function resolveRunCwd(root: string, cwdOption: string | undefined): string {
   const rootReal = fs.realpathSync(root);
@@ -192,9 +195,14 @@ function resolveRunCwd(root: string, cwdOption: string | undefined): string {
   return real;
 }
 
-function captureChild(argv: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+function captureChild(
+  argv: string[],
+  cwd: string,
+  timeoutMs: number = DEFAULT_EVIDENCE_TIMEOUT_MS,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   if (!Array.isArray(argv) || argv.length === 0) throw new Error('command argv is required');
   if (argv.some((a) => typeof a !== 'string' || a.includes('\0'))) throw new Error('argv is invalid');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be a positive safe integer');
   const [exe, ...args] = argv;
   return new Promise((resolve) => {
     const child = spawn(exe!, args, { cwd, shell: false, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -202,6 +210,7 @@ function captureChild(argv: string[], cwd: string): Promise<{ exitCode: number; 
     const stderrChunks: Buffer[] = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
+    let settled = false;
     const take = (chunks: Buffer[], seen: { n: number }, chunk: Buffer): void => {
       if (seen.n >= MAX_CAPTURE_BYTES) return;
       const piece = chunk.subarray(0, MAX_CAPTURE_BYTES - seen.n);
@@ -212,13 +221,34 @@ function captureChild(argv: string[], cwd: string): Promise<{ exitCode: number; 
     const stderrSeen = { n: 0 };
     child.stdout?.on('data', (chunk: Buffer) => { take(stdoutChunks, stdoutSeen, chunk); stdoutBytes = stdoutSeen.n; });
     child.stderr?.on('data', (chunk: Buffer) => { take(stderrChunks, stderrSeen, chunk); stderrBytes = stderrSeen.n; });
-    const finish = (exitCode: number) => resolve({
-      exitCode,
-      stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
-      stderr: Buffer.concat(stderrChunks, stderrBytes).toString('utf8'),
-    });
+    const finish = (exitCode: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks, stderrBytes).toString('utf8'),
+      });
+    };
+    let killTimer: ReturnType<typeof setTimeout> = setTimeout(() => {}, 0);
+    clearTimeout(killTimer);
+    const timer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch { /* already exited */ }
+      killTimer = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* already exited */ }
+        finish(124);
+      }, 1_000);
+    }, timeoutMs);
     child.on('error', () => finish(127));
-    child.on('exit', (code) => finish(typeof code === 'number' && code >= 0 && code <= 255 ? code : 1));
+    child.on('exit', (code, signal) => {
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        finish(124);
+        return;
+      }
+      finish(typeof code === 'number' && code >= 0 && code <= 255 ? code : 1);
+    });
   });
 }
 
@@ -236,6 +266,8 @@ export async function runEvidenceRun(input: {
   cwd?: string;
   declaredScope?: string[];
   resolvedScope?: string[];
+  /** Bounded child timeout (default 120s, aligned with sensor fallback). */
+  timeoutMs?: number;
 }): Promise<EvidenceRunResult> {
   try {
     if (!input || typeof input.root !== 'string' || input.root.length === 0) throw new Error('root is required');
@@ -243,23 +275,36 @@ export async function runEvidenceRun(input: {
     const rootReal = fs.realpathSync(input.root);
     const cwd = resolveRunCwd(rootReal, input.cwd);
     const declared = Array.isArray(input.declaredScope) ? input.declaredScope : [];
-    // Expand globs to real repo-rel paths before digesting (S4-BQ-1). Caller-supplied
-    // resolvedScope (already expanded) wins; otherwise expand declared patterns.
+    // Resolve + validate scope BEFORE spawning (fail closed, no side effects).
+    // Caller-supplied resolvedScope is treated as already-expanded literals
+    // (exact membership — do not re-picomatch). Declared patterns expand once.
     let resolved: string[] = [];
     if (Array.isArray(input.resolvedScope) && input.resolvedScope.length > 0) {
-      resolved = resolveScopePaths(rootReal, input.resolvedScope);
+      const unique = new Set<string>();
+      for (let i = 0; i < input.resolvedScope.length; i++) {
+        const raw = input.resolvedScope[i];
+        if (typeof raw !== 'string') throw new Error(`scope.resolved[${i}] must be a string`);
+        unique.add(assertSafeRepoRel(raw.split(path.sep).join('/'), `scope.resolved[${i}]`));
+      }
+      if (unique.size === 0) {
+        throw new Error('scope expansion is empty (vacuous/unresolved --paths); refusing empty-set contentDigest');
+      }
+      resolved = [...unique].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     } else if (declared.length > 0) {
       resolved = resolveScopePaths(rootReal, declared);
     }
+    // Seal candidate contentDigest BEFORE mutation (RF-3.6) — argv must not
+    // rewrite the identity the receipt claims to observe.
+    const contentDigest = computeCandidateContentDigest(rootReal, resolved.length > 0 ? resolved : undefined);
+    const headCommit = resolveHeadCommit(rootReal);
     const started = Date.now();
     const ranAt = new Date(started).toISOString();
-    const child = await captureChild(input.argv, cwd);
+    const child = await captureChild(input.argv, cwd, input.timeoutMs ?? DEFAULT_EVIDENCE_TIMEOUT_MS);
     const durationMs = Math.max(0, Date.now() - started);
-    const contentDigest = computeCandidateContentDigest(rootReal, resolved.length > 0 ? resolved : undefined);
     const sealed = sealMechanicalRunEvidence({
       ranAt,
       durationMs,
-      candidate: { headCommit: resolveHeadCommit(rootReal), contentDigest },
+      candidate: { headCommit, contentDigest },
       argv: redactMechanicalArgv(input.argv),
       cwd,
       exitCode: child.exitCode,

@@ -11,9 +11,11 @@
  * verify. Controllers that need env-sensitive gates MUST re-execute or pass
  * env via explicit argv.
  *
- * Scope (S4-BQ-1): `--paths` patterns are picomatch globs expanded against the
- * candidate worktree before digesting. An empty expansion (vacuous scope) fails
- * closed — never an empty-set SHA-256 that would false-match after edits.
+ * Scope (S4-BQ-1): `--paths` patterns are picomatch globs expanded once via
+ * `resolveScopePaths` against the candidate worktree; digests then use exact
+ * Set membership over those literals (never re-picomatch). An empty expansion
+ * (vacuous scope) fails closed — never an empty-set SHA-256 that would
+ * false-match after edits.
  */
 /// <reference path="../../types/picomatch-posix.d.ts" />
 import crypto from 'crypto';
@@ -105,7 +107,8 @@ export function computeIntegrityDigest(body: MechanicalRunBody): string {
   return sha256Prefixed(canonicalBody(body));
 }
 
-function assertSafeRepoRel(value: string, label: string): string {
+/** Safe repo-relative path (no abs, drive, `..`, empty segments). Used for sealed scope + run preflight. */
+export function assertSafeRepoRel(value: string, label: string): string {
   if (typeof value !== 'string' || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)
     || value.split('/').some((part) => part === '' || part === '.' || part === '..')) {
     throw new Error(`${label} must be a safe relative path`);
@@ -189,11 +192,13 @@ export function validateMechanicalRunEvidence(input: unknown): MechanicalRunEvid
 
 const AUTHORIZATION_TOKEN = /^(authorization)$/i;
 const AUTHORIZATION_INLINE = /^(authorization\s*[:=]\s*)(.+)$/i;
+const BEARER_TOKEN = /^bearer$/i;
 
 /**
  * Redact secret-shaped argv for durable receipts (RF-3.4).
  * Reuses journal redactArgv for --token=/--password=/--api-key= family, then
- * additionally blanks AUTHORIZATION-like header tokens.
+ * additionally blanks AUTHORIZATION-like header tokens — including the split
+ * three-token form `Authorization` / `Bearer` / `<secret>`.
  */
 export function redactMechanicalArgv(argv: string[]): string[] {
   if (!Array.isArray(argv) || argv.some((a) => typeof a !== 'string')) throw new Error('argv must be string[]');
@@ -208,6 +213,14 @@ export function redactMechanicalArgv(argv: string[]): string[] {
     }
     if (AUTHORIZATION_TOKEN.test(arg) && i + 1 < base.length) {
       out.push(arg);
+      const next = base[i + 1]!;
+      if (BEARER_TOKEN.test(next) && i + 2 < base.length) {
+        // Authorization Bearer <token> across three argv slots
+        out.push('[REDACTED]');
+        out.push('[REDACTED]');
+        i += 2;
+        continue;
+      }
       out.push('[REDACTED]');
       i++;
       continue;
@@ -272,6 +285,10 @@ export function resolveScopePaths(root: string, patterns: readonly string[]): st
   if (patterns.some((p) => typeof p !== 'string' || p.length === 0 || p.includes('\0'))) {
     throw new Error('scope patterns must be non-empty strings');
   }
+  // Fail closed on traversal before any glob expansion or child exec (RF robustness).
+  for (let i = 0; i < patterns.length; i++) {
+    assertSafeRepoRel(patterns[i]!.split(path.sep).join('/'), `scope.declared[${i}]`);
+  }
   const rootReal = fs.realpathSync(root);
   const candidates = listCandidatePaths(rootReal).map((p) => p.split(path.sep).join('/'));
   const matchers = patterns.map((pattern) => {
@@ -291,9 +308,12 @@ export function resolveScopePaths(root: string, patterns: readonly string[]): st
 /**
  * Worktree content digest for candidate identity (RF-3.6). Shared by
  * `evidence run` (seal) and `evidence verify` (recompute). Env is intentionally
- * excluded (see module header). When `scopePaths` is provided it is treated as
- * already-resolved repo-rel paths OR as patterns to expand (via resolveScopePaths);
- * empty expansion fails closed (S4-BQ-1).
+ * excluded (see module header).
+ *
+ * When `scopePaths` is provided it MUST be already-resolved repo-rel literals
+ * (exact Set membership — never re-picomatch; `file[1].txt` ≠ `file1.txt`).
+ * Expand globs only via `resolveScopePaths` at the resolve entry. Empty scope
+ * fails closed (S4-BQ-1).
  */
 export function computeCandidateContentDigest(root: string, scopePaths?: readonly string[]): string {
   if (typeof root !== 'string' || root.length === 0) throw new Error('contentDigest root must be a non-empty string');
@@ -302,8 +322,16 @@ export function computeCandidateContentDigest(root: string, scopePaths?: readonl
   if (scopePaths === undefined) {
     paths = listCandidatePaths(rootReal).map((p) => p.split(path.sep).join('/'));
   } else {
-    // Expand globs / validate non-empty intersection with the candidate set.
-    paths = resolveScopePaths(rootReal, scopePaths);
+    if (!Array.isArray(scopePaths) || scopePaths.length === 0) {
+      throw new Error('scope expansion is empty (vacuous/unresolved --paths); refusing empty-set contentDigest');
+    }
+    const unique = new Set<string>();
+    for (let i = 0; i < scopePaths.length; i++) {
+      const raw = scopePaths[i];
+      if (typeof raw !== 'string') throw new Error(`scope.resolved[${i}] must be a string`);
+      unique.add(assertSafeRepoRel(raw.split(path.sep).join('/'), `scope.resolved[${i}]`));
+    }
+    paths = [...unique];
   }
   paths = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const hash = crypto.createHash('sha256');

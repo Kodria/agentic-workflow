@@ -9,6 +9,7 @@ import {
   computeCandidateContentDigest,
   computeIntegrityDigest,
   redactMechanicalArgv,
+  resolveScopePaths,
   validateMechanicalRunEvidence,
   writeMechanicalRunEvidence,
   type MechanicalRunEvidence,
@@ -93,6 +94,13 @@ describe('argv redaction and result bounds (RF-3.4)', () => {
     expect(out.some((t) => /REDACTED/i.test(t) || /Authorization/i.test(t))).toBe(true);
   });
 
+  test('redacts Authorization Bearer token split across three argv tokens (RF-3.4)', () => {
+    const out = redactMechanicalArgv(['curl', '-H', 'Authorization', 'Bearer', 'super-secret-token']);
+    expect(out.join('\0')).not.toMatch(/super-secret-token/);
+    expect(out.join('\0')).not.toMatch(/Bearer/i);
+    expect(out).toEqual(['curl', '-H', 'Authorization', '[REDACTED]', '[REDACTED]']);
+  });
+
   test('resultSummary longer than the bound is rejected by validate', () => {
     const huge = 'x'.repeat(16_384);
     expect(() => validateMechanicalRunEvidence(sealed({ resultSummary: huge }))).toThrow(/resultSummary|bound|size/i);
@@ -150,14 +158,29 @@ describe('contentDigest helper shared by run+verify (RF-3.6)', () => {
   });
 
   test('S4-BQ-1: glob scope expands to real paths so edits change the digest', () => {
-    const before = computeCandidateContentDigest(root, ['*.txt']);
+    const resolved = resolveScopePaths(root, ['*.txt']);
+    const before = computeCandidateContentDigest(root, resolved);
     expect(before).toMatch(/^sha256:[a-f0-9]{64}$/);
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'edited\n');
-    expect(computeCandidateContentDigest(root, ['*.txt'])).not.toBe(before);
+    expect(computeCandidateContentDigest(root, resolved)).not.toBe(before);
   });
 
   test('S4-BQ-1: vacuous/unresolved scope fails closed (no empty-set digest)', () => {
-    expect(() => computeCandidateContentDigest(root, ['no-such-*.xyz'])).toThrow(/scope|empty|unresolved|vacuous/i);
-    expect(() => computeCandidateContentDigest(root, ['literally-missing.txt'])).toThrow(/scope|empty|unresolved|vacuous/i);
+    expect(() => resolveScopePaths(root, ['no-such-*.xyz'])).toThrow(/scope|empty|unresolved|vacuous/i);
+    expect(() => resolveScopePaths(root, ['literally-missing.txt'])).toThrow(/scope|empty|unresolved|vacuous/i);
+    expect(() => computeCandidateContentDigest(root, [])).toThrow(/scope|empty|unresolved|vacuous/i);
+  });
+
+  test('resolved literal file[1].txt does not also digest file1.txt (path-as-glob)', () => {
+    fs.writeFileSync(path.join(root, 'file1.txt'), 'one\n');
+    fs.writeFileSync(path.join(root, 'file[1].txt'), 'bracket\n');
+    git(root, ['add', '.']);
+    git(root, ['commit', '-qm', 'both']);
+    const resolved = ['file[1].txt'];
+    const before = computeCandidateContentDigest(root, resolved);
+    fs.writeFileSync(path.join(root, 'file1.txt'), 'mutated-sibling\n');
+    expect(computeCandidateContentDigest(root, resolved)).toBe(before);
+    fs.writeFileSync(path.join(root, 'file[1].txt'), 'mutated-bracket\n');
+    expect(computeCandidateContentDigest(root, resolved)).not.toBe(before);
   });
 });

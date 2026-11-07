@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { MECHANICAL_RUN_SCHEMA, validateMechanicalRunEvidence } from '../../../src/core/evidence/mechanical-run';
+import { MECHANICAL_RUN_SCHEMA, computeCandidateContentDigest, validateMechanicalRunEvidence } from '../../../src/core/evidence/mechanical-run';
 import { runEvidenceRun } from '../../../src/commands/evidence';
 
 const mockRunStructuredCommand = jest.fn();
@@ -108,6 +108,47 @@ describe('awm evidence run (RF-3.1, RF-3.4, RF-3.5, RF-5.1)', () => {
     await runEvidenceRun({ root, argv: [process.execPath, '-e', 'process.exit(0)'] });
     expect(listChangeReceipts(root)).toEqual([]);
   });
+
+  test('unsafe scope fails closed without executing argv (no side effects)', async () => {
+    const marker = path.join(root, 'side-effect.txt');
+    const result = await runEvidenceRun({
+      root,
+      argv: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'leaked'); process.exit(0)`],
+      declaredScope: ['foo/../hello.txt'],
+    });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toMatch(/scope|safe|relative|path|\.\./i);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(listMechanicalRuns(root)).toEqual([]);
+  });
+
+  test('contentDigest reflects pre-run candidate when argv mutates scoped files (RF-3.6)', async () => {
+    const before = computeCandidateContentDigest(root, ['hello.txt']);
+    const result = await runEvidenceRun({
+      root,
+      argv: [process.execPath, '-e', "require('fs').writeFileSync('hello.txt','mutated-by-child\\n'); process.exit(0)"],
+      declaredScope: ['hello.txt'],
+    });
+    expect(result.code).toBe(0);
+    const receipt = JSON.parse(fs.readFileSync(result.receiptPath!, 'utf8'));
+    expect(receipt.candidate.contentDigest).toBe(before);
+    expect(fs.readFileSync(path.join(root, 'hello.txt'), 'utf8')).toBe('mutated-by-child\n');
+  });
+
+  test('hung command is bounded by captureChild timeout (RF robustness)', async () => {
+    const started = Date.now();
+    const result = await runEvidenceRun({
+      root,
+      argv: [process.execPath, '-e', 'setTimeout(() => {}, 60_000)'],
+      timeoutMs: 200,
+    });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeLessThan(15_000);
+    expect(result.code).not.toBe(0);
+    expect(result.receiptPath).toBeDefined();
+    const receipt = JSON.parse(fs.readFileSync(result.receiptPath!, 'utf8'));
+    expect(receipt.exitCode).toBeGreaterThan(0);
+  }, 20_000);
 });
 
 describe('sensors must not emit MechanicalRunEvidence (RF-3.2 / RF-3.8)', () => {
