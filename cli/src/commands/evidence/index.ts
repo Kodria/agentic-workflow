@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, spawn } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import { Command } from 'commander';
 import { captureCycleEvidence } from '../../core/evidence/capture';
 import { writeCycleEvidence } from '../../core/evidence/store';
@@ -20,6 +20,7 @@ import { detectBranch, listEntries } from '../../core/ledger/store';
 import type { JournalState } from '../../core/journal/types';
 import { classifyPlanState, type PlanState } from '../../core/dashboard/plan-state';
 import type { CycleEvidencePlanState } from '../../core/evidence/types';
+import { isWindowsNative } from '../../core/paths';
 
 function assertRepoRelativePlan(value: unknown): string {
   if (typeof value !== 'string' || !value || value.startsWith('--') || path.isAbsolute(value)
@@ -195,6 +196,19 @@ function resolveRunCwd(root: string, cwdOption: string | undefined): string {
   return real;
 }
 
+/** Kill the whole process tree (align with sensors/exec.ts::killTree). */
+function killTree(pid: number, signal: NodeJS.Signals): void {
+  if (isWindowsNative()) {
+    try { execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ }); } catch { /* ignore */ }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try { process.kill(pid, signal); } catch { /* already dead */ }
+  }
+}
+
 function captureChild(
   argv: string[],
   cwd: string,
@@ -205,7 +219,14 @@ function captureChild(
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be a positive safe integer');
   const [exe, ...args] = argv;
   return new Promise((resolve) => {
-    const child = spawn(exe!, args, { cwd, shell: false, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // detached on POSIX so pgid === pid and killTree reaches grandchildren (B2).
+    const child = spawn(exe!, args, {
+      cwd,
+      shell: false,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: !isWindowsNative(),
+    });
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let stdoutBytes = 0;
@@ -235,9 +256,10 @@ function captureChild(
     let killTimer: ReturnType<typeof setTimeout> = setTimeout(() => {}, 0);
     clearTimeout(killTimer);
     const timer = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* already exited */ }
+      const pid = child.pid;
+      if (pid !== undefined) killTree(pid, 'SIGTERM');
       killTimer = setTimeout(() => {
-        try { child.kill('SIGKILL'); } catch { /* already exited */ }
+        if (pid !== undefined) killTree(pid, 'SIGKILL');
         finish(124);
       }, 1_000);
     }, timeoutMs);

@@ -4,6 +4,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { MECHANICAL_RUN_SCHEMA, computeCandidateContentDigest, validateMechanicalRunEvidence } from '../../../src/core/evidence/mechanical-run';
 import { runEvidenceRun } from '../../../src/commands/evidence';
+import { posixOnly } from '../../helpers/platform';
 
 const mockRunStructuredCommand = jest.fn();
 const mockRunCommand = jest.fn();
@@ -148,6 +149,46 @@ describe('awm evidence run (RF-3.1, RF-3.4, RF-3.5, RF-5.1)', () => {
     expect(result.receiptPath).toBeDefined();
     const receipt = JSON.parse(fs.readFileSync(result.receiptPath!, 'utf8'));
     expect(receipt.exitCode).toBeGreaterThan(0);
+  }, 20_000);
+
+  posixOnly('B2: captureChild timeout kills the grandchild, not only the direct child', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-kill-tree-'));
+    const beat = path.join(dir, 'beat');
+    const workerSrc = `
+      const fs = require('fs');
+      setInterval(() => fs.writeFileSync(${JSON.stringify(beat)}, String(Date.now())), 30);
+      setTimeout(() => {}, 60_000);
+    `;
+    const parentSrc = `
+      const { spawn } = require('child_process');
+      spawn(process.execPath, ['-e', ${JSON.stringify(workerSrc)}], { stdio: 'ignore' });
+      setTimeout(() => {}, 60_000);
+    `;
+    try {
+      const started = Date.now();
+      const result = await runEvidenceRun({
+        root,
+        argv: [process.execPath, '-e', parentSrc],
+        timeoutMs: 400,
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+      expect(result.code).not.toBe(0);
+
+      const until = async (pred: () => boolean, ms = 2_000): Promise<boolean> => {
+        const deadline = Date.now() + ms;
+        while (Date.now() < deadline) {
+          if (pred()) return true;
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        return false;
+      };
+      expect(await until(() => fs.existsSync(beat))).toBe(true);
+      const atKill = fs.readFileSync(beat, 'utf8');
+      const stillBeating = await until(() => fs.readFileSync(beat, 'utf8') !== atKill, 1_000);
+      expect(stillBeating).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }, 20_000);
 });
 
