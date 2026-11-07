@@ -4,7 +4,7 @@ id: 2026-11-07-slice-cost-control
 title: Slice cost control CLI — sliceCommand, scoped cache, evidence run/verify, ledger defer
 summary_short: CLI ships structured sliceCommand with conditional --base, scoped⟂full cache isolation, MechanicalRunEvidence (evidence run/verify), and ledger deferred resolve-by-id for #246.
 type: feat
-scope: evidence
+scope: sensors
 semver: minor
 breaking: false
 modules:
@@ -20,13 +20,13 @@ links:
   plan: docs/plans/2026-11-06-slice-cost-control-cli-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/246
 verification:
-  commit: f448a9de41cf3625ef153712ba7a9a0fc955df39
+  commit: fdf2b9f25613c21880252a551b3283438ef91afd
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:1a5a7914f591a0e9d8e801199368c4e2f1ec94bcbd6ff520c18748e0eabf2fc6
+  receipt_digest: sha256:16abd860596061f93579ed1f6f488dc11216142229cb8e0f4cc2dc02e49ffbfc
 manual_validation:
   - step: "From a clean clone of this branch, build CLI (npm --prefix cli run build) and run node cli/dist/src/index.js sensors run --slice with no sliceCommand in the project pack"
     expected: "Bare closureOnly sensors skip as in 9.22.x; command does not fail solely for missing --base"
@@ -50,13 +50,13 @@ rollback: "Revert this branch merge commit (or git revert the merge) and republi
 
 ## Qué se hizo
 
-Shipped CLI support for #246 slice cost control without reopening Spine #126: optional variant/project `sliceCommand` (structured, `fileInput` required), `--slice` that stays bare-compatible and requires `--base` only when executing `sliceCommand`, scoped⟂full result-cache isolation, `awm evidence run`/`verify` for MechanicalRunEvidence (distinct from CycleEvidenceV1), and ledger deferred/`resolve --id`/`--deferred-open`. Documented in `docs/cli-reference.md` and D-026. Post-review hardening (A1–A6): deletes stay out of tool argv (digest/diagnostics only), verify re-expands declared scope, large files stream-hash, slice path content in scoped digests, project slice cachePlan wiring, HOME+AWM_HOME test isolation. Registry skills/packs (RF-E.3, pack schema teaching) remain a companion after npm publish.
+Shipped CLI support for #246 slice cost control without reopening Spine #126: optional variant/project `sliceCommand` (structured, `fileInput` required), `--slice` that stays bare-compatible and requires `--base` only when executing `sliceCommand`, scoped⟂full result-cache isolation, `awm evidence run`/`verify` for MechanicalRunEvidence (distinct from CycleEvidenceV1), and ledger deferred/`resolve --id`/`--deferred-open`. Documented in `docs/cli-reference.md` and D-026. Post-review hardening (A1–A6): deletes stay out of tool argv (digest/diagnostics only), verify re-expands declared scope, large files stream-hash, slice path content in scoped digests, project slice cachePlan wiring, HOME+AWM_HOME redirected in fixtures with save/restore (not delete) matching `run-read-only`. Registry skills/packs (RF-E.3, pack schema teaching) remain a companion after npm publish.
 
 ## Qué se probó
 
-- Compact S1–S6 with TDD + independent spec/quality reviews; plan P7/P8 amendments; QA Track A/B with fix rounds; external audit A1–A6 closed with RED/GREEN suites.
-- Related suites after review fixes: changed/slice/cache/evidence (82 tests) pass; prior closure CMD suite green.
-- `awm sensors run` full gate → `overall: pass` (lint/typecheck/depcheck) with receipt on commit `f448a9de`.
+- Compact S1–S6 with TDD + independent spec/quality reviews; plan P7/P8 amendments; QA Track A/B with fix rounds; external audit A1–A6 closed with RED/GREEN suites; re-audit residual A6 (env restore) fixed.
+- Related suites after review fixes: changed/slice/cache/evidence pass; A6 restore suites (36 tests across slice-command/cache-isolation/evidence run) green.
+- `awm sensors run` full gate → `overall: pass` (lint/typecheck/depcheck) with receipt on commit `fdf2b9f2`.
 - Built `cli/dist` smoke for `evidence`/`ledger`/`sensors` help surfaces against operator docs.
 
 ## Qué falta validar
