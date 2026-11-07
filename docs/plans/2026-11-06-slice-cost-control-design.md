@@ -52,7 +52,7 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
   - Controllers that will execute a `sliceCommand` SHALL pass that SHA (normative flag: reuse `--base <sha>` with `--slice`, or an equally explicit slice-base option — one public flag, no silent default to branch-wide scope).
   - IF a **selected** sensor would execute `sliceCommand` and no slice base is provided, THAT sensor SHALL be non-pass with an explicit reason (e.g. `slice scope requires --base`) per RF-1.4 — THE CLI SHALL NOT reject the whole `awm sensors run --slice` invocation solely for a missing `--base`.
   - IF `--slice` is set and **no** selected sensor will execute `sliceCommand`, THE CLI SHALL behave as today (D-025 skip of bare `closureOnly`) **without** requiring `--base`, so published CLI remains compatible with registry skills that still call `--slice` alone until the companion lands.
-  - Renames SHALL contribute the new path; deletes SHALL contribute the deleted path; paths outside `packageRoot` SHALL be dropped before `fileInput` extension filtering, with the drop visible in diagnostics.
+  - Renames SHALL contribute the new path; deletes SHALL contribute to **digest/diagnostics** (deleted path names), never to tool argv (sensors cannot read gone paths); paths outside `packageRoot` SHALL be dropped before `fileInput` extension filtering, with the drop visible in diagnostics.
   - THE design REJECTS “reuse branch-wide `--changed` as slice scope” as the default: that set grows every slice and would defeat scoped cache (D2).
 
 ### RF-2 — Digest cache isolation (scoped vs full) and closure reuse

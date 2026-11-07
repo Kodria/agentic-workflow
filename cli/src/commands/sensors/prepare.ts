@@ -1,5 +1,5 @@
 import path from 'path';
-import { changedScopeError, applyChangedCmd, filterByExtension, type ChangedFiles } from './changed';
+import { changedScopeError, applyChangedCmd, filterByExtension, filterExistingFiles, type ChangedFiles } from './changed';
 import { resolveTimeout } from './compatibility/timeout';
 import type { CompatibilityEvidence, SensorPackSensor, SensorVariant, StructuredCommand } from './compatibility/types';
 import {
@@ -104,6 +104,10 @@ export type PrepareLegacySensorInput = {
     packTimeout?: number;
     requestedScope?: RequestedScope;
     changed?: ChangedFiles;
+    /** When set, drop non-existent paths before argv expansion. */
+    worktreeRoot?: string;
+    /** Deleted paths for RF-1.8 diagnostics — never expanded into argv. */
+    deletedFiles?: string[];
 };
 
 export type PrepareV2SensorInput = {
@@ -117,7 +121,38 @@ export type PrepareV2SensorInput = {
     changed?: ChangedFiles;
     /** Project paths used to evaluate optional project-sensor applicability. */
     applicabilityPaths?: string[];
+    /** When set, drop non-existent paths before argv expansion. */
+    worktreeRoot?: string;
+    /** Deleted paths for RF-1.8 diagnostics — never expanded into argv. */
+    deletedFiles?: string[];
 };
+
+/** Extension-filter then drop missing paths; note omitted deletes for diagnostics. */
+function argvFilesForScope(
+    files: string[],
+    extensions: string[] | undefined,
+    worktreeRoot: string | undefined,
+    deletedFiles: string[] | undefined,
+): { files: string[]; scopeReason?: string; deletedForDigest: string[] } {
+    let scoped = filterByExtension(files, extensions);
+    const notes: string[] = [];
+    if (typeof worktreeRoot === 'string' && worktreeRoot.trim() !== '') {
+        const existing = filterExistingFiles(worktreeRoot, scoped);
+        if (existing.omitted > 0) {
+            notes.push(`omitted ${existing.omitted} missing path(s) from argv`);
+        }
+        scoped = existing.files;
+    }
+    const deletedForDigest = filterByExtension(deletedFiles ?? [], extensions);
+    if (deletedForDigest.length > 0) {
+        notes.push(`omitted ${deletedForDigest.length} deleted path(s) from argv`);
+    }
+    return {
+        files: scoped,
+        ...(notes.length > 0 ? { scopeReason: notes.join('; ') } : {}),
+        deletedForDigest,
+    };
+}
 
 export function validateRunOptions(opts: PrepareRunOptions): void {
     if (!opts || typeof opts !== 'object' || Array.isArray(opts)) throw new Error('run options must be an object');
@@ -189,19 +224,32 @@ export function prepareLegacySensor(input: PrepareLegacySensorInput): PreparedSe
         const { command: _command, ...prepared } = fullLegacy(input);
         return { ...prepared, effectiveScope: 'changed', syntheticStatus: 'inconclusive', syntheticReason: 'changedCmd has no {files} placeholder' };
     }
-    const files = filterByExtension(input.changed.files, input.config.changedExtensions);
-    if (files.length === 0) {
+    const scoped = argvFilesForScope(
+        input.changed.files,
+        input.config.changedExtensions,
+        input.worktreeRoot,
+        input.deletedFiles,
+    );
+    if (scoped.files.length === 0) {
         const { command: _command, ...prepared } = fullLegacy(input);
-        return { ...prepared, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
+        return {
+            ...prepared,
+            effectiveScope: 'changed',
+            files: 0,
+            syntheticStatus: 'pass',
+            syntheticReason: 'no changed files in scope',
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
     }
     return {
         name: input.name,
-        command: { kind: 'legacy', value: applyChangedCmd(input.config.changedCmd, files) },
+        command: { kind: 'legacy', value: applyChangedCmd(input.config.changedCmd, scoped.files) },
         ...(input.config.formatter ? { formatter: input.config.formatter } : {}),
         ...timeout(input.config.timeout, input.packTimeout, input.config.fast ?? false),
         requestedScope,
         effectiveScope: 'changed',
-        files: files.length,
+        files: scoped.files.length,
+        ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
     };
 }
 
@@ -272,22 +320,33 @@ function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecut
                 syntheticReason: 'sliceCommand is not usable',
             };
         }
-        const files = filterByExtension(input.changed.files, sensor.sliceCommand.fileInput.extensions);
-        if (files.length === 0) {
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sensor.sliceCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
             return {
                 ...common,
                 effectiveScope: 'slice',
                 files: 0,
                 syntheticStatus: 'skipped',
                 syntheticReason: 'slice scope empty after filters',
-                ...(input.changed.files.length > 0 ? { scopeReason: 'extension or packageRoot filters removed every slice path' } : {}),
+                scopeReason: [
+                    input.changed.files.length > 0 || (input.deletedFiles?.length ?? 0) > 0
+                        ? 'extension or packageRoot filters removed every slice path'
+                        : undefined,
+                    scoped.scopeReason,
+                ].filter(Boolean).join('; ') || undefined,
             };
         }
         return {
             ...common,
-            command: { kind: 'structured', value: expandFileInput(sensor.sliceCommand, files) },
+            command: { kind: 'structured', value: expandFileInput(sensor.sliceCommand, scoped.files) },
             effectiveScope: 'slice',
-            files: files.length,
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
         };
     }
     if (requestedScope === 'changed' && input.changed) {
@@ -307,15 +366,28 @@ function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecut
                 scopeReason: 'sensor does not support changed scope',
             };
         }
-        const files = filterByExtension(input.changed.files, sensor.changedCommand.fileInput.extensions);
-        if (files.length === 0) {
-            return { ...common, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sensor.changedCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
+            return {
+                ...common,
+                effectiveScope: 'changed',
+                files: 0,
+                syntheticStatus: 'pass',
+                syntheticReason: 'no changed files in scope',
+                ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+            };
         }
         return {
             ...common,
-            command: { kind: 'structured', value: expandFileInput(sensor.changedCommand, files) },
+            command: { kind: 'structured', value: expandFileInput(sensor.changedCommand, scoped.files) },
             effectiveScope: 'changed',
-            files: files.length,
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
         };
     }
     return {
@@ -390,28 +462,59 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
                 syntheticReason: 'sliceCommand is not usable',
             };
         }
-        const files = filterByExtension(input.changed.files, sliceCommand.fileInput.extensions);
-        if (files.length === 0) {
+        const scoped = argvFilesForScope(
+            input.changed.files,
+            sliceCommand.fileInput.extensions,
+            input.worktreeRoot,
+            input.deletedFiles,
+        );
+        if (scoped.files.length === 0) {
             return {
                 ...common,
                 effectiveScope: 'slice',
                 files: 0,
                 syntheticStatus: 'skipped',
                 syntheticReason: 'slice scope empty after filters',
-                ...(input.changed.files.length > 0 ? { scopeReason: 'extension or packageRoot filters removed every slice path' } : {}),
+                scopeReason: [
+                    input.changed.files.length > 0 || (input.deletedFiles?.length ?? 0) > 0
+                        ? 'extension or packageRoot filters removed every slice path'
+                        : undefined,
+                    scoped.scopeReason,
+                ].filter(Boolean).join('; ') || undefined,
             };
         }
         return {
             ...common,
-            command: { kind: 'structured', value: expandFileInput(sliceCommand, files) },
+            command: { kind: 'structured', value: expandFileInput(sliceCommand, scoped.files) },
             effectiveScope: 'slice',
-            files: files.length,
+            files: scoped.files.length,
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
         };
     }
     if (requestedScope !== 'changed' || !input.changed) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full' };
     if (input.changed.error) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: `changed scope could not be resolved: ${input.changed.error}` };
     if (!changedCommand) return { ...common, command: { kind: 'structured', value: variant.command }, effectiveScope: 'full', scopeReason: 'sensor does not support changed scope' };
-    const files = filterByExtension(input.changed.files, changedCommand.fileInput?.extensions);
-    if (files.length === 0) return { ...common, effectiveScope: 'changed', files: 0, syntheticStatus: 'pass', syntheticReason: 'no changed files in scope' };
-    return { ...common, command: { kind: 'structured', value: expandFileInput(changedCommand, files) }, effectiveScope: 'changed', files: files.length };
+    const scoped = argvFilesForScope(
+        input.changed.files,
+        changedCommand.fileInput?.extensions,
+        input.worktreeRoot,
+        input.deletedFiles,
+    );
+    if (scoped.files.length === 0) {
+        return {
+            ...common,
+            effectiveScope: 'changed',
+            files: 0,
+            syntheticStatus: 'pass',
+            syntheticReason: 'no changed files in scope',
+            ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+        };
+    }
+    return {
+        ...common,
+        command: { kind: 'structured', value: expandFileInput(changedCommand, scoped.files) },
+        effectiveScope: 'changed',
+        files: scoped.files.length,
+        ...(scoped.scopeReason ? { scopeReason: scoped.scopeReason } : {}),
+    };
 }

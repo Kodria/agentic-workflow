@@ -16,9 +16,14 @@ jest.mock('../../../src/commands/sensors/exec', () => ({
 }));
 
 const mockChangedFiles = jest.fn();
+const mockChangedDeletedFiles = jest.fn();
 jest.mock('../../../src/commands/sensors/changed', () => {
     const actual = jest.requireActual('../../../src/commands/sensors/changed');
-    return { ...actual, changedFiles: (...args: unknown[]) => mockChangedFiles(...args) };
+    return {
+        ...actual,
+        changedFiles: (...args: unknown[]) => mockChangedFiles(...args),
+        changedDeletedFiles: (...args: unknown[]) => mockChangedDeletedFiles(...args),
+    };
 });
 
 const { ok } = require('./exec-fixtures');
@@ -54,11 +59,13 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
     function writeFixture() {
         project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-slice-cache-'));
         home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-slice-cache-home-'));
-        process.env.AWM_HOME = home;
-        const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+        process.env.HOME = home;
+        process.env.AWM_HOME = path.join(home, '.awm');
+        fs.mkdirSync(process.env.AWM_HOME, { recursive: true });
+        const registry = path.join(process.env.AWM_HOME, 'registries', 'baseline', 'sensor-packs', 'js-ts');
         fs.mkdirSync(registry, { recursive: true });
         fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
-        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+        fs.writeFileSync(path.join(process.env.AWM_HOME, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
         fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
         fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
         fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version }));
@@ -121,7 +128,7 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         });
         fs.mkdirSync(path.join(project, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
-            schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, 'registries', 'baseline'), sensors: {
+            schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, '.awm', 'registries', 'baseline'), sensors: {
                 lint: {
                     enabled: true, fast: true, variantId: 'eslint-10',
                     command: { executable: 'stale', resolution: 'node-modules-bin', args: ['.'] },
@@ -147,13 +154,16 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         mockRunStructuredCommand.mockReset();
         mockRunCommand.mockReset();
         mockChangedFiles.mockReset();
+        mockChangedDeletedFiles.mockReset();
         mockRunStructuredCommand.mockResolvedValue(ok());
         mockRunCommand.mockResolvedValue(ok());
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
+        mockChangedDeletedFiles.mockReturnValue({ files: [] });
         writeFixture();
     });
 
     afterEach(() => {
+        delete process.env.HOME;
         delete process.env.AWM_HOME;
         if (project) fs.rmSync(project, { recursive: true, force: true });
         if (home) fs.rmSync(home, { recursive: true, force: true });
@@ -249,6 +259,35 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         expect(mutationExecCount()).toBe(1);
         expect(byName(miss).mutation.cached).toBeUndefined();
         expect(byName(miss).mutation.status).toBe('pass');
+    });
+
+    it('A5: changing content of a slice file outside inputs forces scoped miss', async () => {
+        // Narrow inputs so src/a.ts is in slice argv but NOT in inputs digests.
+        const sensorsPath = path.join(project, '.awm', 'sensors.json');
+        const manifest = JSON.parse(fs.readFileSync(sensorsPath, 'utf8'));
+        manifest.sensors.mutation.inputs = ['tests/**/*.ts'];
+        fs.writeFileSync(sensorsPath, JSON.stringify(manifest));
+        const packPath = path.join(home, '.awm', 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json');
+        const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
+        pack.sensors.mutation.variants[0].inputs = ['tests/**/*.ts'];
+        fs.writeFileSync(packPath, JSON.stringify(pack));
+        git(project, ['add', '-A']);
+        git(project, ['commit', '-qm', 'narrow-inputs']);
+
+        const { runSensors } = load();
+        await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        expect(mutationExecCount()).toBe(1);
+        mockRunStructuredCommand.mockClear();
+        const hit = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        expect(byName(hit).mutation).toMatchObject({ status: 'pass', cached: true });
+        expect(mutationExecCount()).toBe(0);
+
+        fs.writeFileSync(path.join(project, 'src', 'a.ts'), 'export const a = 42;\n');
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+        const miss = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        expect(mutationExecCount()).toBe(1);
+        expect(byName(miss).mutation.cached).toBeUndefined();
     });
 
     it('RF-2.2: scoped fingerprint includes mode/sliceCommand/paths; dropping them collapses keys (mutation RED)', () => {

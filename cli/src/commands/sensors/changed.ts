@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { isWindowsNative } from '../../core/paths';
 
@@ -65,20 +66,70 @@ export function changedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
     try {
         // `HEAD` means "everything not yet committed" — no merge-base needed, and it
         // is the right default for a gate that runs before the work is committed.
-        // Inclusive name-only diffs (RF-1.8): deletes contribute the deleted path;
-        // renames contribute the new path. Do not use `--diff-filter=d` (excludes deletes).
+        // Omit deletes from the default list (`--diff-filter=d`): sensors cannot read
+        // gone paths, so deletes must never enter tool argv. RF-1.8 accounting for
+        // deletes lives on `changedDeletedFiles` + digests/diagnostics, not argv.
+        // Renames still contribute the new path under this filter.
         if (base !== 'HEAD') {
             const from = mergeBase(base, cwd);
-            out = out.concat(git(['diff', '--name-only', from, 'HEAD'], cwd).split('\n'));
+            out = out.concat(git(['diff', '--name-only', '--diff-filter=d', from, 'HEAD'], cwd).split('\n'));
         }
-        out = out.concat(git(['diff', '--name-only', 'HEAD'], cwd).split('\n'));
-        out = out.concat(git(['diff', '--name-only', '--cached'], cwd).split('\n'));
+        out = out.concat(git(['diff', '--name-only', '--diff-filter=d', 'HEAD'], cwd).split('\n'));
+        out = out.concat(git(['diff', '--name-only', '--diff-filter=d', '--cached'], cwd).split('\n'));
         out = out.concat(git(['ls-files', '--others', '--exclude-standard'], cwd).split('\n'));
     } catch (e) {
         return { files: [], error: (e as Error).message.split('\n')[0] };
     }
     const files = Array.from(new Set(out.map(s => s.trim()).filter(Boolean))).sort();
     return { files };
+}
+
+/**
+ * Deleted paths only (`--diff-filter=D`) for RF-1.8 digest/diagnostics.
+ * Never handed to tool argv — see `changedFiles` and slice fingerprint digests.
+ */
+export function changedDeletedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
+    let out: string[] = [];
+    try {
+        if (base !== 'HEAD') {
+            const from = mergeBase(base, cwd);
+            out = out.concat(git(['diff', '--name-only', '--diff-filter=D', from, 'HEAD'], cwd).split('\n'));
+        }
+        out = out.concat(git(['diff', '--name-only', '--diff-filter=D', 'HEAD'], cwd).split('\n'));
+        out = out.concat(git(['diff', '--name-only', '--diff-filter=D', '--cached'], cwd).split('\n'));
+    } catch (e) {
+        return { files: [], error: (e as Error).message.split('\n')[0] };
+    }
+    const files = Array.from(new Set(out.map(s => s.trim()).filter(Boolean))).sort();
+    return { files };
+}
+
+/**
+ * Keep only paths that still exist as regular files under `cwd` (repo- or
+ * package-relative). Defense in depth before `expandFileInput` / argv.
+ */
+export function filterExistingFiles(cwd: string, files: string[]): { files: string[]; omitted: number } {
+    if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a nonempty string');
+    if (!Array.isArray(files)) throw new Error('files must be an array');
+    const kept: string[] = [];
+    let omitted = 0;
+    for (const file of files) {
+        if (typeof file !== 'string' || file.trim() === '') {
+            omitted += 1;
+            continue;
+        }
+        try {
+            const st = fs.statSync(path.join(cwd, file));
+            if (!st.isFile()) {
+                omitted += 1;
+                continue;
+            }
+            kept.push(file);
+        } catch {
+            omitted += 1;
+        }
+    }
+    return { files: kept, omitted };
 }
 
 /**

@@ -320,7 +320,7 @@ Own RF-1.1–1.4, RF-1.7–1.8, RF-E.2. Wire `--slice` so bare calls stay 9.22.x
    - Do **not** require `opts.base` at the commander/`index.ts` level for every `--slice`.
    - `run.ts`: IF `opts.slice` and the sensor has usable `sliceCommand`, require base; missing → synthetic non-pass for that sensor only. IF closureOnly and no `sliceCommand`, keep `sliceSkipExecution` (today). IF executing `sliceCommand`, set that execution's `requestedScope='slice'`, resolve with `changedFiles(cwd, base)`, filter extensions, `expandFileInput`. Empty files → skip (not pass).
    - Document `--base` as slice-start SHA when used with `--slice`+`sliceCommand` (also keeps `--changed` meaning).
-   - Paths outside packageRoot dropped before expansion; renames/deletes inherit `changedFiles`.
+   - Paths outside packageRoot dropped before expansion; renames inherit `changedFiles` (argv); deletes contribute digest/diagnostics only (`changedDeletedFiles`), never tool argv.
 3. GREEN — CMD-SLICE + CMD-TYPECHECK.
 
 #### Edge cases
@@ -470,6 +470,7 @@ Forward: every CLI-owned design RF in the manifest has ≥1 slice and ≥1 comma
 | P5 | S5: stable `id`; resolve by `--id` |
 | P6 | RF-E.3 moved to registry companion handoff |
 | P7 | S4/RF-3.9: verify requires expected argv (after `--`); omit → mismatch fail-closed (spec FAIL on f875497e) |
+| P8 | RF-1.8: deletes contribute digest/diagnostics only — never tool argv (`--diff-filter=d` on argv list; `changedDeletedFiles` for accounting) |
 
 ## Handoff
 

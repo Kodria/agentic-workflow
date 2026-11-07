@@ -6,7 +6,7 @@ import { SensorManifest, RunOutput, PreparedSensorExecution, SensorResult } from
 import { readBaseline } from './baseline';
 import { applyBaseline, executePrepared } from './result';
 export { applyBaseline };
-import { changedFiles, changedScopeError, filterByExtension } from './changed';
+import { changedDeletedFiles, changedFiles, changedScopeError, filterByExtension, filterExistingFiles } from './changed';
 // Solo `detectStack` (puro, lee el arbol) — NO `initSensors`, que escribe. `run` es un
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
 import { detectStack } from './detection';
@@ -196,8 +196,10 @@ function buildCachePlan(args: {
     /** Scoped cache mode (RF-2.2). Defaults to full-gate keys. */
     cacheMode?: 'full' | 'slice';
     sliceCommand?: StructuredCommand;
-    /** Resolved slice file paths (post packageRoot + extension filters). */
+    /** Resolved slice file paths (post packageRoot + extension filters; existing only). */
     slicePaths?: string[];
+    /** Deleted slice paths for RF-1.8 digest markers (never argv). */
+    sliceDeletedPaths?: string[];
 }): CachePlan | null {
     const toolVersion = args.liveState?.toolVersion;
     const runtimeVersion = args.liveState?.runtimeVersion;
@@ -218,7 +220,10 @@ function buildCachePlan(args: {
             ? {
                 cacheMode: 'slice' as const,
                 sliceCommand: args.sliceCommand,
-                slicePathsDigest: digestSortedSlicePaths(args.slicePaths as string[]),
+                slicePathsDigest: digestSortedSlicePaths(args.slicePaths as string[], {
+                    root: args.packageRoot,
+                    deletedPaths: args.sliceDeletedPaths,
+                }),
             }
             : {}),
     };
@@ -548,6 +553,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
 
     const baseline = opts.ignoreBaseline ? null : readBaseline(manifestDir);
     const changed = opts.changed ? changedFiles(manifestDir, opts.base ?? 'HEAD') : null;
+    const changedDeleted = opts.changed ? changedDeletedFiles(manifestDir, opts.base ?? 'HEAD') : null;
     // Legacy commands pass changed filenames through a shell; preserve the native
     // Windows safety fallback. Structured v2 argv never crosses that shell layer.
     if (parsed.kind === 'legacy' && changed && !changed.error) {
@@ -570,10 +576,16 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const writeCache = cacheEnabled && requestedScope === 'full';
     // Lazily resolve slice file scope only when a selected sensor will execute sliceCommand.
     let sliceChanged: ReturnType<typeof changedFiles> | null = null;
+    let sliceDeleted: ReturnType<typeof changedDeletedFiles> | null = null;
     const resolveSliceChanged = (): ReturnType<typeof changedFiles> => {
         if (sliceChanged) return sliceChanged;
         sliceChanged = changedFiles(manifestDir, opts.base as string);
         return sliceChanged;
+    };
+    const resolveSliceDeleted = (): ReturnType<typeof changedDeletedFiles> => {
+        if (sliceDeleted) return sliceDeleted;
+        sliceDeleted = changedDeletedFiles(manifestDir, opts.base as string);
+        return sliceDeleted;
     };
     // Realpath so Windows git toplevel / Node path forms agree before cache digests.
     const gitRootRaw = resolveGitRoot(manifestDir) ?? manifestDir;
@@ -587,6 +599,11 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             gitRoot = path.resolve(gitRootRaw);
         }
     }
+    const packageRelativeDeleted = (raw: ReturnType<typeof changedDeletedFiles>): string[] => {
+        if (raw.error) return [];
+        return filterPathsInsidePackageRoot(raw.files, projectCwd, gitRoot).files;
+    };
+    const changedDeletedPkg = changedDeleted ? packageRelativeDeleted(changedDeleted) : [];
 
     const activeManifest = parsed.pack as unknown as SensorManifest;
     const sensorsMap = activeManifest.sensors ?? {};
@@ -623,9 +640,11 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                     continue;
                 }
                 const rawSlice = resolveSliceChanged();
+                const rawDeleted = resolveSliceDeleted();
                 const contained = rawSlice.error
                     ? { files: [] as string[], dropped: 0 }
                     : filterPathsInsidePackageRoot(rawSlice.files, projectCwd, gitRoot);
+                const deletedPkg = packageRelativeDeleted(rawDeleted);
                 const sliceScope = rawSlice.error
                     ? { files: [] as string[], error: rawSlice.error }
                     : { files: contained.files };
@@ -643,6 +662,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                     changed: sliceScope,
                     projectTimeout: projectEntry.timeout,
                     applicabilityPaths,
+                    worktreeRoot: projectCwd,
+                    deletedFiles: deletedPkg,
                 });
                 const withDropNote = contained.dropped > 0
                     ? {
@@ -656,7 +677,36 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 const disabled = projectEntry.enabled === false
                     ? { ...withDropNote, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
                     : withDropNote;
-                prepared.push({ execution: disabled, cachePlan: null });
+                // Scoped plan for project-declared sliceCommand (RF-2.2 spirit / A4).
+                // Without live tool/runtime versions the plan is not cacheable (RF-2.10)
+                // but still attaches fingerprint/digest measurements when inputs exist.
+                let projectSlicePlan: CachePlan | null = null;
+                const projectSliceInputs = effectiveInputs(projectEntry.inputs, undefined);
+                if (projectSliceInputs && disabled.syntheticStatus === undefined && !('error' in sliceScope && sliceScope.error)) {
+                    const existingPaths = filterByExtension(
+                        filterExistingFiles(projectCwd, contained.files).files,
+                        projectSlice.fileInput?.extensions,
+                    );
+                    const deletedForDigest = filterByExtension(deletedPkg, projectSlice.fileInput?.extensions);
+                    if (existingPaths.length > 0 || deletedForDigest.length > 0) {
+                        projectSlicePlan = buildCachePlan({
+                            gitRoot,
+                            packageRoot: projectCwd,
+                            manifestPath: configured.manifestPath,
+                            sensorId: name,
+                            inputGlobs: projectSliceInputs,
+                            variant: undefined,
+                            liveState: undefined,
+                            assets: projectEntry.assets,
+                            command: projectEntry.command,
+                            cacheMode: 'slice',
+                            sliceCommand: projectSlice,
+                            slicePaths: existingPaths,
+                            sliceDeletedPaths: deletedForDigest,
+                        });
+                    }
+                }
+                prepared.push({ execution: disabled, cachePlan: projectSlicePlan });
                 continue;
             }
             const markers = [
@@ -673,6 +723,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 changed: changed ?? undefined,
                 projectTimeout: projectEntry.timeout,
                 applicabilityPaths,
+                worktreeRoot: projectCwd,
+                deletedFiles: changedDeletedPkg,
             });
             const disabled = projectEntry.enabled === false
                 ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
@@ -749,9 +801,11 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 continue;
             }
             const rawSlice = resolveSliceChanged();
+            const rawDeleted = resolveSliceDeleted();
             const contained = rawSlice.error
                 ? { files: [] as string[], dropped: 0 }
                 : filterPathsInsidePackageRoot(rawSlice.files, projectCwd, gitRoot);
+            const deletedPkg = packageRelativeDeleted(rawDeleted);
             const sliceScope = rawSlice.error
                 ? { files: [] as string[], error: rawSlice.error }
                 : { files: contained.files };
@@ -762,6 +816,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 liveState,
                 requestedScope: 'slice',
                 changed: sliceScope,
+                worktreeRoot: projectCwd,
+                deletedFiles: deletedPkg,
             });
             const withDropNote = contained.dropped > 0
                 ? {
@@ -776,16 +832,17 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 ? { ...withDropNote, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }
                 : withDropNote;
             // Scoped cache plan (RF-2.1/2.2): fingerprint includes mode=slice, sliceCommand,
-            // and digest of resolved paths. Full-gate keys never share this space.
+            // and digest of resolved paths (+ content / deleted markers). Full-gate keys never share this space.
             let slicePlan: CachePlan | null = null;
             const sliceInputs = effectiveInputs((packBoundSensor as PackBoundManifestSensor).inputs, variant);
             const sliceCmd = usableSliceCommand(variant, projectSliceOverride);
             if (sliceInputs && sliceCmd && ready.syntheticStatus === undefined && !('error' in sliceScope && sliceScope.error)) {
-                const slicePaths = filterByExtension(
-                    'files' in sliceScope ? sliceScope.files : [],
+                const existingPaths = filterByExtension(
+                    filterExistingFiles(projectCwd, contained.files).files,
                     sliceCmd.fileInput?.extensions,
                 );
-                if (slicePaths.length > 0) {
+                const deletedForDigest = filterByExtension(deletedPkg, sliceCmd.fileInput?.extensions);
+                if (existingPaths.length > 0 || deletedForDigest.length > 0) {
                     slicePlan = buildCachePlan({
                         gitRoot,
                         packageRoot: projectCwd,
@@ -797,7 +854,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                         assets: (packBoundSensor as PackBoundManifestSensor).assets ?? variant?.assets,
                         cacheMode: 'slice',
                         sliceCommand: sliceCmd,
-                        slicePaths,
+                        slicePaths: existingPaths,
+                        sliceDeletedPaths: deletedForDigest,
                     });
                 }
             }
@@ -813,12 +871,16 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 liveState,
                 requestedScope,
                 changed: changed ?? undefined,
+                worktreeRoot: projectCwd,
+                deletedFiles: changedDeletedPkg,
             })
             : prepareLegacySensor({
                 name,
                 config: entry as SensorManifest['sensors'][string],
                 requestedScope,
                 changed: changed ?? undefined,
+                worktreeRoot: projectCwd,
+                deletedFiles: changedDeletedPkg,
             });
         const ready = (packBoundSensor as { enabled?: boolean }).enabled === false
             ? { ...execution, command: undefined, syntheticStatus: 'skipped' as const, syntheticReason: 'disabled' }

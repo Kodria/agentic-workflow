@@ -14,9 +14,14 @@ jest.mock('../../../src/commands/sensors/exec', () => ({
 }));
 
 const mockChangedFiles = jest.fn();
+const mockChangedDeletedFiles = jest.fn();
 jest.mock('../../../src/commands/sensors/changed', () => {
   const actual = jest.requireActual('../../../src/commands/sensors/changed');
-  return { ...actual, changedFiles: (...args: unknown[]) => mockChangedFiles(...args) };
+  return {
+    ...actual,
+    changedFiles: (...args: unknown[]) => mockChangedFiles(...args),
+    changedDeletedFiles: (...args: unknown[]) => mockChangedDeletedFiles(...args),
+  };
 });
 
 function git(cwd: string, args: string[]): string {
@@ -199,11 +204,13 @@ describe('sensors must not emit MechanicalRunEvidence (RF-3.2 / RF-3.8)', () => 
   function writeSensorFixture() {
     project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-sensors-'));
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-sensors-home-'));
-    process.env.AWM_HOME = home;
-    const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+    process.env.HOME = home;
+    process.env.AWM_HOME = path.join(home, '.awm');
+    fs.mkdirSync(process.env.AWM_HOME, { recursive: true });
+    const registry = path.join(process.env.AWM_HOME, 'registries', 'baseline', 'sensor-packs', 'js-ts');
     fs.mkdirSync(registry, { recursive: true });
     fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
-    fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+    fs.writeFileSync(path.join(process.env.AWM_HOME, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
     fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
     fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
     fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
@@ -234,7 +241,7 @@ describe('sensors must not emit MechanicalRunEvidence (RF-3.2 / RF-3.8)', () => 
     }));
     fs.mkdirSync(path.join(project, '.awm'), { recursive: true });
     fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
-      schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, 'registries', 'baseline'), sensors: {
+      schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, '.awm', 'registries', 'baseline'), sensors: {
         lint: {
           enabled: true, fast: true, variantId: 'eslint-10',
           command: { executable: 'stale', resolution: 'node-modules-bin', args: ['.'] },
@@ -257,14 +264,17 @@ describe('sensors must not emit MechanicalRunEvidence (RF-3.2 / RF-3.8)', () => 
     mockRunStructuredCommand.mockReset();
     mockRunCommand.mockReset();
     mockChangedFiles.mockReset();
+    mockChangedDeletedFiles.mockReset();
     const { ok } = require('../sensors/exec-fixtures');
     mockRunStructuredCommand.mockResolvedValue(ok());
     mockRunCommand.mockResolvedValue(ok());
     mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
+    mockChangedDeletedFiles.mockReturnValue({ files: [] });
     writeSensorFixture();
   });
 
   afterEach(() => {
+    delete process.env.HOME;
     delete process.env.AWM_HOME;
     if (project) fs.rmSync(project, { recursive: true, force: true });
     if (home) fs.rmSync(home, { recursive: true, force: true });

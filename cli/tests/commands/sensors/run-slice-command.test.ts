@@ -11,9 +11,14 @@ jest.mock('../../../src/commands/sensors/exec', () => ({
 }));
 
 const mockChangedFiles = jest.fn();
+const mockChangedDeletedFiles = jest.fn();
 jest.mock('../../../src/commands/sensors/changed', () => {
     const actual = jest.requireActual('../../../src/commands/sensors/changed');
-    return { ...actual, changedFiles: (...args: unknown[]) => mockChangedFiles(...args) };
+    return {
+        ...actual,
+        changedFiles: (...args: unknown[]) => mockChangedFiles(...args),
+        changedDeletedFiles: (...args: unknown[]) => mockChangedDeletedFiles(...args),
+    };
 });
 
 const { ok, timedOut, spawnFailed } = require('./exec-fixtures');
@@ -38,11 +43,13 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
 
         project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-slice-cmd-'));
         home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-slice-cmd-home-'));
-        process.env.AWM_HOME = home;
-        const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+        process.env.HOME = home;
+        process.env.AWM_HOME = path.join(home, '.awm');
+        fs.mkdirSync(process.env.AWM_HOME, { recursive: true });
+        const registry = path.join(process.env.AWM_HOME, 'registries', 'baseline', 'sensor-packs', 'js-ts');
         fs.mkdirSync(registry, { recursive: true });
         fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
-        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+        fs.writeFileSync(path.join(process.env.AWM_HOME, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
         fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
         fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
         fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version }));
@@ -50,6 +57,10 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
             fs.mkdirSync(path.join(project, 'node_modules', tool), { recursive: true });
             fs.writeFileSync(path.join(project, 'node_modules', tool, 'package.json'), JSON.stringify({ version: '1.0.0' }));
         }
+        fs.mkdirSync(path.join(project, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'src', 'a.ts'), 'export const a = 1;\n');
+        fs.writeFileSync(path.join(project, 'src', 'b.ts'), 'export const b = 1;\n');
+        fs.writeFileSync(path.join(project, 'README.md'), '# fixture\n');
 
         const mutationVariant: Record<string, unknown> = {
             id: 'stryker', priority: 1, certifiedRange: '>=0',
@@ -113,7 +124,7 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         });
         fs.mkdirSync(path.join(project, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
-            schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, 'registries', 'baseline'), sensors: {
+            schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, '.awm', 'registries', 'baseline'), sensors: {
                 lint: {
                     enabled: true, fast: true, variantId: 'eslint-10',
                     command: { executable: 'stale', resolution: 'node-modules-bin', args: ['.'] },
@@ -139,12 +150,15 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         mockRunStructuredCommand.mockReset();
         mockRunCommand.mockReset();
         mockChangedFiles.mockReset();
+        mockChangedDeletedFiles.mockReset();
+        mockChangedDeletedFiles.mockReturnValue({ files: [] });
         mockRunStructuredCommand.mockResolvedValue(ok());
         mockRunCommand.mockResolvedValue(ok());
         writeFixture();
     });
 
     afterEach(() => {
+        delete process.env.HOME;
         delete process.env.AWM_HOME;
         if (project) fs.rmSync(project, { recursive: true, force: true });
         if (home) fs.rmSync(home, { recursive: true, force: true });
@@ -218,6 +232,18 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         expect(sensors.mutation.execution?.effectiveScope).toBe('slice');
     });
 
+    it('RF-1.8: --slice --base with a deleted matching file omits it from argv and notes scopeReason', async () => {
+        mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
+        mockChangedDeletedFiles.mockReturnValue({ files: ['src/gone.ts'] });
+        const { runSensors } = load();
+        const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha' });
+        const sliceCalls = structuredArgs().filter((cmd: { executable?: string }) => cmd?.executable === 'stryker-slice');
+        expect(sliceCalls).toHaveLength(1);
+        expect(sliceCalls[0].args).toEqual(['run', '--mutate', 'src/a.ts']);
+        expect(sliceCalls[0].args).not.toContain('src/gone.ts');
+        expect(byName(out).mutation.execution?.scopeReason).toMatch(/omitted 1 deleted path\(s\) from argv/i);
+    });
+
     it('full gate (no --slice) uses normal command, not sliceCommand (RF-1.3)', async () => {
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
         const { runSensors } = load();
@@ -273,7 +299,7 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
     }
 
     function withMutationInputs(): void {
-        const packPath = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json');
+        const packPath = path.join(home, '.awm', 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json');
         const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
         pack.sensors.mutation.variants[0].inputs = ['src/**/*.ts'];
         fs.writeFileSync(packPath, JSON.stringify(pack));
