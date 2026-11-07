@@ -49,6 +49,8 @@ export type SensorVariant = {
     policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
     changedCommand?: StructuredCommand;
+    /** Optional scoped command for `--slice` (RF-1.5); requires fileInput when present. */
+    sliceCommand?: StructuredCommand;
     /** Optional cache/digest input globs relative to packageRoot (RF-1.1). */
     inputs?: string[];
 };
