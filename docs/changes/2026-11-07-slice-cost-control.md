@@ -20,13 +20,13 @@ links:
   plan: docs/plans/2026-11-06-slice-cost-control-cli-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/246
 verification:
-  commit: 2fa80e578e09fd4a0e9e9bbcfb0b5ee1630adfa3
+  commit: c99d50da8dbf335f10b7337ce2807745e4bc9481
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:0cd11b8b38667a9a11605810940b946c8cae2b5b495972d6965dc4dd2069f954
+  receipt_digest: sha256:57d922677f00f86fedb270021fc3605b686fed62a1073440d135da021589c60c
 manual_validation:
   - step: "From a clean clone of this branch, build CLI (npm --prefix cli run build) and run node cli/dist/src/index.js sensors run --slice with no sliceCommand in the project pack"
     expected: "Bare closureOnly sensors skip as in 9.22.x; command does not fail solely for missing --base"
@@ -50,13 +50,13 @@ rollback: "Revert this branch merge commit (or git revert the merge) and republi
 
 ## Qué se hizo
 
-Shipped CLI support for #246 slice cost control without reopening Spine #126: optional variant/project `sliceCommand` (structured, `fileInput` required), `--slice` that stays bare-compatible and requires `--base` only when executing `sliceCommand`, scoped⟂full result-cache isolation, `awm evidence run`/`verify` for MechanicalRunEvidence (distinct from CycleEvidenceV1), and ledger deferred/`resolve --id`/`--deferred-open`. Documented in `docs/cli-reference.md` and D-026. Post-review hardening (A1–A6): deletes stay out of tool argv (digest/diagnostics only), verify re-expands declared scope, large files stream-hash, slice path content in scoped digests, project slice cachePlan wiring, HOME+AWM_HOME redirected in fixtures with save/restore (not delete) matching `run-read-only`. Windows CI: `filterPathsInsidePackageRoot` realpaths via `toSafeRepoRel` so native gitRoot vs packageRoot cannot false-throw on `--changed`. Registry skills/packs (RF-E.3, pack schema teaching) remain a companion after npm publish.
+Shipped CLI support for #246 slice cost control without reopening Spine #126: optional variant/project `sliceCommand` (structured, `fileInput` required), `--slice` that stays bare-compatible and requires `--base` only when executing `sliceCommand`, scoped⟂full result-cache isolation, `awm evidence run`/`verify` for MechanicalRunEvidence (distinct from CycleEvidenceV1), and ledger deferred/`resolve --id`/`--deferred-open`. Documented in `docs/cli-reference.md` and D-026. Post-review hardening (A1–A6): deletes stay out of tool argv (digest/diagnostics only), verify re-expands declared scope, large files stream-hash, slice path content in scoped digests, project slice cachePlan wiring, HOME+AWM_HOME redirected in fixtures with save/restore (not delete) matching `run-read-only`. Windows CI: `filterPathsInsidePackageRoot` realpaths via `toSafeRepoRel` so native gitRoot vs packageRoot cannot false-throw on `--changed`; evidence RF-3.4 test generates large stdout in-child (no 50k argv) and sync spawn failures seal as exit 127. Registry skills/packs (RF-E.3, pack schema teaching) remain a companion after npm publish.
 
 ## Qué se probó
 
 - Compact S1–S6 with TDD + independent spec/quality reviews; plan P7/P8 amendments; QA Track A/B with fix rounds; external audit A1–A6 closed with RED/GREEN suites; re-audit residual A6 (env restore) fixed.
-- Related suites after review fixes + Windows containment fix: full `tests/commands/sensors/` + evidence run → 1051 pass; prepare/run-cache/changed/slice suites green; `tsc --noEmit` clean.
-- `awm sensors run` full gate → `overall: pass` (lint/typecheck/depcheck) with receipt on commit `2fa80e57`.
+- Related suites after review fixes + Windows containment + evidence RF-3.4 argv fix: sensors/evidence suites green; prepare/run-cache still pass; `tsc --noEmit` clean.
+- `awm sensors run` full gate → `overall: pass` (lint/typecheck/depcheck) with receipt on commit `c99d50da`.
 - Built `cli/dist` smoke for `evidence`/`ledger`/`sensors` help surfaces against operator docs.
 
 ## Qué falta validar
