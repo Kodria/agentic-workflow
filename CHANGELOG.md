@@ -1,3 +1,8 @@
+## v9.23.0 - 2026-11-07
+
+### Features
+- **sensors:** #246 slice cost control — sliceCommand, scoped cache, evidence, ledger defer (#247)
+
 ## v9.22.2 - 2026-10-30
 
 ### Fixes
