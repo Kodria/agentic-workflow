@@ -323,12 +323,19 @@ async function runPreparedSlot(
                     sensorFingerprint: cached.sensorFingerprint,
                 },
                 measurement: measurementFromPlan(cachePlan),
+                // RF-1.8 / A6: cache hits must keep live prepare provenance (scope + files +
+                // scopeReason) so drop diagnostics stay visible on the hit path.
+                ...(execution.effectiveScope === 'changed' || execution.effectiveScope === 'slice'
+                    ? { scope: execution.effectiveScope }
+                    : {}),
                 execution: {
                     timeoutMs: execution.timeoutMs,
                     timeoutSource: execution.timeoutSource,
                     elapsedMs: 0,
                     requestedScope: execution.requestedScope,
                     effectiveScope: execution.effectiveScope,
+                    ...(execution.files !== undefined ? { files: execution.files } : {}),
+                    ...(execution.scopeReason ? { scopeReason: execution.scopeReason } : {}),
                 },
             };
             return baseline ? applyBaseline(raw, baseline[execution.name]) : raw;

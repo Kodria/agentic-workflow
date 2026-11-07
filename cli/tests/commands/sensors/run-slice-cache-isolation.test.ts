@@ -197,6 +197,41 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         expect(second.overall).toBe('pass');
     });
 
+    it('RF-1.8/A6: scoped cache hit still exposes scope + files + scopeReason drop diagnostics', async () => {
+        mockChangedFiles.mockReturnValue({ files: ['src/a.ts', '../escape.ts', '/etc/passwd'] });
+        const { runSensors } = load();
+        const first = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        const cold = byName(first).mutation;
+        expect(cold).toMatchObject({
+            status: 'pass',
+            scope: 'slice',
+            execution: expect.objectContaining({
+                files: 1,
+                scopeReason: expect.stringMatching(/dropped \d+ path\(s\) outside packageRoot/i),
+                requestedScope: 'slice',
+                effectiveScope: 'slice',
+            }),
+        });
+        expect(cold.cached).toBeUndefined();
+        expect(mutationExecCount()).toBe(1);
+
+        mockRunStructuredCommand.mockClear();
+        const second = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        expect(mutationExecCount()).toBe(0);
+        const hit = byName(second).mutation;
+        expect(hit).toMatchObject({
+            status: 'pass',
+            cached: true,
+            scope: 'slice',
+            execution: expect.objectContaining({
+                files: 1,
+                scopeReason: expect.stringMatching(/dropped \d+ path\(s\) outside packageRoot/i),
+                requestedScope: 'slice',
+                effectiveScope: 'slice',
+            }),
+        });
+    });
+
     it('RF-2.1: changing only a test file under inputs forces scoped miss', async () => {
         const { runSensors } = load();
         await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
