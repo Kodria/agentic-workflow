@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger } from '../../../src/core/ledger/store';
-import { parseLedgerEntry } from '../../../src/core/ledger/types';
+import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger, resolveById } from '../../../src/core/ledger/store';
+import { LEDGER_RESOLVE_KIND, parseLedgerEntry } from '../../../src/core/ledger/types';
 import type { LedgerEntry } from '../../../src/core/ledger/types';
 import { symlinkTest } from '../../helpers/platform';
 
@@ -107,6 +107,56 @@ describe('ledger store — add/list', () => {
         const got = listEntries(cwd, 'feat-x');
         expect(got).toHaveLength(1);
         expect(got[0].signature).toBe('s2');
+    });
+
+    test('duplicate ids: fold + resolveById both use first entry (first-wins)', () => {
+        const p = ledgerPath(cwd, 'feat-x');
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        const first = entry({
+            id: 'dup-id-1',
+            signature: 'first-wins',
+            desc: 'first deferred finding',
+            deferred: { at: '2026-06-06T01:00:00.000Z', reason: 'round-ceiling' },
+        });
+        const second = entry({
+            id: 'dup-id-1',
+            signature: 'second-should-not-own-resolve',
+            desc: 'duplicate id later line',
+            deferred: { at: '2026-06-06T02:00:00.000Z', reason: 're-review-defer' },
+        });
+        fs.writeFileSync(p, `${JSON.stringify(first)}\n${JSON.stringify(second)}\n`);
+
+        const before = listEntries(cwd, 'feat-x');
+        expect(before).toHaveLength(2);
+        expect(before[0].signature).toBe('first-wins');
+        expect(before[0].resolved).toBeUndefined();
+        expect(before[1].resolved).toBeUndefined();
+
+        const resolved = resolveById(cwd, 'feat-x', 'dup-id-1', 'fixed', '2026-06-06T03:00:00.000Z');
+        expect(resolved.signature).toBe('first-wins');
+        expect(resolved.resolved).toMatchObject({ how: 'fixed' });
+
+        const after = listEntries(cwd, 'feat-x');
+        expect(after[0]).toMatchObject({ signature: 'first-wins', resolved: { how: 'fixed' } });
+        expect(after[1].resolved).toBeUndefined();
+        // resolveById must refuse a second resolve against the same id (first already folded).
+        expect(() => resolveById(cwd, 'feat-x', 'dup-id-1', 'accepted')).toThrow(/already resolved/i);
+    });
+
+    test('resolve appends a LEDGER_RESOLVE_KIND line on disk (append-only)', () => {
+        addEntry(cwd, entry({
+            id: 'id-resolve-disk',
+            deferred: { at: '2026-06-06T01:00:00.000Z', reason: 'round-ceiling' },
+        }));
+        resolveById(cwd, 'feat-x', 'id-resolve-disk', 'accepted', '2026-06-06T04:00:00.000Z');
+        const lines = fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8').trim().split('\n');
+        expect(lines).toHaveLength(2);
+        const resolveLine = JSON.parse(lines[1]!);
+        expect(resolveLine).toMatchObject({
+            kind: LEDGER_RESOLVE_KIND,
+            id: 'id-resolve-disk',
+            resolved: { how: 'accepted', at: '2026-06-06T04:00:00.000Z' },
+        });
     });
 });
 

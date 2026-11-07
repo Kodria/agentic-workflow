@@ -135,7 +135,9 @@ export function listEntries(cwd: string, branch: string): LedgerEntry[] {
         try {
             const parsed = parseLedgerEntry(raw, p);
             if (!parsed.ok) continue;
-            if (typeof parsed.entry.id === 'string' && parsed.entry.id.length > 0) {
+            // First entry wins for id → fold index (matches resolveById's find).
+            // Last-wins here desyncs fold from resolveById when duplicate ids appear.
+            if (typeof parsed.entry.id === 'string' && parsed.entry.id.length > 0 && !indexById.has(parsed.entry.id)) {
                 indexById.set(parsed.entry.id, out.length);
             }
             out.push(parsed.entry);
