@@ -1,8 +1,22 @@
 export type Polarity = 'win' | 'finding';
 export type LedgerClass = 'structural' | 'logica' | 'proceso' | 'seguridad';
 export type Severity = 'blocker' | 'important' | 'minor' | 'info';
+export type DeferredReason = 'round-ceiling' | 're-review-defer';
+export type ResolvedHow = 'fixed' | 'accepted';
 
 export const DEFECT_CLASS = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+export const DEFERRED_REASONS: readonly DeferredReason[] = ['round-ceiling', 're-review-defer'];
+export const RESOLVED_HOWS: readonly ResolvedHow[] = ['fixed', 'accepted'];
+
+export interface LedgerDeferred {
+    at: string;
+    reason: DeferredReason;
+}
+
+export interface LedgerResolved {
+    at: string;
+    how: ResolvedHow;
+}
 
 export interface LedgerEntry {
     ts: string;
@@ -16,6 +30,10 @@ export interface LedgerEntry {
     desc: string;
     ref?: string;
     defectClass?: string;
+    /** Stable unique id assigned at add time. Absent on legacy pre-RF-4.7 lines. */
+    id?: string;
+    deferred?: LedgerDeferred;
+    resolved?: LedgerResolved;
 }
 
 export type LedgerParseReason =
@@ -23,7 +41,9 @@ export type LedgerParseReason =
     | 'invalid-enum'
     | 'invalid-fields'
     | 'invalid-ref'
-    | 'invalid-defect-class';
+    | 'invalid-defect-class'
+    | 'invalid-deferred'
+    | 'invalid-resolved';
 
 export type LedgerParseResult =
     | { ok: true; entry: LedgerEntry }
@@ -45,7 +65,31 @@ function isSeverity(value: unknown): value is Severity {
     return value === 'blocker' || value === 'important' || value === 'minor' || value === 'info';
 }
 
-/** Validates the durable JSONL boundary. Missing defectClass is deliberately legacy-valid. */
+function isDeferredReason(value: unknown): value is DeferredReason {
+    return value === 'round-ceiling' || value === 're-review-defer';
+}
+
+function isResolvedHow(value: unknown): value is ResolvedHow {
+    return value === 'fixed' || value === 'accepted';
+}
+
+function parseDeferred(value: unknown): LedgerDeferred | 'invalid' | undefined {
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) return 'invalid';
+    if (typeof value.at !== 'string' || value.at.length === 0) return 'invalid';
+    if (!isDeferredReason(value.reason)) return 'invalid';
+    return { at: value.at, reason: value.reason };
+}
+
+function parseResolved(value: unknown): LedgerResolved | 'invalid' | undefined {
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) return 'invalid';
+    if (typeof value.at !== 'string' || value.at.length === 0) return 'invalid';
+    if (!isResolvedHow(value.how)) return 'invalid';
+    return { at: value.at, how: value.how };
+}
+
+/** Validates the durable JSONL boundary. Missing defectClass/id/deferred/resolved is deliberately legacy-valid. */
 export function parseLedgerEntry(input: unknown, source: string): LedgerParseResult {
     if (typeof source !== 'string') throw new Error('ledger parse source must be a string');
     if (!isRecord(input)) return { ok: false, source, reason: 'not-object' };
@@ -55,6 +99,10 @@ export function parseLedgerEntry(input: unknown, source: string): LedgerParseRes
     for (const field of ['ts', 'branch', 'phase', 'source_skill', 'signature', 'desc']) {
         if (typeof input[field] !== 'string') return { ok: false, source, reason: 'invalid-fields' };
     }
+    if ('id' in input && input.id !== undefined
+        && (typeof input.id !== 'string' || input.id.length === 0)) {
+        return { ok: false, source, reason: 'invalid-fields' };
+    }
     if ('ref' in input && input.ref !== undefined && typeof input.ref !== 'string') {
         return { ok: false, source, reason: 'invalid-ref' };
     }
@@ -62,6 +110,10 @@ export function parseLedgerEntry(input: unknown, source: string): LedgerParseRes
         && (typeof input.defectClass !== 'string' || !DEFECT_CLASS.test(input.defectClass))) {
         return { ok: false, source, reason: 'invalid-defect-class' };
     }
+    const deferred = parseDeferred(input.deferred);
+    if (deferred === 'invalid') return { ok: false, source, reason: 'invalid-deferred' };
+    const resolved = parseResolved(input.resolved);
+    if (resolved === 'invalid') return { ok: false, source, reason: 'invalid-resolved' };
     return {
         ok: true,
         entry: {
@@ -76,8 +128,11 @@ export function parseLedgerEntry(input: unknown, source: string): LedgerParseRes
             desc: input.desc as string,
             ...(typeof input.ref === 'string' ? { ref: input.ref } : {}),
             // Keep the durable legacy distinction visible to consumers: an older
-            // entry is valid, but has no reusable classification yet.
+            // entry is valid, but has no reusable classification / deferred state yet.
             defectClass: typeof input.defectClass === 'string' ? input.defectClass : undefined,
+            id: typeof input.id === 'string' ? input.id : undefined,
+            deferred,
+            resolved,
         },
     };
 }
