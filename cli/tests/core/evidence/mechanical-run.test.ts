@@ -202,4 +202,26 @@ describe('contentDigest helper shared by run+verify (RF-3.6)', () => {
     fs.writeFileSync(path.join(root, 'file[1].txt'), 'mutated-bracket\n');
     expect(computeCandidateContentDigest(root, resolved)).not.toBe(before);
   });
+
+  test('A3: >1MiB files of equal size but different content produce different digests', () => {
+    const oneMiB = 1024 * 1024 + 64;
+    const bigA = path.join(root, 'big.bin');
+    const fd = fs.openSync(bigA, 'w');
+    try {
+      fs.writeSync(fd, Buffer.alloc(oneMiB, 0x41));
+    } finally {
+      fs.closeSync(fd);
+    }
+    git(root, ['add', 'big.bin']);
+    git(root, ['commit', '-qm', 'big']);
+    const before = computeCandidateContentDigest(root, ['big.bin']);
+    const fd2 = fs.openSync(bigA, 'w');
+    try {
+      fs.writeSync(fd2, Buffer.alloc(oneMiB, 0x42));
+    } finally {
+      fs.closeSync(fd2);
+    }
+    const after = computeCandidateContentDigest(root, ['big.bin']);
+    expect(after).not.toBe(before);
+  });
 });

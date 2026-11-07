@@ -73,6 +73,24 @@ describe('awm evidence verify (RF-3.9 / P7, RF-E.1)', () => {
     expect(JSON.parse(verified.stdout).reason).toMatch(/contentDigest|candidate/i);
   });
 
+  test('A2: new file matching declared glob after seal → verify scope mismatch (not false match)', async () => {
+    fs.mkdirSync(path.join(root, 'tests'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'tests', 'a.test.ts'), 'export const t = 1;\n');
+    git(root, ['add', 'tests']);
+    git(root, ['commit', '-qm', 'tests']);
+    const argv = defaultArgv();
+    const run = await runEvidenceRun({ root, argv, declaredScope: ['tests/**'] });
+    expect(run.code).toBe(0);
+    expect(run.receiptPath).toBeDefined();
+    fs.writeFileSync(path.join(root, 'tests', 'b.test.ts'), 'export const u = 2;\n');
+    const verified = runEvidenceVerify({ root, receiptPath: run.receiptPath!, expectArgv: argv });
+    expect(verified.code).toBe(2);
+    expect(JSON.parse(verified.stdout)).toEqual(expect.objectContaining({
+      status: 'mismatch',
+      reason: 'scope',
+    }));
+  });
+
   test('S4-BQ-1: unresolved glob scope refuses the run (fail closed)', async () => {
     const run = await runEvidenceRun({
       root,

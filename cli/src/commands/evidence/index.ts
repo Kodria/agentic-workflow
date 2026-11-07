@@ -390,15 +390,23 @@ export function runEvidenceVerify(input: {
       return mismatch('argv');
     }
     let scopePaths: string[] | undefined;
-    if (evidence.scope.resolved.length > 0) {
-      scopePaths = evidence.scope.resolved;
-    } else if (evidence.scope.declared.length > 0) {
-      // Legacy/partial receipts: re-expand declared patterns; vacuous → mismatch.
+    if (evidence.scope.declared.length > 0) {
+      // Always re-expand declared patterns. A new matching file after the receipt
+      // was sealed must mismatch on scope set drift before contentDigest compare (A2).
+      let currentResolved: string[];
       try {
-        scopePaths = resolveScopePaths(rootReal, evidence.scope.declared);
+        currentResolved = resolveScopePaths(rootReal, evidence.scope.declared);
       } catch {
         return mismatch('scope');
       }
+      const sealed = [...evidence.scope.resolved].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      const now = [...currentResolved].map((p) => p.split(path.sep).join('/')).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      if (sealed.length !== now.length || sealed.some((p, i) => p !== now[i])) {
+        return mismatch('scope');
+      }
+      scopePaths = evidence.scope.resolved.length > 0 ? evidence.scope.resolved : currentResolved;
+    } else if (evidence.scope.resolved.length > 0) {
+      scopePaths = evidence.scope.resolved;
     }
     const currentDigest = computeCandidateContentDigest(rootReal, scopePaths);
     if (currentDigest !== evidence.candidate.contentDigest) return mismatch('contentDigest');

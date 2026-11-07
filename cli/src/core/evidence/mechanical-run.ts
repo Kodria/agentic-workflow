@@ -37,7 +37,6 @@ const COMMIT_OR_EMPTY = /^(?:[a-f0-9]{40}|)$/;
 const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_ARGV = 256;
 const MAX_ARGV_BYTES = 1024 * 1024;
-const MAX_DIGEST_FILE_BYTES = 1024 * 1024;
 /** Paths under this prefix never enter candidate contentDigest (runtime evidence). */
 const EVIDENCE_RUNTIME_PREFIX = '.awm/evidence';
 
@@ -264,6 +263,22 @@ function listCandidatePaths(root: string): string[] {
   }
 }
 
+function hashFileStreaming(abs: string): string {
+  // Stream so oversized fixtures still contribute content (not size-only) to digests.
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(abs, 'r');
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    let bytesRead = 0;
+    while ((bytesRead = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      hash.update(buf.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
 function hashPathContribution(root: string, repoRel: string): string {
   const abs = path.join(root, repoRel);
   try {
@@ -272,8 +287,9 @@ function hashPathContribution(root: string, repoRel: string): string {
       return `symlink:${fs.readlinkSync(abs)}`;
     }
     if (!st.isFile()) return `special:${st.mode}`;
-    if (st.size > MAX_DIGEST_FILE_BYTES) return `oversize:${st.size}`;
-    return `file:${crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex')}`;
+    // Prefer streaming content hash over size-only `oversize:` tokens (A3): two
+    // >1MiB files of equal size but different bytes must not collide.
+    return `file:${hashFileStreaming(abs)}`;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
     throw error;
