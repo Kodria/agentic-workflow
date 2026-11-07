@@ -17,7 +17,7 @@
 - `awm sensors run --slice --base <sha>` runs a `closureOnly`+`sliceCommand` sensor scoped to files since that SHA; missing `--base` when `sliceCommand` would run → that sensor non-pass (command still runs)
 - Empty resolved scope after extension filter → `skip` (not `pass`)
 - A scoped cache hit never appears as `cached: true` on a subsequent full-gate run (mutation RED)
-- `awm evidence run` writes MechanicalRunEvidence; `awm evidence verify` reports match/mismatch; sensors do not write run receipts; `readOnly` writes neither receipts nor cache
+- `awm evidence run` writes MechanicalRunEvidence; `awm evidence verify -- <argv>` reports match/mismatch (omit argv → mismatch); sensors do not write run receipts; `readOnly` writes neither receipts nor cache
 - `awm ledger add --deferred` assigns stable `id`; `resolve --id` resolves one of two same-signature deferred entries; `list --deferred-open` works
 - D-026 exists; CLI reference stays in sync with Commander via `cli-reference-matches-commander`
 
@@ -370,7 +370,7 @@ Own RF-3.1–3.2, RF-3.4–3.9, RF-5.1, RF-E.1. New schema + store under `.awm/e
    - validate schema with candidate `{ headCommit, contentDigest }`, redacted argv, cwd, exitCode, durationMs, integrityDigest; reject CycleEvidence shape / missing integrity (RF-3.1, RF-3.6, RF-3.7, RF-E.1);
    - argv redacts `--token=secret` (RF-3.4); result summary size-bounded (RF-3.4);
    - `awm evidence run -- …` writes under `.awm/evidence/runs/` with durationMs ≥ 0 (RF-5.1); does not write CycleEvidenceV1;
-   - `awm evidence verify <receipt>` → `match` on unchanged tree/argv/cwd; → `mismatch` after contentDigest-affecting edit or argv change (RF-3.9);
+   - `awm evidence verify <receipt> -- <expected argv…>` → `match` on unchanged tree/cwd + matching expected argv; → `mismatch` after contentDigest-affecting edit or argv change; omit expected argv → `mismatch` fail-closed (RF-3.9 / P7);
    - after a normal (non-readOnly) `sensors run --slice` / full gate, **zero** new MechanicalRunEvidence files (RF-3.2);
    - `runSensors({ readOnly: true })` writes zero run receipts and zero cache files (RF-3.8);
    - `evidence run` alone does not create Change Record receipt (RF-3.5).
@@ -378,7 +378,7 @@ Own RF-3.1–3.2, RF-3.4–3.9, RF-5.1, RF-E.1. New schema + store under `.awm/e
 2. Implementation facts:
    - `cli/src/core/evidence/mechanical-run.ts`: types, validate, integrity, contentDigest helper shared by run+verify.
    - Store under `.awm/evidence/runs/` with `*` gitignore / 0600.
-   - Register `evidence run` and `evidence verify <path>`; verify prints JSON `{ status: 'match'|'mismatch', reason? }` and exits 0 only on match.
+   - Register `evidence run` and `evidence verify <path> [-- <expected argv…>]`; verify prints JSON `{ status: 'match'|'mismatch', reason? }` and exits 0 only on match; missing expected argv is mismatch (P7).
    - Env out of equivalence (documented).
 3. GREEN — CMD-EVIDENCE-RUN + CMD-TYPECHECK.
 
@@ -466,6 +466,7 @@ Forward: every CLI-owned design RF in the manifest has ≥1 slice and ≥1 comma
 | P4 | S4: `awm evidence verify` (RF-3.9) |
 | P5 | S5: stable `id`; resolve by `--id` |
 | P6 | RF-E.3 moved to registry companion handoff |
+| P7 | S4/RF-3.9: verify requires expected argv (after `--`); omit → mismatch fail-closed (spec FAIL on f875497e) |
 
 ## Handoff
 

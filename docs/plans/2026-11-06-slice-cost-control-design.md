@@ -76,7 +76,7 @@ Unattended slice cycles inflate wall-clock: expensive verification runs outside 
 - **RF-3.6 — Candidate identity (D7):** Candidate identity on a run receipt SHALL be `headCommit` (or empty if unavailable) **plus** a content digest of the relevant tree state used for the run (worktree input digest or equivalent over the paths that affect the obligation — HEAD alone is insufficient mid-edit). Reviewers SHALL treat receipts whose candidate digest does not match the current candidate as non-equivalent.
 - **RF-3.7 — Integrity binding (D7):** Each MechanicalRunEvidence document SHALL carry an integrity digest over its canonical payload (same family as sensor receipts). Consumers SHALL reject tampered/edited files as absent (RF-E.1).
 - **RF-3.8 — readOnly writes nothing (D8):** WHEN `runSensors({ readOnly: true })` or an equivalent read-only admission/observation path runs, THE CLI SHALL NOT write MechanicalRunEvidence receipts, scoped cache entries, or full cache entries (align with #236 RF-2.11 and #240 read-only `.awm` observation). RED regression required.
-- **RF-3.9 — Mechanical verify command (P4):** THE CLI SHALL provide `awm evidence verify <receipt-path>` that validates integrity, recomputes the current candidate content digest, compares argv/cwd/scope fields as recorded, and exits with a machine-readable `match` or `mismatch` (reason named). Reviewers SHALL use this instead of recomputing digests by hand.
+- **RF-3.9 — Mechanical verify command (P4 / P7):** THE CLI SHALL provide `awm evidence verify <receipt-path>` that validates integrity, recomputes the current candidate content digest, compares cwd/scope fields as recorded, and compares **caller-supplied expected argv** (after `--` or an equivalent explicit argv option) against the receipt's redacted argv. IF expected argv is omitted, THE CLI SHALL fail closed with `mismatch` (reason naming missing expected argv) — never `match` on tree/cwd alone. Exits with machine-readable `match` or `mismatch` (reason named). Reviewers SHALL use this instead of recomputing digests by hand.
 
 ### RF-4 — Review-round cut (unattended-safe) + ledger CLI support
 
@@ -207,6 +207,7 @@ Packs / structured manifest: inputs, closureOnly, sliceCommand
 | P4 | RF-3.9: `awm evidence verify` |
 | P5 | RF-4.7: stable entry `id`; resolve by `--id` |
 | P6 | RF-E.3 owned by registry QA; CLI exposes `--deferred-open` only |
+| P7 | RF-3.9: verify requires caller-supplied expected argv; omit → mismatch (fail closed); S4 execution discovery 2026-11-06 |
 
 ## Self-review
 
