@@ -218,6 +218,8 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
 
     it('RF-2.2: scoped fingerprint includes mode/sliceCommand/paths; dropping them collapses keys (mutation RED)', () => {
         const slicePathsDigest = digestSortedSlicePaths(['src/a.ts']);
+        const otherPathsDigest = digestSortedSlicePaths(['src/b.ts']);
+        expect(slicePathsDigest).not.toEqual(otherPathsDigest);
         const live = {
             variantId: 'stryker',
             cliVersion: '9.99.0-test',
@@ -236,9 +238,17 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
             sliceCommand: SLICE_COMMAND,
             slicePathsDigest,
         });
+        const scopedFpOtherPaths = computeSensorFingerprint({
+            ...live,
+            command: FULL_COMMAND,
+            cacheMode: 'slice',
+            sliceCommand: SLICE_COMMAND,
+            slicePathsDigest: otherPathsDigest,
+        });
         expect(scopedFp).not.toBeNull();
         expect(fullFp).not.toBeNull();
         expect(scopedFp).not.toEqual(fullFp);
+        expect(scopedFp).not.toEqual(scopedFpOtherPaths);
 
         // Mutation: omit mode + slice fields → key collapses toward a non-scoped shape.
         const collapsed = computeSensorFingerprint({
@@ -328,6 +338,7 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
 
     it('RF-2.5: overall pass requires every selected sensor executed or valid same-mode cache hit', async () => {
         const { runSensors } = load();
+        const { timedOut } = require('./exec-fixtures');
         const first = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
         expect(first.overall).toBe('pass');
         for (const s of first.sensors) {
@@ -340,11 +351,39 @@ describe('runSensors scoped vs full cache isolation (RF-2.1, RF-2.2, RF-2.3, RF-
         expect(second.overall).toBe('pass');
         const mutation = byName(second).mutation;
         expect(mutation).toMatchObject({ status: 'pass', cached: true });
+        // Killing assert: overall pass ⇒ every non-skipped sensor is pass (same-mode hit or exec).
         for (const s of second.sensors) {
-            if (s.status === 'pass') {
-                expect(s.cached === true || s.cached === undefined).toBe(true);
-            }
+            if (s.status === 'skipped') continue;
+            expect(s.status).toBe('pass');
         }
+
+        // Kill false overall-pass: a timed-out slice sensor must demote overall.
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockImplementation(async (cmd: { executable?: string; args?: string[] }) => {
+            if (cmd?.executable === 'stryker-slice' && !(Array.isArray(cmd.args) && cmd.args[0] === '--version')) {
+                return timedOut();
+            }
+            return ok();
+        });
+        // Force miss by changing inputs so the prior scoped hit cannot greenwash a timeout.
+        fs.writeFileSync(path.join(project, 'src', 'a.ts'), 'export const a = 2;\n');
+        const failed = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        const failedMutation = byName(failed).mutation;
+        expect(failedMutation.status).not.toBe('pass');
+        expect(failedMutation.cached).toBeUndefined();
+        expect(failed.overall).not.toBe('pass');
+        // A subsequent identical timeout must not suddenly report overall pass via cache.
+        mockRunStructuredCommand.mockClear();
+        mockRunStructuredCommand.mockImplementation(async (cmd: { executable?: string; args?: string[] }) => {
+            if (cmd?.executable === 'stryker-slice' && !(Array.isArray(cmd.args) && cmd.args[0] === '--version')) {
+                return timedOut();
+            }
+            return ok();
+        });
+        const again = await runSensors({ cwd: project, slice: true, base: 'slice-base', useCache: true });
+        expect(byName(again).mutation.status).not.toBe('pass');
+        expect(byName(again).mutation.cached).toBeUndefined();
+        expect(again.overall).not.toBe('pass');
     });
 
     it('readOnly / useCache:false / ignoreBaseline: no scoped or full cache IO', async () => {

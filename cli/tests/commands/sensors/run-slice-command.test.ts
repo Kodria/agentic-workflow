@@ -267,30 +267,52 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         expect(fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : []).toEqual([]);
     });
 
-    it('timeout of sliceCommand is non-pass (RF-E.2)', async () => {
+    function cacheFiles(): string[] {
+        const runs = path.join(project, '.awm', 'sensors', 'runs');
+        return fs.existsSync(runs) ? fs.readdirSync(runs).filter((n) => n.startsWith('cache-')) : [];
+    }
+
+    function withMutationInputs(): void {
+        const packPath = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts', 'pack.json');
+        const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
+        pack.sensors.mutation.variants[0].inputs = ['src/**/*.ts'];
+        fs.writeFileSync(packPath, JSON.stringify(pack));
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.sensors.mutation.inputs = ['src/**/*.ts'];
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+        fs.mkdirSync(path.join(project, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'src', 'a.ts'), 'export const a = 1;\n');
+    }
+
+    it('timeout of sliceCommand is non-pass and writes zero cache files (RF-E.2)', async () => {
+        withMutationInputs();
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
         mockRunStructuredCommand.mockImplementation(async (cmd: { executable?: string }) => {
             if (cmd?.executable === 'stryker-slice') return timedOut();
             return ok();
         });
         const { runSensors } = load();
-        const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha' });
+        const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha', useCache: true });
         const sensors = byName(out);
         expect(sensors.mutation.status).not.toBe('pass');
         expect(sensors.mutation.skipReason ?? '').toMatch(/timeout/i);
+        expect(cacheFiles()).toEqual([]);
     });
 
-    it('crash/spawn failure of sliceCommand is non-pass (RF-E.2)', async () => {
+    it('crash/spawn failure of sliceCommand is non-pass and writes zero cache files (RF-E.2)', async () => {
+        withMutationInputs();
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
         mockRunStructuredCommand.mockImplementation(async (cmd: { executable?: string }) => {
             if (cmd?.executable === 'stryker-slice') return spawnFailed('ENOENT');
             return ok();
         });
         const { runSensors } = load();
-        const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha' });
+        const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha', useCache: true });
         const sensors = byName(out);
         expect(sensors.mutation.status).not.toBe('pass');
         expect(['fail', 'inconclusive']).toContain(sensors.mutation.status);
+        expect(cacheFiles()).toEqual([]);
     });
 
     it('rejects combining --slice with --changed', async () => {
@@ -298,12 +320,13 @@ describe('runSensors --slice + sliceCommand (RF-1.1–1.4, RF-1.7–1.8, RF-E.2)
         await expect(runSensors({ cwd: project, slice: true, changed: true })).rejects.toThrow(/slice.*changed|changed.*slice/i);
     });
 
-    it('drops paths outside packageRoot before fileInput expansion', async () => {
+    it('drops paths outside packageRoot before fileInput expansion and surfaces drop diagnostics (A5)', async () => {
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts', '../escape.ts', '/etc/passwd'] });
         const { runSensors } = load();
         const out = await runSensors({ cwd: project, slice: true, base: 'slice-base-sha' });
         const sensors = byName(out);
         expect(sensors.mutation.status).toBe('pass');
+        expect(sensors.mutation.scopeReason ?? JSON.stringify(sensors.mutation)).toMatch(/dropped \d+ path\(s\) outside packageRoot/i);
         const sliceCalls = structuredArgs().filter((cmd: { executable?: string }) => cmd?.executable === 'stryker-slice');
         expect(sliceCalls).toHaveLength(1);
         expect(sliceCalls[0].args).toEqual(['run', '--mutate', 'src/a.ts']);

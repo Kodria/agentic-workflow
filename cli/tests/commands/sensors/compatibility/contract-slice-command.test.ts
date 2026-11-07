@@ -89,6 +89,41 @@ describe('sensor pack v2 sliceCommand (RF-1.5, RF-1.6)', () => {
         );
     });
 
+    it.each([
+        {
+            name: 'zero {files} args',
+            sliceCommand: {
+                executable: 'stryker',
+                resolution: 'node-modules-bin',
+                args: ['run', '--mutate'],
+                fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+            },
+            reason: /exactly one \{files\}/,
+        },
+        {
+            name: 'N {files} args',
+            sliceCommand: {
+                executable: 'stryker',
+                resolution: 'node-modules-bin',
+                args: ['run', '{files}', '{files}'],
+                fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+            },
+            reason: /exactly one \{files\}/,
+        },
+        {
+            name: 'embedded {files}',
+            sliceCommand: {
+                executable: 'stryker',
+                resolution: 'node-modules-bin',
+                args: ['run', '--mutate={files}'],
+                fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+            },
+            reason: /must not embed \{files\}/,
+        },
+    ])('rejects sliceCommand arity case: $name (killing)', ({ sliceCommand, reason }) => {
+        expect(() => parseSensorPack(withSliceCommand(sliceCommand), '/registry/sensor-packs/js-ts/pack.json')).toThrow(reason);
+    });
+
     it('rejects fileInput token that is not {files}', () => {
         const pack = withSliceCommand({
             executable: 'stryker',

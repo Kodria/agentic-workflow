@@ -271,6 +271,16 @@ Stdout prints the receipt path (and machine-readable fields). Integrity,
 redaction, size bounds, and symlink escape rules apply; a receipt that fails
 validation is treated as absent by consumers — never as a pass.
 
+**Argv redaction (RF-3.4):** durable receipts redact secret-shaped tokens before
+persist — at least `--token=…`, `--password=…`, `--api-key=…`, and
+`AUTHORIZATION`-like values (inline `Authorization: …` / `Authorization=…`,
+or the split three-token form `Authorization` / `Bearer` / `<secret>`).
+
+**Environment is out of band (RF-3.4):** environment variables that affect tool
+output are **not** hashed into `contentDigest` and are **not** compared by
+`awm evidence verify`. Controllers that need env-sensitive gates must re-execute
+or pass env via explicit argv.
+
 ### `awm evidence verify`
 
 Contrast a MechanicalRunEvidence receipt against the current candidate without
