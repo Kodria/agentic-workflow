@@ -413,4 +413,15 @@ describe('parseJunitXml (RF-2.1–2.3, RF-2.6–2.7)', () => {
 </testsuite>`;
         expect(parseJunitXml(raw, ROOT).findings[0].rule).toBe('C › x y');
     });
+
+    it('accepts failure body wrapped in CDATA and still explains when counts match', () => {
+        const raw = `<testsuite name="s" failures="1" errors="0">
+  <testcase classname="C" name="cdata" file="c.test.ts"><failure message="boom"><![CDATA[expect(1).toBe(2)
+& not an entity]]></failure></testcase>
+</testsuite>`;
+        const { findings, explainsNonZeroExit } = parseJunitXml(raw, ROOT);
+        expect(findings).toHaveLength(1);
+        expect(findings[0]).toEqual(expect.objectContaining({ file: 'c.test.ts', rule: 'C › cdata' }));
+        expect(explainsNonZeroExit).toBe(true);
+    });
 });

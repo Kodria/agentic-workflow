@@ -42,11 +42,11 @@ function parseAttrs(raw: string): Attrs | null {
 
 /**
  * Minimal element tree parser. Refuses DOCTYPE / entity expansion (malformed).
- * Does not resolve external entities; any `<!` declaration fails closed.
+ * CDATA is treated as ordinary text (not entity expansion). Other `<!` forms fail closed.
  */
 function parseXml(raw: string): XmlNode | null {
     if (!raw || !raw.trim()) return null;
-    if (/<!DOCTYPE/i.test(raw) || /<!ENTITY/i.test(raw) || /<!\[/i.test(raw)) return null;
+    if (/<!DOCTYPE/i.test(raw) || /<!ENTITY/i.test(raw)) return null;
 
     const rootChildren: XmlNode[] = [];
     const stack: XmlNode[] = [];
@@ -76,8 +76,17 @@ function parseXml(raw: string): XmlNode | null {
             i = end + 3;
             continue;
         }
+        if (s.startsWith('<![CDATA[', lt)) {
+            const end = s.indexOf(']]>', lt + 9);
+            if (end < 0) return null;
+            if (stack.length > 0) {
+                stack[stack.length - 1].text += s.slice(lt + 9, end);
+            }
+            i = end + 3;
+            continue;
+        }
         if (s.startsWith('<!', lt)) {
-            // DOCTYPE / CDATA / ENTITY — refuse
+            // DOCTYPE / ENTITY / unknown declaration — refuse (fail closed)
             return null;
         }
         if (s.startsWith('</', lt)) {
