@@ -1175,7 +1175,7 @@ The `test` sensor can emit one stable finding per failed test when a structured 
 | ≠0 | yes | ≥1 | no | synthetic `fail` (do not baseline to pass) | `exit-code` |
 | ≠0 | yes | ≥1 | yes | `fail` → baseline | `findings` |
 
-**Re-baseline advisory:** when the accepted baseline entry for `test` is empty or only the synthetic exit-code shape, `awm sensors status` / `run` / `baseline` emit a non-blocking advisory to re-run `awm sensors baseline` after wiring a results artifact. Exit codes collide under fingerprint masking (`exit 1` ≡ `exit 2`).
+**Re-baseline advisory:** when the accepted baseline entry for `test` is empty or only the synthetic exit-code shape, `awm sensors status` / `run` / `baseline` emit a non-blocking advisory to re-run `awm sensors baseline` after wiring a results artifact. On `awm sensors run`, that advisory is written to **stderr only** so stdout remains a single parseable JSON document. Exit codes collide under fingerprint masking (`exit 1` ≡ `exit 2`).
 
 **Packs do not write the artifact.** Pack-bound projects must override the test script/`cmd` or set `resultsFile`. Minimal project override example:
 

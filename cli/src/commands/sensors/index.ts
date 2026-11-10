@@ -19,14 +19,15 @@ import { applySensorBootstrap, planSensorBootstrap, type BootstrapMode } from '.
 import { describeUnresolved } from './unresolved';
 import { captureReceiptPrecondition, finalizeRunReceipt, isFullSelection } from '../../core/changes/receipt';
 
-/** RF-3.1: non-blocking stderr advisory; never changes exit code or overall. */
+/** RF-3.1: non-blocking advisory on stderr only — never stdout (I1: clack log.info
+ *  writes stdout and would corrupt `sensors run` JSON). Never changes exit/overall. */
 function maybeAdviseTestBaselineRefresh(
     sensors: Array<{ name: string }>,
     cwd: string,
     acceptedTest?: string[],
 ): void {
     if (!shouldAdviseTestBaselineRefresh(sensors, acceptedTest ?? readBaseline(cwd)?.test)) return;
-    log.info(`test: ${TEST_BASELINE_REFRESH_DETAIL}`);
+    process.stderr.write(`test: ${TEST_BASELINE_REFRESH_DETAIL}\n`);
 }
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs

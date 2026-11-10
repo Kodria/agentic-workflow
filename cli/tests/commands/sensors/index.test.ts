@@ -4,7 +4,13 @@ jest.mock('../../../src/commands/sensors/run', () => ({ runSensors: jest.fn(), f
 jest.mock('../../../src/commands/sensors/init', () => ({ initSensors: jest.fn() }));
 jest.mock('../../../src/commands/sensors/status', () => ({ computeSensorStatus: jest.fn() }));
 jest.mock('../../../src/commands/sensors/install', () => ({ installSensorHook: jest.fn() }));
-jest.mock('../../../src/commands/sensors/baseline', () => ({ buildBaseline: jest.fn(), writeBaseline: jest.fn() }));
+jest.mock('../../../src/commands/sensors/baseline', () => ({
+    buildBaseline: jest.fn(),
+    writeBaseline: jest.fn(),
+    readBaseline: jest.fn(() => null),
+    shouldAdviseTestBaselineRefresh: jest.fn(() => false),
+    TEST_BASELINE_REFRESH_DETAIL: 're-run `awm sensors baseline` after wiring a results artifact (baseline is empty or only the synthetic exit-code finding)',
+}));
 jest.mock('../../../src/core/registries', () => ({ capabilityRoot: jest.fn(() => '/mock/registry') }));
 jest.mock('../../../src/commands/sensors/coverage', () => ({ runCoverage: jest.fn() }));
 jest.mock('../../../src/commands/sensors/coverage/render', () => ({ renderCoverageHuman: jest.fn(), renderCoverageJson: jest.fn() }));
@@ -17,9 +23,14 @@ import { renderCoverageHuman, renderCoverageJson } from '../../../src/commands/s
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { exitCodeForVerdict } from '../../../src/commands/sensors/verdict';
 import { planSensorBootstrap, applySensorBootstrap } from '../../../src/commands/sensors/bootstrap';
+import {
+    shouldAdviseTestBaselineRefresh,
+    TEST_BASELINE_REFRESH_DETAIL,
+} from '../../../src/commands/sensors/baseline';
 
 const processExit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+const stderrWrite = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
 describe('exitCodeForVerdict — sensor run verdict → exit code', () => {
     it.each([
@@ -128,6 +139,24 @@ describe('sensors run Commander wiring', () => {
         expect(process.exitCode).toBe(code);
         expect(processExit).not.toHaveBeenCalled();
     });
+
+    it('keeps sensors run stdout parseable JSON when RF-3.1 advisory fires (I1)', async () => {
+        (require('../../../src/commands/sensors/run').runSensors as jest.Mock).mockResolvedValue({
+            sensors: [{ name: 'test', status: 'fail', errors: [] }],
+            overall: 'fail',
+        });
+        (shouldAdviseTestBaselineRefresh as jest.Mock).mockReturnValue(true);
+
+        await programWithSensors().parseAsync(['node', 'awm', 'sensors', 'run']);
+
+        const stdout = String(stdoutWrite.mock.calls[0][0]);
+        expect(() => JSON.parse(stdout)).not.toThrow();
+        expect(JSON.parse(stdout)).toMatchObject({ overall: 'fail' });
+        expect(stdout).not.toContain(TEST_BASELINE_REFRESH_DETAIL);
+        expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining(TEST_BASELINE_REFRESH_DETAIL));
+        expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining(TEST_BASELINE_REFRESH_DETAIL));
+        expect(process.exitCode).toBe(1);
+    });
 });
 
 describe('sensors coverage Commander wiring', () => {
@@ -143,6 +172,7 @@ describe('sensors coverage Commander wiring', () => {
 
     afterAll(() => {
         stdoutWrite.mockRestore();
+        stderrWrite.mockRestore();
         processExit.mockRestore();
     });
 

@@ -39,7 +39,7 @@
 
 **Out of plan:** registry pack command changes; CLI flag injection; Vitest/TAP; auto baseline migration; XML library; defaults under `.awm/`.
 
-**Amendment note:** closes H1–H6, N1–N4, and M1 (no prose-doc greps; objective `resultsFile` example parse + commander match + spec review for RF-4.1). RFs: RF-1.9–1.11 as above. **Post-implementation QA:** RF-1.2 prefer findings-bearing usable candidates; RF-1.10 JUnit suite-only `<suite-failed>` covers `suiteAttr`; RF-1.11 non-readOnly may unlink canonical `awm-test-results.*` basenames while readOnly stays exclusion-name-only (never reserved / never arbitrary files).
+**Amendment note:** closes H1–H6, N1–N4, and M1 (no prose-doc greps; objective `resultsFile` example parse + commander match + spec review for RF-4.1). RFs: RF-1.9–1.11 as above. **Post-implementation QA:** RF-1.2 prefer findings-bearing usable candidates; RF-1.10 JUnit suite-only `<suite-failed>` covers `suiteAttr`; RF-1.11 non-readOnly may unlink canonical `awm-test-results.*` basenames while readOnly stays exclusion-name-only (never reserved / never arbitrary files). **Impl audit I1–I3:** RF-3.1 run advisory on stderr only (stdout JSON stays parseable); `index.test.ts` mocks `readBaseline` / `shouldAdvise…` + I1 kill-RED; I3 confirms RF-1.2 prefer-findings text matches code.
 
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
