@@ -35,7 +35,7 @@
 
 **Out of plan:** registry pack command changes; CLI flag injection; Vitest/TAP; auto baseline migration; XML library; defaults under `.awm/`.
 
-**Amendment note:** closes H1–H6, N1–N4, and M1 (no prose-doc greps; objective `resultsFile` example parse + commander match + spec review for RF-4.1). RFs: RF-1.9–1.11 as above.
+**Amendment note:** closes H1–H6, N1–N4, and M1 (no prose-doc greps; objective `resultsFile` example parse + commander match + spec review for RF-4.1). RFs: RF-1.9–1.11 as above. **Post-implementation QA:** RF-1.2 prefer findings-bearing usable candidates; RF-1.10 JUnit suite-only `<suite-failed>` covers `suiteAttr`; RF-1.11 non-readOnly may unlink canonical `awm-test-results.*` basenames while readOnly stays exclusion-name-only (never reserved / never arbitrary files).
 
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
@@ -205,7 +205,7 @@ Own RF-2.1–2.7. Produce `TestParseResult` (`findings` + `explainsNonZeroExit` 
      - Jest failed-only, **no** `coverageMap`, runtimeError=0, !interrupted, counts match → **true** (N1 GREEN).
      - Same failures **with** truthy `coverageMap` → **false** (N1 RED).
      - failed + `numRuntimeErrorTestSuites>0` or `wasInterrupted` → false.
-     - JUnit sum match → true; sum mismatch → false.
+     - JUnit: suite attrs accounted for (failed testcases 1:1; suite-only `<suite-failed>` covers that suite's `suiteAttr`) → true; unaccounted attrs → false.
    CMD-PARSERS RED.
 2. Implementation facts:
    ```ts
@@ -218,7 +218,7 @@ Own RF-2.1–2.7. Produce `TestParseResult` (`findings` + `explainsNonZeroExit` 
    // Malformed → { findings: [], explainsNonZeroExit: false }
    // Jest: if (obj.coverageMap) explainsNonZeroExit = false; else runtime/interrupt/count checks.
    ```
-   JUnit: sum of suite `errors`+`failures` attrs === `findings.length`. Hand-rolled XML; refuse doctype/entity expansion → malformed. Keep `parseTestOutput` → `[]`.
+   JUnit: explain when every suite's `errors`+`failures` are accounted for (testcase findings 1:1; one suite-failed covers suiteAttr when no failed testcases) — not a bare `attrSum === findings.length`. Cap recursive suite walk depth (fail closed). Hand-rolled XML; refuse doctype/entity expansion → malformed. Keep `parseTestOutput` → `[]`.
 3. GREEN — CMD-PARSERS + CMD-TYPECHECK. Commit.
 
 #### Edge cases
@@ -266,21 +266,22 @@ Own RF-1.1–1.11 (runtime). Plumb `resultsFile`; contained pre-clear + identity
    - Resolution root = execution `cwd` only.
    - `candidateResultsPaths(prepared)`.
    - Before spawn (`isTestFindingsSensor`): for each candidate, if regular file exists snapshot `{mtimeMs,size,ino?}`; then `clearTestResultCandidates(cwd, paths, { readOnly })`:
-     - resolve parent via `realpath`; refuse if parent escapes cwd; never unlink symlink leaf;
-     - if `readOnly`, unlink only when a path segment matches `DEFAULT_EXCLUSION_NAMES` (e.g. `coverage`); otherwise skip unlink.
-   - After run: usable iff regular contained non-symlink file and (no prior snapshot OR identity differs).
+     - resolve parent via `realpath`; refuse if parent escapes cwd; never unlink symlink leaf; never unlink reserved `.awm`/`.git`; never unlink arbitrary files (e.g. `package.json`);
+     - if `readOnly`, unlink only when a path segment matches `DEFAULT_EXCLUSION_NAMES` (e.g. `coverage`) — canonical `awm-test-results.*` basename alone is **not** enough;
+     - if not `readOnly`, also allow unlink when basename is `awm-test-results.json` / `.xml` (case-insensitive) or under exclusion names.
+   - After run: usable iff regular contained non-symlink file and (no prior snapshot OR identity differs); among multiple fresh usable candidates prefer `findings.length > 0`, else RF-1.2 order.
    - `interpretResult(prepared, raw, opts?: { cwd?: string })`; `executePrepared` passes `cwd` + `readOnly` into clear.
-   - Unexplained exit ≠0 → authoritative `failureKind: 'exit-code'` (baseline cannot pass).
+   - Unexplained exit ≠0 → authoritative `failureKind: 'exit-code'` (baseline cannot pass). JUnit suite-only `<suite-failed>` covers that suite's attr sum (RF-1.10).
 3. GREEN — CMD-INTERPRET + CMD-TYPECHECK. Commit.
 
 #### Edge cases
-Symlink leaf → unusable. Parent symlink escaping cwd → no unlink. `readOnly` + custom path outside exclusions → no CLI delete; runner write may still trip observation — docs (S3/N4) warn; prefer defaults under `coverage/`.
+Symlink leaf → unusable. Parent symlink escaping cwd → no unlink. `readOnly` + `reports/awm-test-results.json` (canonical basename, no exclusion segment) → no unlink; non-readOnly may unlink that basename. `readOnly` + custom path outside exclusions → no CLI delete; runner write may still trip observation — docs (S3/N4) warn; prefer defaults under `coverage/`. Vacuous all-pass json must not shadow findings-bearing xml among fresh usable peers.
 
 #### Evidence
-Stale, unlink-fail, coverageMap, contained-clear, and mandatory readOnly cases must RED if omitted. Spec+quality; security fallback.
+Stale, unlink-fail, coverageMap, contained-clear, mandatory readOnly, readOnly+canonical-basename-outside-exclusion, and vacuous-json preference cases must RED if omitted. Spec+quality; security fallback.
 
 #### Fallback
-Changing readOnly unlink allowlist beyond `DEFAULT_EXCLUSION_NAMES` requires design amendment.
+Changing readOnly unlink allowlist beyond `DEFAULT_EXCLUSION_NAMES` requires design amendment. Non-readOnly basename allowlist is limited to canonical `awm-test-results.*` (design-amended).
 
 <a id="slice-s3"></a>
 ### Slice S3: Re-baseline advisory and operator docs
