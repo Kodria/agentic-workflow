@@ -35,7 +35,7 @@
 
 **Out of plan:** registry pack command changes; CLI flag injection; Vitest/TAP; auto baseline migration; XML library; defaults under `.awm/`.
 
-**Amendment note:** closes H1–H6 and re-audit N1–N4 before execution. RFs: RF-1.9 freshness+identity snapshot, RF-1.10 exit explained (`coverageMap` rule), RF-1.11 contained clear + readOnly unlink policy.
+**Amendment note:** closes H1–H6, N1–N4, and M1 (no prose-doc greps; objective `resultsFile` example parse + commander match + spec review for RF-4.1). RFs: RF-1.9–1.11 as above.
 
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
@@ -137,7 +137,7 @@
     {
       "id": "CMD-ADVISORY-DOCS",
       "program": "npm",
-      "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/test-baseline-advisory.test.ts", "tests/structural/test-sensor-findings-docs.test.ts"],
+      "args": ["--prefix", "cli", "test", "--", "--runInBand", "--silent", "tests/commands/sensors/test-baseline-advisory.test.ts", "tests/structural/cli-reference-matches-commander.test.ts", "tests/structural/test-sensor-results-file-doc-example.test.ts"],
       "covers": ["RF-3.1", "RF-4.1"]
     },
     {
@@ -286,7 +286,7 @@ Changing readOnly unlink allowlist beyond `DEFAULT_EXCLUSION_NAMES` requires des
 ### Slice S3: Re-baseline advisory and operator docs
 
 #### Surfaces
-Own RF-3.1 and RF-4.1. Single masked synthetic fingerprint (H4). Docs: `coverage/` defaults, pack override (H6), no `--coverage` on test sensor (N1), gitignore/no-tracked requirement for `coverage/` exclusion (N4), TS 4.x, freshness/explain table.
+Own RF-3.1 and RF-4.1. Single masked synthetic fingerprint (H4). Docs prose for RF-4.1 is verified by **specification review** (not vacuous phrase greps — M1 / #239). Mechanical gates: advisory unit tests + `cli-reference-matches-commander` + objective parse of a documented `resultsFile` manifest example.
 
 #### Implementation
 1. RED — `cli/tests/commands/sensors/test-baseline-advisory.test.ts`:
@@ -295,16 +295,17 @@ Own RF-3.1 and RF-4.1. Single masked synthetic fingerprint (H4). Docs: `coverage
    - Assert exit 1 ≡ exit 2 synthetic fingerprints (H4).
    - Ruled finding fingerprint only → false.
    - Emit path non-blocking.
-   RED — `cli/tests/structural/test-sensor-findings-docs.test.ts` section-scoped asserts for: `coverage/awm-test-results`, `resultsFile`, jest/`--json`, junit/junitxml, baseline refresh, TypeScript 4 / `source: "project"` / `formatter: tsc`, pack-override wording, **no `--coverage`/threshold on test sensor**, and **`coverage/` must be gitignored without tracked files** for admit exclusion (N4). Non-vacuous: deleting the gitignore/`--coverage` sentences fails the test.
+   RED — `cli/tests/structural/test-sensor-results-file-doc-example.test.ts`: extract the documented JSON/YAML-ish project-sensor example that includes `resultsFile` from `docs/cli-reference.md` (fenced code block under the test-results section) and assert `parseSensorManifest` / project entry parse **accepts** `resultsFile` (objective; deleting the field from the example fails). Reuse `cli-reference-matches-commander` for flag/command sync.
+   Update `docs/cli-reference.md` with: `coverage/` defaults, `resultsFile`, Jest/JUnit/pytest wiring, state table, advisory, TS 4.x project-declared, pack non-write + override example, no `--coverage` on test sensor, and `coverage/` gitignore/no-tracked caveat (N4). Spec reviewer confirms those RF-4.1 sentences exist.
    CMD-ADVISORY-DOCS RED.
-2. Implementation: `needsTestBaselineRefresh` using one synthetic fp; wire advisory; update `docs/cli-reference.md`.
+2. Implementation: `needsTestBaselineRefresh` using one synthetic fp; wire advisory; docs as above. **Do not** add `test-sensor-findings-docs.test.ts` prose greps (M1).
 3. GREEN — CMD-ADVISORY-DOCS + CMD-TYPECHECK. Commit.
 
 #### Edge cases
-No advisory when `test` sensor absent. Docs asserts use heading windows.
+No advisory when `test` sensor absent. Doc example must stay a valid manifest fragment the real parser accepts.
 
 #### Evidence
-CMD-ADVISORY-DOCS; full closureCommands.
+CMD-ADVISORY-DOCS; specification review owns RF-4.1 prose completeness; full closureCommands.
 
 #### Fallback
 Advisory on run info alone is enough if status warnings are awkward — keep non-blocking.
@@ -326,7 +327,7 @@ Advisory on run info alone is enough if status warnings are awkward — keep non
 | RF-1.11 | S2 | contained clear + mandatory readOnly RED |
 | RF-2.1–2.7 | S1 | parser fixtures + coverageMap explain plumbing |
 | RF-3.1 | S3 | single masked fp + advisory |
-| RF-4.1 | S3 | docs: H6 override, N1 no-coverage, N4 gitignore |
+| RF-4.1 | S3 | docs + objective example parse + cli-reference-matches-commander; prose via spec review (M1) |
 
 ## Skills for implementers
 - @test-driven-development for each slice RED→GREEN
