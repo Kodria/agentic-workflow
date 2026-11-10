@@ -63,17 +63,30 @@ function exclusionAllowsUnlink(rel: string): boolean {
     return pathSegments(rel).some((seg) => (DEFAULT_EXCLUSION_NAMES as readonly string[]).includes(seg));
 }
 
+const SAFE_RESULTS_BASENAMES = new Set([
+    'awm-test-results.json',
+    'awm-test-results.xml',
+]);
+
+/** Unlink only under DEFAULT_EXCLUSION_NAMES or a canonical awm-test-results basename. */
+function mayUnlinkResultsFile(rel: string): boolean {
+    if (exclusionAllowsUnlink(rel)) return true;
+    return SAFE_RESULTS_BASENAMES.has(path.basename(rel).toLowerCase());
+}
+
 /**
  * Contained pre-clear of candidate result files (RF-1.9 / RF-1.11).
  * Never unlinks a symlink leaf; refuses when the parent realpath escapes cwd.
  * NEVER unlinks a candidate whose relative path has a reserved `.awm` / `.git` segment.
- * Under readOnly, only unlinks when a path segment is in DEFAULT_EXCLUSION_NAMES.
+ * NEVER unlinks unless a path segment is in DEFAULT_EXCLUSION_NAMES or the basename is
+ * `awm-test-results.json` / `.xml` (case-insensitive) — even when readOnly is false.
  */
 export function clearTestResultCandidates(
     cwd: string,
     paths: string[],
     opts?: { readOnly?: boolean },
 ): void {
+    void opts;
     let rootReal: string;
     try {
         rootReal = fs.realpathSync(cwd);
@@ -82,7 +95,7 @@ export function clearTestResultCandidates(
     }
     for (const rel of paths) {
         if (hasReservedSegment(rel)) continue;
-        if (opts?.readOnly && !exclusionAllowsUnlink(rel)) continue;
+        if (!mayUnlinkResultsFile(rel)) continue;
         const abs = path.resolve(cwd, rel);
         const parent = path.dirname(abs);
         let parentReal: string;
@@ -115,6 +128,7 @@ export function snapshotTestResultCandidates(
 }
 
 export function readContainedUtf8(cwd: string, rel: string): string | null {
+    if (hasReservedSegment(rel)) return null;
     const abs = path.resolve(cwd, rel);
     let rootReal: string;
     try {
@@ -177,8 +191,10 @@ export type UsableArtifact = {
 };
 
 /**
- * Resolve the first fresh usable results artifact (RF-1.2–1.4 / RF-1.9).
+ * Resolve a fresh usable results artifact (RF-1.2–1.4 / RF-1.9).
  * Fail-closed when priorIdentities is undefined.
+ * Missing keys in priorIdentities are unusable (only explicit `null` means absent-before-run).
+ * Among fresh usable candidates, prefer findings.length > 0; preserve RF-1.2 order among equals.
  */
 export function resolveUsableArtifact(
     prepared: PreparedSensorExecution,
@@ -186,7 +202,10 @@ export function resolveUsableArtifact(
     priorIdentities?: Record<string, ResultFileIdentity | null>,
 ): UsableArtifact | null {
     if (priorIdentities === undefined) return null;
+    let bestEmpty: UsableArtifact | null = null;
     for (const rel of candidateResultsPaths(prepared)) {
+        if (!Object.prototype.hasOwnProperty.call(priorIdentities, rel)) continue;
+        if (hasReservedSegment(rel)) continue;
         const abs = path.resolve(cwd, rel);
         const next = snapshotRegularFile(abs);
         if (!next) continue;
@@ -196,7 +215,9 @@ export function resolveUsableArtifact(
         if (content === null) continue;
         const parsed = parseResultsContent(rel, content, cwd);
         if (!parsed) continue;
-        return { rel, parsed };
+        const candidate = { rel, parsed };
+        if (parsed.findings.length > 0) return candidate;
+        if (!bestEmpty) bestEmpty = candidate;
     }
-    return null;
+    return bestEmpty;
 }

@@ -8,6 +8,7 @@ import {
     interpretResult,
 } from '../../../src/commands/sensors/result';
 import { fingerprint } from '../../../src/commands/sensors/baseline';
+import { readContainedUtf8 } from '../../../src/commands/sensors/test-results-artifact';
 import type { PreparedSensorExecution } from '../../../src/commands/sensors/types';
 import { exited, ok, overflowed, spawnFailed, timedOut } from './exec-fixtures';
 
@@ -485,5 +486,71 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
             priorIdentities: { [DEFAULT_JSON]: null },
         });
         expect(result.failureKind).toBe('findings');
+    });
+
+    it('clear never unlinks resultsFile package.json even when readOnly is false (RF-1.11)', () => {
+        const abs = writeRel(cwd, 'package.json', JSON.stringify({ name: 'must-survive-clear' }));
+        const before = fs.readFileSync(abs, 'utf8');
+        clearTestResultCandidates(cwd, ['package.json'], { readOnly: false });
+        expect(fs.existsSync(abs)).toBe(true);
+        expect(fs.readFileSync(abs, 'utf8')).toBe(before);
+    });
+
+    it('prefers findings-bearing xml over vacuous all-pass json among fresh candidates (RF-1.2)', () => {
+        writeRel(cwd, DEFAULT_JSON, jestPassing());
+        writeRel(cwd, DEFAULT_XML, `<?xml version="1.0"?>
+<testsuites>
+  <testsuite name="x" failures="1" errors="0">
+    <testcase classname="Xml" name="from-xml" file="xml.test.ts">
+      <failure message="boom"/>
+    </testcase>
+  </testsuite>
+</testsuites>`);
+        const onFail = interpretResult(prepared(), exited(1), {
+            cwd,
+            priorIdentities: { [DEFAULT_JSON]: null, [DEFAULT_XML]: null },
+        });
+        expect(onFail.status).toBe('fail');
+        expect(onFail.failureKind).toBe('findings');
+        expect(onFail.errors).toEqual([
+            expect.objectContaining({ file: 'xml.test.ts', rule: 'Xml › from-xml' }),
+        ]);
+
+        const onPassExit = interpretResult(prepared(), ok(''), {
+            cwd,
+            priorIdentities: { [DEFAULT_JSON]: null, [DEFAULT_XML]: null },
+        });
+        expect(onPassExit.status).toBe('fail');
+        expect(onPassExit.failureKind).toBe('findings');
+        expect(onPassExit.errors[0]).toMatchObject({ file: 'xml.test.ts', rule: 'Xml › from-xml' });
+    });
+
+    it('readContainedUtf8 refuses reserved .awm / .git segments (RF-1.11)', () => {
+        writeRel(cwd, '.awm/secret.json', jestOneFail());
+        writeRel(cwd, '.git/hooks/awm-test-results.json', jestOneFail());
+        expect(readContainedUtf8(cwd, '.awm/secret.json')).toBeNull();
+        expect(readContainedUtf8(cwd, '.git/hooks/awm-test-results.json')).toBeNull();
+    });
+
+    it('empty priorIdentities {} does not treat a missing key as prior=null / new (RF-1.9)', () => {
+        writeRel(cwd, DEFAULT_JSON, jestOneFail());
+        const result = interpretResult(prepared(), exited(1), {
+            cwd,
+            priorIdentities: {},
+        });
+        expect(result.status).toBe('fail');
+        expect(result.failureKind).toBe('exit-code');
+        expect(result.errors[0]?.message).toMatch(/SENSOR\[test\] failed/);
+        expect(result.errors[0]?.rule).toBeUndefined();
+    });
+
+    it('exit ≠0 with bad XML content → synthetic exit-code (RF-1.4)', () => {
+        writeRel(cwd, DEFAULT_XML, '<not-closed');
+        const result = interpretResult(prepared(), exited(1), {
+            cwd,
+            priorIdentities: { [DEFAULT_JSON]: null, [DEFAULT_XML]: null },
+        });
+        expect(result.failureKind).toBe('exit-code');
+        expect(result.errors[0]?.message).toMatch(/SENSOR\[test\] failed/);
     });
 });
