@@ -296,7 +296,7 @@ function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecut
     const requestedScope = resolveRequestedScope(input.requestedScope);
     const common = {
         name: input.name,
-        formatter: sensor.formatter || 'exit-code',
+        formatter: sensor.formatter || (input.name === 'test' ? 'test' : 'exit-code'),
         ...resultsFileField(sensor.resultsFile),
         ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
         requestedScope,

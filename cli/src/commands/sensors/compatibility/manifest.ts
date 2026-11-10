@@ -291,7 +291,7 @@ function parseScopedCommandOverride(
     return command;
 }
 
-function parseProjectSensor(input: unknown, source: unknown, location: string): ProjectDeclaredSensor {
+function parseProjectSensor(input: unknown, source: unknown, location: string, sensorName?: string): ProjectDeclaredSensor {
     const value = record(input, source, location);
     if ('variantId' in value) invalid(source, `${location}.variantId is forbidden on source:"project" entries`);
     if ('initializedCompatibility' in value) invalid(source, `${location}.initializedCompatibility is forbidden on source:"project" entries`);
@@ -302,7 +302,8 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
         source: 'project',
         enabled: value.enabled,
         command: parseStructuredCommand(value.command, source, `${location}.command`),
-        formatter: 'exit-code',
+        // RF-1.1: omitted formatter on name=test defaults to the findings formatter.
+        formatter: sensorName === 'test' ? 'test' : 'exit-code',
     };
     if ('formatter' in value) {
         const formatter = text(value.formatter, source, `${location}.formatter`);
@@ -340,9 +341,14 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
     return sensor;
 }
 
-function parseV3SensorEntry(input: unknown, source: unknown, location: string): SensorManifestV3ProjectSensors['sensors'][string] {
+function parseV3SensorEntry(
+    input: unknown,
+    source: unknown,
+    location: string,
+    sensorName?: string,
+): SensorManifestV3ProjectSensors['sensors'][string] {
     const value = record(input, source, location);
-    if (value.source === 'project') return parseProjectSensor(value, source, location);
+    if (value.source === 'project') return parseProjectSensor(value, source, location, sensorName);
     const unmarkedCustom = !('variantId' in value) && !('initializedCompatibility' in value) && 'command' in value;
     if (unmarkedCustom) {
         invalid(source, `${location}.source is required for project-declared sensors; add source:"project"`);
@@ -479,7 +485,7 @@ function parseV3ProjectSensorsMap(
     for (const name of Object.keys(sensorsInput)) {
         const sensorName = id(name, source, 'sensor id');
         try {
-            sensors[sensorName] = parseV3SensorEntry(sensorsInput[name], source, `sensors.${sensorName}`);
+            sensors[sensorName] = parseV3SensorEntry(sensorsInput[name], source, `sensors.${sensorName}`, sensorName);
         } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
             if (!soft) throw error instanceof Error ? error : new Error(reason);

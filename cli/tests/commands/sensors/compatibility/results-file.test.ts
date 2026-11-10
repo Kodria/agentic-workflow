@@ -117,6 +117,25 @@ describe('resultsFile manifest + prepare plumbing (RF-1.2)', () => {
         expect(prepared.resultsFile).toBeUndefined();
     });
 
+    it('defaults omitted formatter to test when project sensor name is test (RF-1.1)', () => {
+        const { formatter: _omit, ...withoutFormatter } = projectSensor();
+        const parsed = parseSensorManifest(
+            v3Project({ test: withoutFormatter }),
+            'sensors.json',
+        );
+        expect(parsed.kind).toBe('v3');
+        if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') throw new Error('expected v3 project-sensors');
+        const sensor = parsed.pack.sensors.test as ProjectDeclaredSensor;
+        expect(sensor.formatter).toBe('test');
+
+        const prepared = prepareV2Sensor({
+            name: 'test',
+            sensor,
+            requestedScope: 'full',
+        });
+        expect(prepared.formatter).toBe('test');
+    });
+
     it.each([
         ['../escape.json', 'escape'],
         ['/abs/out.json', 'absolute'],
