@@ -6,8 +6,8 @@ import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
 import {
     buildBaseline,
-    needsTestBaselineRefresh,
     readBaseline,
+    shouldAdviseTestBaselineRefresh,
     TEST_BASELINE_REFRESH_DETAIL,
     writeBaseline,
 } from './baseline';
@@ -25,8 +25,7 @@ function maybeAdviseTestBaselineRefresh(
     cwd: string,
     acceptedTest?: string[],
 ): void {
-    if (!sensors.some(sensor => sensor.name === 'test')) return;
-    if (!needsTestBaselineRefresh(acceptedTest ?? readBaseline(cwd)?.test)) return;
+    if (!shouldAdviseTestBaselineRefresh(sensors, acceptedTest ?? readBaseline(cwd)?.test)) return;
     log.info(`test: ${TEST_BASELINE_REFRESH_DETAIL}`);
 }
 

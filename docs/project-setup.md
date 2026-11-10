@@ -46,7 +46,11 @@ awm preflight
 
 For a legacy codebase with known findings, use `awm sensors baseline` only after
 reviewing the full run. That records accepted debt and makes future gates fail
-on new findings rather than hiding the original state.
+on new findings rather than hiding the original state. For the `test` sensor,
+wire a structured results artifact (`coverage/awm-test-results.json` / `.xml`, or
+`resultsFile`) so individual failures can ratchet; when the baseline still holds
+only the synthetic exit-code shape, status/run emit a re-baseline advisory — see
+[CLI reference — test sensor findings](cli-reference.md#awm-sensors-baseline).
 
 Legacy adoption starts from the same baseline manifest, but hardening remains an
 explicit **hardening opt-in**: first establish runnable controls and review

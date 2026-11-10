@@ -1,7 +1,13 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fingerprint, needsTestBaselineRefresh, writeBaseline } from '../../../src/commands/sensors/baseline';
+import {
+    fingerprint,
+    needsTestBaselineRefresh,
+    shouldAdviseTestBaselineRefresh,
+    TEST_BASELINE_REFRESH_DETAIL,
+    writeBaseline,
+} from '../../../src/commands/sensors/baseline';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
 
 /**
@@ -33,6 +39,36 @@ describe('needsTestBaselineRefresh (RF-3.1)', () => {
             message: 'Expected 3 to be 4',
         });
         expect(needsTestBaselineRefresh([ruled])).toBe(false);
+    });
+
+    it('is false when synthetic and ruled fingerprints coexist (kill-RED)', () => {
+        const synthetic = fingerprint('test', { message: 'SENSOR[test] failed (exit 1)' });
+        const ruled = fingerprint('test', {
+            file: 'src/math.test.ts',
+            rule: 'math adds',
+            message: 'Expected 3 to be 4',
+        });
+        expect(needsTestBaselineRefresh([synthetic, ruled])).toBe(false);
+    });
+});
+
+describe('shouldAdviseTestBaselineRefresh emit helper (RF-3.1)', () => {
+    it('is true for run/baseline paths when test is selected and refresh is needed', () => {
+        expect(shouldAdviseTestBaselineRefresh([{ name: 'test' }], undefined)).toBe(true);
+        expect(shouldAdviseTestBaselineRefresh([{ name: 'test' }], [])).toBe(true);
+    });
+
+    it('is false when test is absent from the selected sensors', () => {
+        expect(shouldAdviseTestBaselineRefresh([{ name: 'lint' }], [])).toBe(false);
+    });
+
+    it('is false when ruled findings are already baselined', () => {
+        const ruled = fingerprint('test', {
+            file: 'src/math.test.ts',
+            rule: 'math adds',
+            message: 'Expected 3 to be 4',
+        });
+        expect(shouldAdviseTestBaselineRefresh([{ name: 'test' }], [ruled])).toBe(false);
     });
 });
 
@@ -88,9 +124,12 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
             expect.objectContaining({
                 sensor: 'test',
                 kind: 'test-baseline-refresh',
-                detail: expect.stringMatching(/awm sensors baseline|results artifact|re-?run/i),
+                detail: expect.stringMatching(/awm sensors baseline/i),
             }),
         ]));
+        const advisory = result.warnings!.find((w) => w.kind === 'test-baseline-refresh');
+        expect(advisory?.detail).toMatch(/results artifact/i);
+        expect(advisory?.detail).toBe(TEST_BASELINE_REFRESH_DETAIL);
     });
 
     it('emits a non-blocking warning when baseline holds only the synthetic fingerprint', async () => {
@@ -106,7 +145,24 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
             expect.objectContaining({
                 sensor: 'test',
                 kind: 'test-baseline-refresh',
-                detail: expect.stringMatching(/awm sensors baseline|results artifact|re-?run/i),
+                detail: expect.stringMatching(/awm sensors baseline/i),
+            }),
+        ]));
+        const advisory = result.warnings!.find((w) => w.kind === 'test-baseline-refresh');
+        expect(advisory?.detail).toMatch(/results artifact/i);
+        expect(advisory?.detail).toBe(TEST_BASELINE_REFRESH_DETAIL);
+    });
+
+    it('does not emit the advisory when test is configured but enabled:false', async () => {
+        writeOnlyProject({ test: projectSensor({ enabled: false }) });
+        writeBaseline(tmpDir, { test: [] });
+
+        const result = await computeSensorStatus(tmpDir);
+
+        expect(result.warnings ?? []).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                sensor: 'test',
+                kind: 'test-baseline-refresh',
             }),
         ]));
     });
@@ -168,7 +224,8 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
                 const rendered = output.mock.calls.flat().join('\n');
                 expect(rendered).toMatch(/READY/);
                 expect(rendered).toMatch(/test/);
-                expect(rendered).toMatch(/awm sensors baseline|results artifact|re-?run/i);
+                expect(rendered).toMatch(/awm sensors baseline/i);
+                expect(rendered).toMatch(/results artifact/i);
                 expect(exitSpy).not.toHaveBeenCalled();
             } finally {
                 output.mockRestore();

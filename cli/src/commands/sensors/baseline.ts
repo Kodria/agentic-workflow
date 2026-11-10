@@ -60,6 +60,15 @@ export function needsTestBaselineRefresh(accepted: string[] | undefined): boolea
     return accepted.every(fp => fp === TEST_SYNTHETIC_EXIT_FINGERPRINT);
 }
 
+/** RF-3.1: whether run/baseline should emit the non-blocking re-baseline advisory. */
+export function shouldAdviseTestBaselineRefresh(
+    sensors: Array<{ name: string }>,
+    acceptedTest: string[] | undefined,
+): boolean {
+    if (!sensors.some(sensor => sensor.name === 'test')) return false;
+    return needsTestBaselineRefresh(acceptedTest);
+}
+
 export function readBaseline(cwd: string): Baseline | null {
     const p = path.join(cwd, BASELINE_FILE);
     if (!fs.existsSync(p)) return null;
