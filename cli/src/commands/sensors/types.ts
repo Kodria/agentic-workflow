@@ -238,10 +238,14 @@ export type SensorCheck = {
     certification?: 'project-declared';
 };
 
-/** Non-blocking RF-3.4 note: enabled sensor has no effective `inputs`, so it is not cacheable. */
+/**
+ * Non-blocking status notes. `uncacheable-inputs` is RF-3.4; `test-baseline-refresh`
+ * is RF-3.1. Neither feeds `overall`.
+ */
 export type SensorStatusWarning = {
     sensor: string;
     detail: string;
+    kind?: 'uncacheable-inputs' | 'test-baseline-refresh';
 };
 
 export type SensorAuthority = {
