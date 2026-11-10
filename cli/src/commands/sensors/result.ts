@@ -34,7 +34,10 @@ export type ResultFileIdentity = {
 
 export type InterpretResultOpts = {
     cwd?: string;
-    /** Pre-spawn identities keyed by relative candidate path; `null` means absent. */
+    /**
+     * Pre-spawn identities keyed by relative candidate path; `null` means absent.
+     * Required for file-first usability (RF-1.9 fail-closed): omit/undefined → no usable artifact.
+     */
     priorIdentities?: Record<string, ResultFileIdentity | null>;
 };
 
@@ -266,15 +269,15 @@ function resolveUsableArtifact(
     cwd: string,
     priorIdentities?: Record<string, ResultFileIdentity | null>,
 ): UsableArtifact | null {
+    // RF-1.9 fail-closed: without a pre-spawn snapshot map, no candidate is usable.
+    // Freshness only applies when executePrepared (or tests) supply priorIdentities.
+    if (priorIdentities === undefined) return null;
     for (const rel of candidateResultsPaths(prepared)) {
         const abs = path.resolve(cwd, rel);
         const next = snapshotRegularFile(abs);
         if (!next) continue;
-        const prior = priorIdentities ? priorIdentities[rel] : null;
-        // When priorIdentities is provided, require freshness. When absent (direct
-        // interpretResult call without executePrepared), treat existing regular file
-        // as a candidate (no prior snapshot ⇒ usable per RF-1.9).
-        if (priorIdentities && !identityChanged(prior, next)) continue;
+        const prior = priorIdentities[rel] ?? null;
+        if (!identityChanged(prior, next)) continue;
         const content = readContainedUtf8(cwd, rel);
         if (content === null) continue;
         const parsed = parseResultsContent(rel, content, cwd);

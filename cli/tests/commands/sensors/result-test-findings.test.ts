@@ -1,10 +1,15 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { applyBaseline, executePrepared, interpretResult } from '../../../src/commands/sensors/result';
+import {
+    applyBaseline,
+    clearTestResultCandidates,
+    executePrepared,
+    interpretResult,
+} from '../../../src/commands/sensors/result';
 import { fingerprint } from '../../../src/commands/sensors/baseline';
 import type { PreparedSensorExecution } from '../../../src/commands/sensors/types';
-import { exited, ok, spawnFailed, timedOut } from './exec-fixtures';
+import { exited, ok, overflowed, spawnFailed, timedOut } from './exec-fixtures';
 
 const mockRunCommand = jest.fn();
 const mockRunStructuredCommand = jest.fn();
@@ -332,6 +337,18 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
         expect(result.skipReason).toMatch(/timeout/);
     });
 
+    it('overflow stays inconclusive without file-first substitute (RF-1.8)', () => {
+        writeRel(cwd, DEFAULT_JSON, jestOneFail());
+        const result = interpretResult(prepared(), overflowed('partial'), {
+            cwd,
+            priorIdentities: { [DEFAULT_JSON]: null },
+        });
+        expect(result.status).toBe('inconclusive');
+        expect(result.skipReason).toMatch(/output exceeded|buffer/i);
+        expect(result.failureKind).toBeUndefined();
+        expect(result.errors).toEqual([]);
+    });
+
     it('spawn failure stays missing-binary without file-first substitute (RF-1.8)', () => {
         writeRel(cwd, DEFAULT_JSON, jestOneFail());
         const result = interpretResult(prepared(), spawnFailed('ENOENT'), {
@@ -340,6 +357,32 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
         });
         expect(result.status).toBe('fail');
         expect(result.failureKind).toBe('missing-binary');
+    });
+
+    it('stale file on disk without priorIdentities → exit-code, never findings (RF-1.9 fail-closed)', () => {
+        writeRel(cwd, DEFAULT_JSON, jestOneFail());
+        const result = interpretResult(prepared(), exited(1), { cwd });
+        expect(result.status).toBe('fail');
+        expect(result.failureKind).toBe('exit-code');
+        expect(result.errors[0]?.message).toMatch(/SENSOR\[test\] failed/);
+        expect(result.errors[0]?.rule).toBeUndefined();
+    });
+
+    it('clearTestResultCandidates does not unlink a symlink leaf (RF-1.11)', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-symlink-leaf-'));
+        try {
+            const target = path.join(outside, 'real.json');
+            fs.writeFileSync(target, jestOneFail());
+            fs.mkdirSync(path.join(cwd, 'coverage'), { recursive: true });
+            const link = path.join(cwd, DEFAULT_JSON);
+            fs.symlinkSync(target, link);
+            clearTestResultCandidates(cwd, [DEFAULT_JSON]);
+            expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+            expect(fs.existsSync(target)).toBe(true);
+            expect(fs.readFileSync(target, 'utf8')).toBe(jestOneFail());
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
     });
 
     it('readOnly + default under coverage unlinks coverage candidate and does not mutate .awm (RF-1.11)', async () => {
