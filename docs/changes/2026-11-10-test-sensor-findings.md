@@ -18,13 +18,13 @@ links:
   plan: docs/plans/2026-11-10-test-sensor-findings-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/248
 verification:
-  commit: 8a59098c6238b27d22d92aece881f33347acb29b
+  commit: eec70aba64e30600deae296fd6af7d62e427a863
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:64a37b60762c19d6a3abfab78924326ae0576196ad24fe75e1a886f9d827c490
+  receipt_digest: sha256:580b2a18d6c2485e3fc47583075e4227addbd23918436c70c05a2a19e90cce1a
 manual_validation:
   - step: In a throwaway repo, run Jest with two known failures writing coverage/awm-test-results.json; awm sensors baseline; confirm both fingerprints accepted; add a third failing test; confirm gate fails only on the new fingerprint; remove it and confirm pass.
     expected: Baseline ratchets the two legacy failures; only the new failure fails the gate; without it, overall pass.
@@ -44,7 +44,7 @@ rollback: Revert this branch's commits (or restore the prior CLI release). Remov
 
 ## Qué se hizo
 
-The `test` sensor can consume a structured results artifact (defaults `coverage/awm-test-results.json` then `.xml`, or `resultsFile`) with contained pre-clear, identity-snapshot freshness, and Jest/JUnit parsers that emit one finding per failed test (`sensor|file|rule`). Unexplained non-zero exits (including Jest `coverageMap`, runtime/interrupt, stale/unlink-fail) stay authoritative `exit-code`. Status/run/baseline emit a non-blocking re-baseline advisory when the test baseline is empty or synthetic-only. Operator docs cover defaults, pack override, and admit/`coverage/` caveats.
+The `test` sensor can consume a structured results artifact (defaults `coverage/awm-test-results.json` then `.xml`, or `resultsFile`) with contained pre-clear, identity-snapshot freshness, and Jest/JUnit parsers that emit one finding per failed test (`sensor|file|rule`). Unexplained non-zero exits (including Jest `coverageMap`, runtime/interrupt, stale/unlink-fail) stay authoritative `exit-code`. Status/run/baseline emit a non-blocking re-baseline advisory when the test baseline is empty or synthetic-only; on `sensors run` that advisory goes to **stderr only** so stdout stays a single parseable JSON document. Operator docs cover defaults, pack override, and admit/`coverage/` caveats.
 
 ## Qué se probó
 
@@ -53,6 +53,7 @@ The `test` sensor can consume a structured results artifact (defaults `coverage/
 - Per-slice `awm sensors run --slice` during SDD — overall pass
 - Full `awm sensors run` at Change Record verification commit — overall pass (lint/typecheck/depcheck)
 - Post-implementation QA Track A/B with fix loop (arbitrary unlink, JUnit depth, vacuous JSON preference, reserved read, priorIdentities fail-closed, prepare formatter default, RF amendments) — closed
+- Impl audit I1/I2: `index.test.ts` (incl. stdout-JSON-vs-stderr advisory kill-RED) + typecheck — pass; I3 RF-1.2 prefer-findings already matched design
 
 ## Qué falta validar
 
