@@ -272,6 +272,25 @@ describe('parseJestJson (RF-2.1–2.5, RF-2.7)', () => {
         expect(parseJestJson(raw, ROOT).explainsNonZeroExit).toBe(false);
     });
 
+    it('sets explainsNonZeroExit false when numFailedTestSuites mismatches failed suites in detail', () => {
+        // Header/detail suite-count diverge while numFailedTests matches assertion findings.
+        // Deleting `numFailedTestSuites === failedSuitesInDetail` must make this fail (RF-1.10).
+        const raw = JSON.stringify({
+            numFailedTests: 1,
+            numFailedTestSuites: 99,
+            numRuntimeErrorTestSuites: 0,
+            wasInterrupted: false,
+            testResults: [
+                {
+                    name: 'a.test.ts',
+                    status: 'failed',
+                    assertionResults: [{ status: 'failed', fullName: 't', title: 't', ancestorTitles: [] }],
+                },
+            ],
+        });
+        expect(parseJestJson(raw, ROOT).explainsNonZeroExit).toBe(false);
+    });
+
     it('allows duplicate fullNames as separate findings', () => {
         const raw = JSON.stringify({
             numFailedTests: 2,
