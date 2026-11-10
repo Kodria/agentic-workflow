@@ -408,6 +408,30 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
         }
     });
 
+    it('clear/execute never unlinks a .awm candidate even when readOnly is false (RF-1.11)', async () => {
+        const reserved = '.awm/foo.json';
+        const abs = writeRel(cwd, reserved, jestOneFail({ fullName: 'must survive clear' }));
+        const before = fs.readFileSync(abs, 'utf8');
+        clearTestResultCandidates(cwd, [reserved], { readOnly: false });
+        expect(fs.existsSync(abs)).toBe(true);
+        expect(fs.readFileSync(abs, 'utf8')).toBe(before);
+
+        mockRunStructuredCommand.mockResolvedValue(exited(1));
+        const result = await executePrepared(prepared({ resultsFile: reserved }), cwd, { readOnly: false });
+        expect(fs.existsSync(abs)).toBe(true);
+        expect(fs.readFileSync(abs, 'utf8')).toBe(before);
+        // Unchanged identity after refused clear → unusable → exit-code (fail-closed freshness).
+        expect(result.failureKind).toBe('exit-code');
+    });
+
+    it('clear never unlinks a .git candidate even when readOnly is false (RF-1.11)', () => {
+        const reserved = '.git/hooks/awm-test-results.json';
+        const abs = writeRel(cwd, reserved, jestOneFail());
+        clearTestResultCandidates(cwd, [reserved], { readOnly: false });
+        expect(fs.existsSync(abs)).toBe(true);
+        expect(fs.lstatSync(abs).isFile()).toBe(true);
+    });
+
     it('readOnly + default under coverage unlinks coverage candidate and does not mutate .awm (RF-1.11)', async () => {
         writeRel(cwd, DEFAULT_JSON, jestOneFail());
         fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });

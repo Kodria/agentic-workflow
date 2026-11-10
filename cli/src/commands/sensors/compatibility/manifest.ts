@@ -2,6 +2,7 @@ import type { SensorConfig, SensorManifest } from '../types';
 import type { CompatibilityEvidence, SensorPackSensor, StructuredCommand } from './types';
 import { parseSensorInputs, parseStructuredCommand } from './contract';
 import { positiveTimeout } from './timeout';
+import { isReservedSegment } from '../read-only-observation';
 import semver from 'semver';
 import path from 'path';
 
@@ -173,6 +174,15 @@ function asset(value: unknown, source: unknown, location: string): string {
     return parsed;
 }
 
+/** Contained relative resultsFile; refuses reserved `.awm` / `.git` segments (RF-1.11). */
+function resultsFilePath(value: unknown, source: unknown, location: string): string {
+    const parsed = asset(value, source, location);
+    if (parsed.split('/').some(isReservedSegment)) {
+        invalid(source, `${location} must not contain .git or .awm path segments`);
+    }
+    return parsed;
+}
+
 const STATES = new Set<CompatibilityEvidence['state']>(['certified', 'compatible-unverified', 'incompatible', 'missing-tool', 'unverifiable', 'not-applicable']);
 
 function nullableText(value: unknown, source: unknown, location: string): string | null {
@@ -321,7 +331,7 @@ function parseProjectSensor(input: unknown, source: unknown, location: string): 
         sensor.sliceCommand = parseScopedCommandOverride(value.sliceCommand, source, location, 'sliceCommand');
     }
     if ('resultsFile' in value) {
-        sensor.resultsFile = asset(value.resultsFile, source, `${location}.resultsFile`);
+        sensor.resultsFile = resultsFilePath(value.resultsFile, source, `${location}.resultsFile`);
     }
     if ('timeout' in value) {
         try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
@@ -377,7 +387,7 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
         sensor.sliceCommand = parseScopedCommandOverride(value.sliceCommand, source, location, 'sliceCommand');
     }
     if ('resultsFile' in value) {
-        sensor.resultsFile = asset(value.resultsFile, source, `${location}.resultsFile`);
+        sensor.resultsFile = resultsFilePath(value.resultsFile, source, `${location}.resultsFile`);
     }
     if ('timeout' in value) {
         try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }

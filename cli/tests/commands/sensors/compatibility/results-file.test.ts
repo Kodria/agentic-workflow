@@ -124,6 +124,12 @@ describe('resultsFile manifest + prepare plumbing (RF-1.2)', () => {
         ['', 'empty'],
         ['coverage/./out.json', 'dot segment'],
         ['coverage//out.json', 'empty segment'],
+        ['.awm/foo.json', 'reserved .awm'],
+        ['nested/.awm/out.json', 'nested reserved .awm'],
+        ['.git/objects/x.json', 'reserved .git'],
+        ['vendor/.git/out.json', 'nested reserved .git'],
+        ['.AWM/Out.json', 'reserved .awm case-insensitive'],
+        ['.Git/out.json', 'reserved .git case-insensitive'],
     ])('rejects invalid resultsFile %j (%s) on project and pack-bound', (bad) => {
         expect(() => parseSensorManifest(
             v3Project({ test: projectSensor({ resultsFile: bad }) }),
