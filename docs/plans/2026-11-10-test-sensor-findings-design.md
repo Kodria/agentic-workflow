@@ -10,7 +10,7 @@
 
 **Design artifacts:** none (no UI screens).
 
-**Amendments (PR #249 audit):** H1 freshness via pre-spawn unlink; H2 exit-explained gate; H3 defaults under `coverage/`; H4 single masked synthetic fingerprint; H5 resolve against execution `cwd` only; H6 docs state pack non-write + override example.
+**Amendments (PR #249 audit):** H1–H6 closed; re-audit N1–N4: Jest `coverageMap` explain rule (not inventing threshold fields); mandatory identity snapshot when unlink fails; contained pre-clear + `readOnly` unlink policy; docs note `coverage/` exclusion needs gitignore/no tracked files.
 
 ## Requirements
 
@@ -24,11 +24,12 @@
 - **RF-1.6 — Zero findings, non-zero exit:** IF a usable artifact parses to zero findings and the process exit code is non-zero, THEN THE CLI SHALL `fail` with a synthetic error and `failureKind: exit-code`, and SHALL NOT invent per-test findings.
 - **RF-1.7 — Findings drive fail (when exit is explained):** WHEN one or more findings are parsed **and** (exit is 0 **or** RF-1.10 says the artifact explains the non-zero exit), THE CLI SHALL set status `fail` with `failureKind: findings` before baseline, and SHALL run baseline `partition` / `applyBaseline` with the same semantics as other finding sensors.
 - **RF-1.8 — Completed process only:** WHEN the process times out, overflows the output buffer, or fails to spawn, THE CLI SHALL keep the existing inconclusive / missing-binary / partial-output paths and SHALL NOT substitute file-first interpretation for those outcomes.
-- **RF-1.9 — Freshness (this run only):** BEFORE spawning a test-findings sensor, THE CLI SHALL unlink (best-effort) every candidate results path for that run (the configured `resultsFile` if set, otherwise both default paths). AFTER the process completes, THE CLI SHALL treat an artifact as usable only if it exists as a regular contained file that was created or replaced by this run (absence after pre-clear ⇒ not usable). IF a stale file somehow remains without being rewritten, THEN THE CLI SHALL treat it as not usable (RF-1.5). THE CLI SHALL NOT `pass` on exit ≠0 solely because a pre-existing baselined artifact was left behind.
+- **RF-1.9 — Freshness (this run only):** BEFORE spawning a test-findings sensor, for every candidate path (configured `resultsFile` or both defaults) the CLI SHALL: (1) if a regular file exists, snapshot `{mtimeMs, size, ino?}`; (2) attempt a **contained** unlink per RF-1.11 (never unlink a symlink leaf; `realpath` the parent directory and refuse if it escapes execution cwd). AFTER the process completes, THE CLI SHALL treat an artifact as usable only if it is a regular contained non-symlink file that either did not exist in the pre-spawn snapshot or differs in `mtimeMs`/`size`/`ino` from that snapshot. IF unlink failed and the file identity is unchanged, OR the file is absent, THEN THE CLI SHALL treat it as not usable (RF-1.5). THE CLI SHALL NOT `pass` on exit ≠0 solely because a pre-existing baselined artifact was left behind.
 - **RF-1.10 — Exit explained by artifact:** WHEN exit ≠ 0 and findings were parsed, THE CLI SHALL enter findings-mode (RF-1.7) only if the artifact **explains** the non-zero exit as test/suite failures alone:
-  - **Jest:** `numRuntimeErrorTestSuites === 0`, not `wasInterrupted`, no coverage-threshold failure signal in the JSON, and failure counts are accounted for by emitted failed assertions/suites (`numFailedTests` / failed suites align with emitted findings; `success === false` is attributable to those failures).
+  - **Jest:** `numRuntimeErrorTestSuites === 0`, not `wasInterrupted`, failure counts accounted for by emitted failed assertions/suites (`numFailedTests` / failed suites align with emitted findings). IF the JSON object has a truthy `coverageMap` property (coverage was collected), THEN THE CLI SHALL treat the exit as **not** explained (fail-closed: coverage thresholds affect exit without a portable threshold field). IF `coverageMap` is absent, coverage cannot be the cause; the exit is explained when the runtime/interrupt/count checks above hold. Operators who want the ratchet MUST NOT pass `--coverage` (with thresholds) on the test sensor command — coverage belongs on a separate sensor.
   - **JUnit:** the sum of suite-level `errors` + `failures` attributes equals the number of emitted findings (including suite-failed rows).
-  IF the artifact does **not** explain the exit, THEN THE CLI SHALL `fail` with `failureKind: exit-code` (synthetic evidence), even when findings were also parsed (findings may still be attached for display only if useful, but baseline MUST NOT convert this outcome to `pass`).
+  IF the artifact does **not** explain the exit, THEN THE CLI SHALL `fail` with `failureKind: exit-code` (synthetic evidence), even when findings were also parsed (baseline MUST NOT convert this outcome to `pass`).
+- **RF-1.11 — Contained clear and readOnly:** WHEN unlinking a candidate, THE CLI SHALL resolve the parent directory with `realpath`, require it stays under execution cwd, and SHALL NOT unlink if the leaf is a symlink. WHEN `runSensors({ readOnly: true })`, THE CLI SHALL unlink only candidates whose relative path is under a default admission exclusion **name** segment (today: `coverage`, matching `DEFAULT_EXCLUSION_NAMES`); for other candidates THE CLI SHALL skip unlink and still apply RF-1.9 identity-snapshot freshness. THE CLI SHALL NOT introduce `.awm` mutations via pre-clear.
 
 ### Finding identity and failure set
 
@@ -43,7 +44,7 @@
 ### Baseline advisory and documentation
 
 - **RF-3.1 — Re-baseline advisory:** WHEN the accepted baseline entry for `test` is empty or only reflects the synthetic exit-code failure shape, THE CLI SHALL emit a non-blocking advisory suggesting the operator re-run `awm sensors baseline` after wiring a results artifact. Synthetic shape detection SHALL use a **single** fingerprint: `fingerprint('test', { message: 'SENSOR[test] failed (exit 1)' })`, relying on existing `maskNumbers` so all exit codes collide (H4).
-- **RF-4.1 — Operator docs:** THE CLI reference (and legacy-adoption guidance in this repo) SHALL document: default paths under `coverage/`, optional `resultsFile`, Jest and JUnit wiring examples (including pytest `--junitxml`), the exit×artifact state table (including freshness and exit-explained rows), the re-baseline advisory, project-declared sensors for out-of-range toolchains (e.g. TypeScript 4.x with `formatter: tsc`), and an explicit statement that **packs do not write the artifact** — pack-bound projects must override the test script/`cmd` or set `resultsFile` (with a minimal override example) (H6).
+- **RF-4.1 — Operator docs:** THE CLI reference (and legacy-adoption guidance in this repo) SHALL document: default paths under `coverage/`, optional `resultsFile`, Jest and JUnit wiring examples (including pytest `--junitxml`), the exit×artifact state table (including freshness and exit-explained rows), the re-baseline advisory, project-declared sensors for out-of-range toolchains (e.g. TypeScript 4.x with `formatter: tsc`), an explicit statement that **packs do not write the artifact** — pack-bound projects must override the test script/`cmd` or set `resultsFile` (with a minimal override example) (H6), that the test sensor command must not combine `--coverage`/thresholds with the ratchet (use a separate coverage sensor), and that read-only admission skips `coverage/` only when that directory is gitignored and contains no tracked files (`read-only-observation` / N4) — otherwise admit may still see mutations.
 
 ## Non-goals (v1)
 
@@ -107,7 +108,7 @@ No schema change. RF-3.1 uses one masked synthetic fingerprint. Packs unchanged:
 
 | Requirement | Verified by |
 |---|---|
-| RF-1.1–RF-1.10 | `interpretResult` / execute tests for every state-table cell, stale-artifact RED, coverage-threshold unexplained exit RED, timeout/spawn non-interference |
+| RF-1.1–RF-1.11 | `interpretResult` / execute tests for every state-table cell; stale RED; unlink-fail+unchanged identity RED; Jest with/without `coverageMap` RED/GREEN; contained clear; mandatory `readOnly` RED under `coverage/`; timeout/spawn non-interference |
 | RF-2.1–RF-2.7 | Parser unit tests with Jest/JUnit fixtures |
 | RF-3.1 | Advisory helper + exit-1 ≡ exit-2 synthetic fingerprint equivalence |
 | RF-4.1 | Section-scoped structural docs asserts (defaults under `coverage/`, override example, TS 4.x) |
@@ -116,4 +117,4 @@ No schema change. RF-3.1 uses one masked synthetic fingerprint. Packs unchanged:
 
 - **Size cap:** `16 * 1024 * 1024` bytes unless plan picks another multi-MB constant; fail closed as unusable when exceeded.
 - **Advisory surface:** existing non-blocking status warnings / run info channels.
-- **Pre-clear failures:** best-effort unlink; if unlink fails and a file remains, post-run usability still requires the file to have been rewritten this run (implement via pre-clear inode/mtime snapshot or simply “must exist after clear” — prefer clear-then-require-presence).
+- **Pre-clear failures:** identity snapshot is mandatory (RF-1.9); unlink is best-effort but never sufficient alone for freshness.
