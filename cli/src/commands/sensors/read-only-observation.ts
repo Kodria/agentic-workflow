@@ -63,7 +63,7 @@ function defaultRules(): ExclusionRule[] {
 }
 
 /** Exact, case-insensitive match: `my.awm` and `.gitignore-dir` are not reserved. */
-function isReservedSegment(segment: string): boolean {
+export function isReservedSegment(segment: string): boolean {
     return RESERVED_NAMES.has(segment.toLowerCase());
 }
 

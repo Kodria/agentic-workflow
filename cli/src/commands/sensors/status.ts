@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorStatusWarning } from './types';
+import {
+    needsTestBaselineRefresh,
+    readBaseline,
+    TEST_BASELINE_REFRESH_DETAIL,
+} from './baseline';
 import { parseSensorPack } from './compatibility/contract';
 import { discoverProjectEvidence } from './compatibility/discovery';
 import { bindContainedRuntimeCommands } from './compatibility/live';
@@ -34,11 +39,31 @@ function hasEffectiveInputs(
 }
 
 function uncacheableWarning(sensor: string): SensorStatusWarning {
-    return { sensor, detail: UNCACHEABLE_DETAIL };
+    return { sensor, detail: UNCACHEABLE_DETAIL, kind: 'uncacheable-inputs' };
 }
 
 function withWarnings<T extends SensorStatusResult>(result: T, warnings: SensorStatusWarning[]): T {
     return warnings.length === 0 ? result : { ...result, warnings };
+}
+
+/** RF-3.1: non-blocking advisory when `test` is configured but baseline is empty/synthetic. */
+function collectTestBaselineRefreshWarning(
+    sensors: Record<string, { enabled?: boolean }>,
+    cwd: string,
+): SensorStatusWarning[] {
+    const testSensor = sensors.test;
+    if (!testSensor || testSensor.enabled === false) return [];
+    const baseline = readBaseline(cwd);
+    if (!needsTestBaselineRefresh(baseline?.test)) return [];
+    return [{
+        sensor: 'test',
+        detail: TEST_BASELINE_REFRESH_DETAIL,
+        kind: 'test-baseline-refresh',
+    }];
+}
+
+function mergeStatusWarnings(...groups: SensorStatusWarning[][]): SensorStatusWarning[] {
+    return groups.flat();
 }
 
 function variantInputsFromPack(
@@ -459,7 +484,10 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             pack: null,
             checks,
             ...projectMetadata(project, 'project-sensors', 'project-declared-only'),
-        }, collectConfiguredInputsWarnings(parsed.pack.sensors));
+        }, mergeStatusWarnings(
+            collectConfiguredInputsWarnings(parsed.pack.sensors),
+            collectTestBaselineRefreshWarning(parsed.pack.sensors, packageRoot),
+        ));
     }
 
     if (parsed.kind === 'v2' || parsed.kind === 'v3') {
@@ -497,7 +525,10 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             return withWarnings({
                 overall: 'DEGRADED', pack: packId, checks,
                 ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
-            }, collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs));
+            }, mergeStatusWarnings(
+                collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs),
+                collectTestBaselineRefreshWarning(parsedPack.sensors, packageRoot),
+            ));
         }
         for (const [name, sensor] of Object.entries(parsedPack.sensors)) {
             if (isProjectDeclaredSensor(sensor as V3ManifestSensor)) {
@@ -516,7 +547,10 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             pack: packId, checks,
             ...(uninitialized ? { uninitialized } : {}),
             ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
-        }, collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs));
+        }, mergeStatusWarnings(
+            collectConfiguredInputsWarnings(parsedPack.sensors, packForInputs),
+            collectTestBaselineRefreshWarning(parsedPack.sensors, packageRoot),
+        ));
     }
 
     const manifest = parsed.pack;
@@ -529,5 +563,8 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
     return withWarnings({
         overall: Object.keys(manifest.sensors ?? {}).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
         pack: manifest.pack, checks, ...projectMetadata(project, 'project-sensors', 'legacy-v1'),
-    }, collectLegacyInputsWarnings(manifest.sensors ?? {}));
+    }, mergeStatusWarnings(
+        collectLegacyInputsWarnings(manifest.sensors ?? {}),
+        collectTestBaselineRefreshWarning(manifest.sensors ?? {}, packageRoot),
+    ));
 }

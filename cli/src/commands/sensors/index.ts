@@ -4,7 +4,13 @@ import { log } from '@clack/prompts';
 import { runSensors, findManifestDir } from './run';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
-import { buildBaseline, writeBaseline } from './baseline';
+import {
+    buildBaseline,
+    readBaseline,
+    shouldAdviseTestBaselineRefresh,
+    TEST_BASELINE_REFRESH_DETAIL,
+    writeBaseline,
+} from './baseline';
 import { runCoverage } from './coverage';
 import { renderCoverageHuman, renderCoverageJson } from './coverage/render';
 import { capabilityRoot } from '../../core/registries';
@@ -12,6 +18,17 @@ import { exitCodeForVerdict } from './verdict';
 import { applySensorBootstrap, planSensorBootstrap, type BootstrapMode } from './bootstrap';
 import { describeUnresolved } from './unresolved';
 import { captureReceiptPrecondition, finalizeRunReceipt, isFullSelection } from '../../core/changes/receipt';
+
+/** RF-3.1: non-blocking advisory on stderr only — never stdout (I1: clack log.info
+ *  writes stdout and would corrupt `sensors run` JSON). Never changes exit/overall. */
+function maybeAdviseTestBaselineRefresh(
+    sensors: Array<{ name: string }>,
+    cwd: string,
+    acceptedTest?: string[],
+): void {
+    if (!shouldAdviseTestBaselineRefresh(sensors, acceptedTest ?? readBaseline(cwd)?.test)) return;
+    process.stderr.write(`test: ${TEST_BASELINE_REFRESH_DETAIL}\n`);
+}
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs
  * before the action, so an invalid value cannot trigger ledger I/O. */
@@ -67,6 +84,10 @@ export function registerSensorsCommand(program: Command): void {
                 const note = finalizeRunReceipt(pre, output);
                 if (note) process.stderr.write(note);
             }
+            maybeAdviseTestBaselineRefresh(
+                output.sensors,
+                findManifestDir(process.cwd()) ?? process.cwd(),
+            );
             process.exitCode = exitCodeForVerdict(output.overall);
         });
 
@@ -152,6 +173,7 @@ export function registerSensorsCommand(program: Command): void {
             const total = Object.values(baseline).reduce((n, fps) => n + fps.length, 0);
             log.success(`Baseline saved: ${total} findings accepted in .awm/sensors.baseline.json`);
             log.info('Sensors now fail only on new findings. Re-run `awm sensors baseline` after reducing debt.');
+            maybeAdviseTestBaselineRefresh(output.sensors, writeDir, baseline.test);
         });
 
     sensors

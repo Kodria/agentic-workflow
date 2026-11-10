@@ -1,6 +1,14 @@
 # Harness Retros
 
 
+## 2026-11-10 — Test sensor findings (#248)
+
+- **Hallazgos:** SDD + QA Track A/B sobre file-first test findings (S1–S3). Blockers: clear unlinked arbitrary `resultsFile` (incl. `package.json`); JUnit `walkSuites` stack overflow; vacuous all-pass JSON preferred over failing XML. Importants: reserved `.awm`/`.git` readable after clear refused them; `priorIdentities: {}` fail-open; prepare defaulted `name=test` to `formatter: exit-code`; RF-3.1 emit/test holes; legacy docs gap; readOnly unlink widened by safe-basename alone.
+- **Recurrente:** grupo convergente clear/read/freshness (`resultsfile-clear-arbitrary-unlink`, `reserved-results-still-readable`, `prioridentities-empty-object-failopen`, `vacuous-json-shadows-xml`).
+- **Curas:** lecciones en `AGENTS.md` (dual-door clear/read; amend RF when QA changes behavior). Kill-REDs in `result-test-findings` / formatters / advisory; design RF-1.2/1.10/1.11 amended and re-admitted.
+- **Descartes:** nits de wording en status human asserts; wins de ledger — no generan regla nueva.
+- **Captura:** journal `not-required` (`proveedor-nativo` interactivo → cierre a PR); sensors `overall: pass`.
+
 ## 2026-10-27 — Sensor execution optimization (#236)
 
 - **Hallazgos:** QA Track A/B sobre el plan CLI (S1–S5): huecos de cobertura donde `CMD-CACHE` listaba RF-1.4/1.6/E.3 sin `it()` discriminante; bug de lógica — sensores project-declared con `inputs` no adjuntaban `measurements` al recibo (RF-4.6 demote falso); endurecimiento de caché (pass+errors, `raw.name`≠sensorId, globs de measurement sin RF-1.5). Cerrados en `3c6109f2`.

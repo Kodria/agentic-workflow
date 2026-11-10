@@ -392,7 +392,10 @@ function checkSensorsBaseline(cwd: string, status: SensorStatusResult): Prefligh
  * Omitted when there is nothing to warn about (including opt-out / native-gate).
  */
 function checkSensorsInputs(status: SensorStatusResult): PreflightCheck | null {
-    const warnings = status.warnings ?? [];
+    // RF-3.4 only — ignore RF-3.1 test-baseline-refresh advisories on the same channel.
+    const warnings = (status.warnings ?? []).filter(
+        entry => entry.kind === 'uncacheable-inputs' || (entry.kind === undefined && /not cacheable|no effective inputs/i.test(entry.detail)),
+    );
     if (warnings.length === 0) return null;
     const names = warnings.map(entry => entry.sensor).join(', ');
     return {

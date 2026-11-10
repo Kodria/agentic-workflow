@@ -1,3 +1,4 @@
+import path from 'path';
 import { runCommand, runStructuredCommand, type ExecResult } from './exec';
 import { partition } from './baseline';
 import { parseTscOutput } from './formatters/tsc';
@@ -8,9 +9,40 @@ import { parseTestOutput } from './formatters/test';
 import { parseMypyOutput } from './formatters/mypy';
 import { parseRuffOutput } from './formatters/ruff';
 import { parseShellcheckOutput } from './formatters/shellcheck';
+import {
+    candidateResultsPaths,
+    clearTestResultCandidates,
+    resolveUsableArtifact,
+    snapshotRegularFile,
+    snapshotTestResultCandidates,
+    TEST_RESULTS_MAX_BYTES,
+    type ResultFileIdentity,
+} from './test-results-artifact';
 import type { PreparedSensorExecution, SensorError, SensorFailureKind, SensorResult } from './types';
 
+// Re-export artifact helpers used by tests / callers (RF-1.2–1.11).
+export {
+    TEST_RESULTS_MAX_BYTES,
+    candidateResultsPaths,
+    clearTestResultCandidates,
+    snapshotTestResultCandidates,
+};
+export type { ResultFileIdentity };
+
 const MAX_BUFFER = 64 * 1024 * 1024;
+
+export type InterpretResultOpts = {
+    cwd?: string;
+    /**
+     * Pre-spawn identities keyed by relative candidate path; `null` means absent.
+     * Required for file-first usability (RF-1.9 fail-closed): omit/undefined → no usable artifact.
+     */
+    priorIdentities?: Record<string, ResultFileIdentity | null>;
+};
+
+export type ExecutePreparedOpts = {
+    readOnly?: boolean;
+};
 
 /** Exit-code sensors signal solely via process status — never invent per-file findings. */
 function parseExitCodeOutput(_raw: string): SensorError[] {
@@ -77,8 +109,57 @@ function withFailureKind(result: Omit<SensorResult, 'execution'>, kind: SensorFa
     return result.status === 'fail' ? { ...result, failureKind: kind } : result;
 }
 
+export function isTestFindingsSensor(prepared: PreparedSensorExecution): boolean {
+    return prepared.formatter === 'test' || (prepared.formatter === undefined && prepared.name === 'test');
+}
+
+function syntheticTestExit(prepared: PreparedSensorExecution, code: number | null): Omit<SensorResult, 'execution'> {
+    return withFailureKind(
+        { name: prepared.name, status: 'fail', errors: [{ message: `SENSOR[${prepared.name}] failed (exit ${code})` }] },
+        'exit-code',
+    );
+}
+
+function interpretTestFindings(
+    prepared: PreparedSensorExecution,
+    raw: ExecResult,
+    opts: InterpretResultOpts | undefined,
+    withEvidence: (result: Omit<SensorResult, 'execution'>) => SensorResult,
+): SensorResult {
+    const cwd = opts?.cwd ?? process.cwd();
+    const usable = resolveUsableArtifact(prepared, cwd, opts?.priorIdentities);
+
+    if (raw.code === 0) {
+        if (!usable || usable.parsed.findings.length === 0) {
+            return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
+        }
+        return withEvidence(withFailureKind(
+            { name: prepared.name, status: 'fail', errors: usable.parsed.findings },
+            'findings',
+        ));
+    }
+
+    if (!usable) {
+        return withEvidence(syntheticTestExit(prepared, raw.code));
+    }
+    if (usable.parsed.findings.length === 0) {
+        return withEvidence(syntheticTestExit(prepared, raw.code));
+    }
+    if (!usable.parsed.explainsNonZeroExit) {
+        return withEvidence(syntheticTestExit(prepared, raw.code));
+    }
+    return withEvidence(withFailureKind(
+        { name: prepared.name, status: 'fail', errors: usable.parsed.findings },
+        'findings',
+    ));
+}
+
 /** Interpret one raw bounded process result without knowing its manifest format. */
-export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResult): SensorResult {
+export function interpretResult(
+    prepared: PreparedSensorExecution,
+    raw: ExecResult,
+    opts?: InterpretResultOpts,
+): SensorResult {
     validatePrepared(prepared);
     if (!raw || typeof raw !== 'object' || !Number.isSafeInteger(raw.elapsedMs) || raw.elapsedMs < 0) throw new Error('execution result requires a non-negative safe-integer elapsedMs');
     const execution = executionEvidence(prepared, raw.elapsedMs);
@@ -109,6 +190,11 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
         }
         return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: reason });
     }
+
+    if (isTestFindingsSensor(prepared)) {
+        return interpretTestFindings(prepared, raw, opts, withEvidence);
+    }
+
     if (raw.code === 0) {
         if (format === parseGenericOutput || format === parseExitCodeOutput) {
             return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
@@ -142,16 +228,17 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
         ));
     }
     if (prepared.name === 'test') {
-        return withEvidence(withFailureKind(
-            { name: prepared.name, status: 'fail', errors: [{ message: `SENSOR[${prepared.name}] failed (exit ${raw.code})` }] },
-            'exit-code',
-        ));
+        return withEvidence(syntheticTestExit(prepared, raw.code));
     }
     return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: `exit ${raw.code}: ${truncateEvidence(output)}` });
 }
 
 /** Execute a validated prepared command, or render its deliberate synthetic result. */
-export async function executePrepared(prepared: PreparedSensorExecution, cwd = process.cwd()): Promise<SensorResult> {
+export async function executePrepared(
+    prepared: PreparedSensorExecution,
+    cwd = process.cwd(),
+    opts?: ExecutePreparedOpts,
+): Promise<SensorResult> {
     validatePrepared(prepared);
     if (prepared.syntheticStatus !== undefined || prepared.command === undefined) {
         const status = prepared.syntheticStatus ?? 'inconclusive';
@@ -164,11 +251,26 @@ export async function executePrepared(prepared: PreparedSensorExecution, cwd = p
             execution: executionEvidence(prepared, 0),
         }, prepared);
     }
+
+    let priorIdentities: Record<string, ResultFileIdentity | null> | undefined;
+    if (isTestFindingsSensor(prepared)) {
+        const paths = candidateResultsPaths(prepared);
+        priorIdentities = snapshotTestResultCandidates(cwd, paths);
+        clearTestResultCandidates(cwd, paths, { readOnly: opts?.readOnly === true });
+        // After clear: absent paths are "no prior" so a rewrite is always fresh even if
+        // the filesystem reuses the same inode/mtime/size (RF-1.9).
+        for (const rel of paths) {
+            if (snapshotRegularFile(path.resolve(cwd, rel)) === null) {
+                priorIdentities[rel] = null;
+            }
+        }
+    }
+
     const options = { timeout: prepared.timeoutMs, cwd, maxBuffer: MAX_BUFFER };
     const raw = prepared.command.kind === 'legacy'
         ? await runCommand(prepared.command.value, options)
         : await runStructuredCommand(prepared.command.value, options);
-    return interpretResult(prepared, raw);
+    return interpretResult(prepared, raw, { cwd, priorIdentities });
 }
 
 /** Apply baseline suppression only to completed verdicts. */

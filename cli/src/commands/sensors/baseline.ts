@@ -40,6 +40,35 @@ export function fingerprint(sensor: string, e: SensorError): string {
     return crypto.createHash('sha1').update(basis).digest('hex');
 }
 
+/**
+ * Synthetic exit-code finding for the `test` sensor before a results artifact is
+ * wired. One fingerprint covers every exit code via `maskNumbers` (H4 / RF-3.1).
+ */
+export const TEST_SYNTHETIC_EXIT_FINGERPRINT = fingerprint('test', {
+    message: 'SENSOR[test] failed (exit 1)',
+});
+
+export const TEST_BASELINE_REFRESH_DETAIL =
+    're-run `awm sensors baseline` after wiring a results artifact (baseline is empty or only the synthetic exit-code finding)';
+
+/**
+ * RF-3.1: accepted `test` baseline is empty / absent, or only the synthetic
+ * exit-code shape. Ruled (per-test) fingerprints mean refresh is not needed.
+ */
+export function needsTestBaselineRefresh(accepted: string[] | undefined): boolean {
+    if (!accepted || accepted.length === 0) return true;
+    return accepted.every(fp => fp === TEST_SYNTHETIC_EXIT_FINGERPRINT);
+}
+
+/** RF-3.1: whether run/baseline should emit the non-blocking re-baseline advisory. */
+export function shouldAdviseTestBaselineRefresh(
+    sensors: Array<{ name: string }>,
+    acceptedTest: string[] | undefined,
+): boolean {
+    if (!sensors.some(sensor => sensor.name === 'test')) return false;
+    return needsTestBaselineRefresh(acceptedTest);
+}
+
 export function readBaseline(cwd: string): Baseline | null {
     const p = path.join(cwd, BASELINE_FILE);
     if (!fs.existsSync(p)) return null;

@@ -171,7 +171,11 @@ awm sensors baseline
 
 The baseline is a ratchet: it accepts reviewed existing findings while new
 findings fail the gate. It is not a way to turn an unknown or broken check into
-a pass. If the stack changes or the manifest reports pack drift, run
+a pass. For per-test ratcheting, point the test runner at
+`coverage/awm-test-results.json` / `.xml` (or set `resultsFile`); re-run
+`awm sensors baseline` after wiring that artifact when the re-baseline advisory
+appears. Details: [CLI reference — test sensor findings](cli-reference.md#awm-sensors-baseline).
+If the stack changes or the manifest reports pack drift, run
 `awm sensors init`, review the generated change, and commit it before relying
 on the new configuration.
 

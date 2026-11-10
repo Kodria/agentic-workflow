@@ -3,10 +3,13 @@ import os from 'os';
 import path from 'path';
 import { preflight, type PreflightReport } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
+import { computeSensorStatus } from '../../../src/commands/sensors/status';
 
 /**
  * RF-3.4 — preflight surfaces a non-blocking (advisory) warning when configured
  * enabled sensors lack effective `inputs`. Opt-out / native-gate must stay quiet.
+ * RF-3.1 `test-baseline-refresh` warnings share the status channel but must not
+ * become sensors-inputs (kind filter kill).
  */
 describe('preflight sensors-inputs warning (RF-3.4)', () => {
     const dirs: string[] = [];
@@ -123,5 +126,40 @@ describe('preflight sensors-inputs warning (RF-3.4)', () => {
 
         expect(report.status).toBe(status);
         expect(check(report, 'sensors-inputs')).toBeUndefined();
+    });
+
+    it('omits sensors-inputs when status warnings are only RF-3.1 test-baseline-refresh (kind filter kill)', async () => {
+        // test has effective inputs → no RF-3.4 uncacheable warning; empty baseline → RF-3.1 only.
+        // Removing checkSensorsInputs' kind filter would mis-fire sensors-inputs on this fixture.
+        const dir = project({
+            bins: ['jest'],
+            manifest: {
+                schemaVersion: 3,
+                mode: 'project-sensors',
+                sensors: {
+                    test: {
+                        source: 'project',
+                        enabled: true,
+                        command: { executable: 'jest', resolution: 'node-modules-bin', args: ['--json'] },
+                        formatter: 'test',
+                        inputs: ['**/*.test.ts'],
+                    },
+                },
+            },
+        });
+
+        const status = await computeSensorStatus(dir);
+        expect(status.warnings?.length).toBeGreaterThan(0);
+        expect(status.warnings!.every(entry => entry.kind === 'test-baseline-refresh')).toBe(true);
+        expect(status.warnings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ sensor: 'test', kind: 'test-baseline-refresh' }),
+        ]));
+
+        const report = await preflight(dir);
+
+        expect(report.status).toBe('ready');
+        expect(exitCodeFor(report)).toBe(0);
+        expect(check(report, 'sensors-inputs')).toBeUndefined();
+        expect(formatReport(report)).not.toMatch(/sensors-inputs/);
     });
 });

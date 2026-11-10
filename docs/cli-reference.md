@@ -1147,6 +1147,61 @@ handoff gate.
 
 Snapshot current findings as an accepted baseline (`.awm/sensors.baseline.json`) so sensors fail only on **new** findings. Commit the file to share the ratchet. Use on legacy repos with large pre-existing debt; skip on greenfield.
 
+#### Test sensor findings and results artifacts
+
+The `test` sensor can emit one stable finding per failed test when a structured results artifact from **this** run is available. Without that artifact it keeps the legacy synthetic exit-code finding (`SENSOR[test] failed (exit N)`), which cannot ratchet individual failures.
+
+**Default artifact paths** (under the sensor execution `cwd`, tried in order): `coverage/awm-test-results.json`, then `coverage/awm-test-results.xml`. Defaults live under `coverage/` so read-only admission (`awm plan admit --verify-sensors`) can skip that directory when it is gitignored and contains no tracked files — otherwise admit may still see mutations. Prefer keeping `coverage/` gitignored with no tracked files inside it.
+
+**Optional `resultsFile`:** a contained relative path on the sensor entry (project-declared or pack-bound override). When set, that path is the only candidate.
+
+**Wiring examples** (the CLI does not inject runner flags — operators must write the artifact themselves):
+
+| Runner | Write JSON/XML into the default or `resultsFile` path |
+|---|---|
+| Jest | e.g. `jest --json --outputFile=coverage/awm-test-results.json` (or equivalent reporter) |
+| JUnit XML | any runner that writes JUnit XML to `coverage/awm-test-results.xml` |
+| pytest | `pytest --junitxml=coverage/awm-test-results.xml` |
+
+**Exit × artifact state table** (freshness: only an artifact created or changed by this spawn counts as usable):
+
+| Exit | Usable fresh artifact | Findings | Exit explained? | Result | `failureKind` |
+|---|---|---|---|---|---|
+| 0 | no | — | — | `pass` | — |
+| 0 | yes | 0 | — | `pass` | — |
+| 0 | yes | ≥1 | — | `fail` | `findings` |
+| ≠0 | no / unusable / stale | — | — | synthetic `fail` | `exit-code` |
+| ≠0 | yes | 0 | — | synthetic `fail` | `exit-code` |
+| ≠0 | yes | ≥1 | no | synthetic `fail` (do not baseline to pass) | `exit-code` |
+| ≠0 | yes | ≥1 | yes | `fail` → baseline | `findings` |
+
+**Re-baseline advisory:** when the accepted baseline entry for `test` is empty or only the synthetic exit-code shape, `awm sensors status` / `run` / `baseline` emit a non-blocking advisory to re-run `awm sensors baseline` after wiring a results artifact. On `awm sensors run`, that advisory is written to **stderr only** so stdout remains a single parseable JSON document. Exit codes collide under fingerprint masking (`exit 1` ≡ `exit 2`).
+
+**Packs do not write the artifact.** Pack-bound projects must override the test script/`cmd` or set `resultsFile`. Minimal project override example:
+
+```json
+{
+  "schemaVersion": 3,
+  "mode": "project-sensors",
+  "sensors": {
+    "test": {
+      "source": "project",
+      "enabled": true,
+      "command": {
+        "executable": "jest",
+        "resolution": "node-modules-bin",
+        "args": ["--json", "--outputFile=coverage/awm-test-results.json"]
+      },
+      "formatter": "test",
+      "resultsFile": "coverage/awm-test-results.json",
+      "inputs": ["**/*.test.ts", "**/*.spec.ts"]
+    }
+  }
+}
+```
+
+Do **not** combine `--coverage` / coverage thresholds on the test sensor command used for the ratchet — use a separate coverage sensor. For out-of-range toolchains (for example TypeScript 4.x), declare a project sensor with `formatter: tsc` rather than stretching a pack variant past its certified range.
+
 ### `awm sensors install`
 
 Install the **`PostToolUse`** hook in `~/.claude/settings.json` so fast sensors run automatically after each file edit. This installs **only the per-edit *trigger*, not the sensors** — the checks and the completion gate are identical on every agent. **Claude Code only:** OpenCode has no hooks, so it has nothing to install here; it runs the same sensors at the completion gate (`awm sensors run`, via `verification-before-completion`). The difference is *cadence* (Claude gets an extra early loop), not *coverage*.
