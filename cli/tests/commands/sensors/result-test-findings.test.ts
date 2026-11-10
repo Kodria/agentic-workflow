@@ -327,6 +327,29 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
         expect(result.errors[0]).toMatchObject({ file: 'json.test.ts', rule: 'from json' });
     });
 
+    it('xml-only default artifact uses JUnit parse → findings when explained (RF-1.4)', () => {
+        // Kill RED for the `.xml` branch in parseResultsContent: no json present, so
+        // deleting xml handling must fall through to exit-code and fail this test.
+        expect(fs.existsSync(path.join(cwd, DEFAULT_JSON))).toBe(false);
+        writeRel(cwd, DEFAULT_XML, `<?xml version="1.0"?>
+<testsuites>
+  <testsuite name="x" failures="1" errors="0">
+    <testcase classname="JUnit" name="only-xml" file="junit-only.test.ts">
+      <failure message="boom"/>
+    </testcase>
+  </testsuite>
+</testsuites>`);
+        const result = interpretResult(prepared(), exited(1), {
+            cwd,
+            priorIdentities: { [DEFAULT_JSON]: null, [DEFAULT_XML]: null },
+        });
+        expect(result.status).toBe('fail');
+        expect(result.failureKind).toBe('findings');
+        expect(result.errors).toEqual([
+            expect.objectContaining({ file: 'junit-only.test.ts', rule: 'JUnit › only-xml' }),
+        ]);
+    });
+
     it('timeout stays inconclusive without file-first substitute (RF-1.8)', () => {
         writeRel(cwd, DEFAULT_JSON, jestOneFail());
         const result = interpretResult(prepared(), timedOut('partial'), {
