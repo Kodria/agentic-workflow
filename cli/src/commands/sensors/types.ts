@@ -17,6 +17,11 @@ export type PreparedSensorExecution = {
     name: string;
     command?: { kind: 'legacy'; value: string } | { kind: 'structured'; value: PreparedStructuredCommand };
     formatter?: string;
+    /**
+     * Optional relative path (execution cwd) to a structured test-results artifact
+     * for file-first interpretation of the `test` sensor (RF-1.2).
+     */
+    resultsFile?: string;
     timeoutMs: number;
     timeoutSource: 'project' | 'pack' | 'fallback';
     requestedScope: 'full' | 'changed' | 'slice';

@@ -361,7 +361,7 @@ async function runPreparedSlot(
             },
         };
     }
-    const raw = await executePrepared(executionForRun, projectCwd);
+    const raw = await executePrepared(executionForRun, projectCwd, { readOnly });
     // Scoped writes only for slice executions; full writes only for full (RF-2.2 / RF-2.6).
     // Top-level writeCache is already false for --changed.
     if (cacheEnabled && writeCache && cachePlan?.cacheable && !synthetic && canCacheRawResult(raw) && sameModeCache) {

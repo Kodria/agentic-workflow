@@ -204,6 +204,10 @@ function timeout(project: number | undefined, pack: number | undefined, fast: bo
     return { timeoutMs: resolved.timeoutMs, timeoutSource: resolved.source };
 }
 
+function resultsFileField(resultsFile: string | undefined): { resultsFile?: string } {
+    return resultsFile !== undefined ? { resultsFile } : {};
+}
+
 function fullLegacy(input: PrepareLegacySensorInput, scopeReason?: string): PreparedSensorExecution {
     const requestedScope = resolveRequestedScope(input.requestedScope);
     return {
@@ -293,6 +297,7 @@ function prepareProjectSensor(input: PrepareV2SensorInput): PreparedSensorExecut
     const common = {
         name: input.name,
         formatter: sensor.formatter || 'exit-code',
+        ...resultsFileField(sensor.resultsFile),
         ...timeout(input.projectTimeout ?? sensor.timeout, input.packTimeout, sensor.fast ?? false),
         requestedScope,
         certification: 'project-declared' as const,
@@ -436,6 +441,7 @@ export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExec
         name: input.name,
         certification: input.liveState.state === 'certified' ? 'certified' as const : 'operational-unverified' as const,
         ...(variant.formatter ? { formatter: variant.formatter } : {}),
+        ...resultsFileField(packSensor.resultsFile),
         ...timeout(input.projectTimeout ?? packSensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, packSensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,
     };
