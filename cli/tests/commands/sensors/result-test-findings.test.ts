@@ -496,6 +496,28 @@ describe('test findings interpretResult / executePrepared (RF-1.1–1.11)', () =
         expect(fs.readFileSync(abs, 'utf8')).toBe(before);
     });
 
+    it('readOnly does not unlink reports/awm-test-results.json (basename alone is not enough) (RF-1.11)', () => {
+        const rel = 'reports/awm-test-results.json';
+        const abs = writeRel(cwd, rel, jestOneFail({ fullName: 'must survive readOnly clear' }));
+        const before = fs.readFileSync(abs, 'utf8');
+        clearTestResultCandidates(cwd, [rel], { readOnly: true });
+        expect(fs.existsSync(abs)).toBe(true);
+        expect(fs.readFileSync(abs, 'utf8')).toBe(before);
+    });
+
+    it('non-readOnly may unlink canonical awm-test-results basename outside coverage (RF-1.11)', () => {
+        const rel = 'reports/awm-test-results.json';
+        writeRel(cwd, rel, jestOneFail());
+        clearTestResultCandidates(cwd, [rel], { readOnly: false });
+        expect(fs.existsSync(path.join(cwd, rel))).toBe(false);
+    });
+
+    it('readOnly still unlinks under coverage exclusion name (RF-1.11)', () => {
+        writeRel(cwd, DEFAULT_JSON, jestOneFail());
+        clearTestResultCandidates(cwd, [DEFAULT_JSON], { readOnly: true });
+        expect(fs.existsSync(path.join(cwd, DEFAULT_JSON))).toBe(false);
+    });
+
     it('prefers findings-bearing xml over vacuous all-pass json among fresh candidates (RF-1.2)', () => {
         writeRel(cwd, DEFAULT_JSON, jestPassing());
         writeRel(cwd, DEFAULT_XML, `<?xml version="1.0"?>

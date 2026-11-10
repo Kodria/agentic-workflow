@@ -78,15 +78,15 @@ function mayUnlinkResultsFile(rel: string): boolean {
  * Contained pre-clear of candidate result files (RF-1.9 / RF-1.11).
  * Never unlinks a symlink leaf; refuses when the parent realpath escapes cwd.
  * NEVER unlinks a candidate whose relative path has a reserved `.awm` / `.git` segment.
- * NEVER unlinks unless a path segment is in DEFAULT_EXCLUSION_NAMES or the basename is
- * `awm-test-results.json` / `.xml` (case-insensitive) — even when readOnly is false.
+ * When readOnly: unlink only if a path segment is in DEFAULT_EXCLUSION_NAMES.
+ * When not readOnly: also allow canonical `awm-test-results.json` / `.xml` basenames
+ * (still never arbitrary project files like `package.json`).
  */
 export function clearTestResultCandidates(
     cwd: string,
     paths: string[],
     opts?: { readOnly?: boolean },
 ): void {
-    void opts;
     let rootReal: string;
     try {
         rootReal = fs.realpathSync(cwd);
@@ -95,7 +95,11 @@ export function clearTestResultCandidates(
     }
     for (const rel of paths) {
         if (hasReservedSegment(rel)) continue;
-        if (!mayUnlinkResultsFile(rel)) continue;
+        if (opts?.readOnly) {
+            if (!exclusionAllowsUnlink(rel)) continue;
+        } else if (!mayUnlinkResultsFile(rel)) {
+            continue;
+        }
         const abs = path.resolve(cwd, rel);
         const parent = path.dirname(abs);
         let parentReal: string;
