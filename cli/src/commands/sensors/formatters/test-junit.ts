@@ -129,9 +129,17 @@ function intAttr(attrs: Attrs, key: string): number {
     return Number.isFinite(n) ? n : 0;
 }
 
-function walkSuites(node: XmlNode, out: XmlNode[]): void {
+/** Cap recursive suite walk; deeper trees fail closed as malformed. */
+const MAX_SUITE_WALK_DEPTH = 64;
+
+/** @returns false when nesting exceeds MAX_SUITE_WALK_DEPTH */
+function walkSuites(node: XmlNode, out: XmlNode[], depth = 0): boolean {
+    if (depth > MAX_SUITE_WALK_DEPTH) return false;
     if (node.name === 'testsuite') out.push(node);
-    for (const child of node.children) walkSuites(child, out);
+    for (const child of node.children) {
+        if (!walkSuites(child, out, depth + 1)) return false;
+    }
+    return true;
 }
 
 function testcaseRule(attrs: Attrs): string {
@@ -150,16 +158,18 @@ export function parseJunitXml(raw: string, root: string): TestParseResult {
     if (!doc) return emptyParseResult();
 
     const suites: XmlNode[] = [];
-    walkSuites(doc, suites);
+    if (!walkSuites(doc, suites)) return emptyParseResult();
     if (suites.length === 0) return emptyParseResult();
 
     const findings: TestParseResult['findings'] = [];
     let attrSum = 0;
+    let explainedSum = 0;
 
     for (const suite of suites) {
         const failures = intAttr(suite.attrs, 'failures');
         const errors = intAttr(suite.attrs, 'errors');
-        attrSum += failures + errors;
+        const suiteAttr = failures + errors;
+        attrSum += suiteAttr;
 
         const suiteFileRaw = suite.attrs.file ?? '';
         const suiteFile = suiteFileRaw ? relativizeTestFile(root, suiteFileRaw) : '';
@@ -181,12 +191,20 @@ export function parseJunitXml(raw: string, root: string): TestParseResult {
             (c) => c.name === 'failure' || c.name === 'error',
         );
 
-        if (directSuiteFault || ((failures > 0 || errors > 0) && failedCaseCount === 0)) {
+        const suiteFailedOnly = (failures > 0 || errors > 0) && failedCaseCount === 0;
+        if (directSuiteFault || suiteFailedOnly) {
             // One suite-failed finding (RF-2.6), even when attrs count > 1.
             findings.push(finding(suiteFile, SUITE_FAILED_RULE));
         }
+
+        if (suiteFailedOnly || (directSuiteFault && failedCaseCount === 0)) {
+            // RF-2.6: one suite-failed row covers the full suite attr sum.
+            explainedSum += suiteAttr;
+        } else {
+            explainedSum += failedCaseCount + (directSuiteFault ? 1 : 0);
+        }
     }
 
-    const explainsNonZeroExit = attrSum === findings.length;
+    const explainsNonZeroExit = explainedSum === attrSum;
     return { findings, explainsNonZeroExit };
 }

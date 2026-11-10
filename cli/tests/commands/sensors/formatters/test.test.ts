@@ -371,6 +371,54 @@ describe('parseJunitXml (RF-2.1–2.3, RF-2.6–2.7)', () => {
         expect(findings[0].rule).toBe(SUITE_FAILED_RULE);
     });
 
+    it('suite-only failures=2 explains non-zero exit via one <suite-failed> (RF-2.6)', () => {
+        const raw = `<testsuite name="s" file="s.test.ts" failures="2" errors="0">
+  <testcase classname="C" name="ok"/>
+</testsuite>`;
+        const { findings, explainsNonZeroExit } = parseJunitXml(raw, ROOT);
+        expect(findings).toEqual([
+            expect.objectContaining({ file: 's.test.ts', rule: SUITE_FAILED_RULE }),
+        ]);
+        expect(explainsNonZeroExit).toBe(true);
+    });
+
+    it('returns emptyParseResult for deeply nested XML instead of RangeError (RF-2.6 depth)', () => {
+        // Depth above typical V8 call-stack limits so an uncapped walkSuites RangeError'd.
+        const depth = 8000;
+        let raw = '<testsuite name="leaf" failures="1" errors="0"><testcase name="x" file="d.test.ts"><failure/></testcase></testsuite>';
+        for (let i = 0; i < depth; i += 1) raw = `<wrapper>${raw}</wrapper>`;
+        expect(raw.length).toBeLessThan(16 * 1024 * 1024);
+        expect(() => parseJunitXml(raw, ROOT)).not.toThrow();
+        expect(parseJunitXml(raw, ROOT)).toEqual({ findings: [], explainsNonZeroExit: false });
+    });
+
+    it('uses final Jest status only when a retried assertion ends passed (RF-2.7)', () => {
+        const raw = JSON.stringify({
+            numFailedTests: 0,
+            numFailedTestSuites: 0,
+            numRuntimeErrorTestSuites: 0,
+            wasInterrupted: false,
+            testResults: [
+                {
+                    name: 'retry.test.ts',
+                    status: 'passed',
+                    assertionResults: [
+                        {
+                            status: 'passed',
+                            fullName: 'flaky eventually passes',
+                            title: 'eventually passes',
+                            ancestorTitles: ['flaky'],
+                            failureMessages: ['expect(1).toBe(2)'],
+                        },
+                    ],
+                },
+            ],
+        });
+        const { findings, explainsNonZeroExit } = parseJestJson(raw, ROOT);
+        expect(findings).toEqual([]);
+        expect(explainsNonZeroExit).toBe(true);
+    });
+
     it('treats testcase with both failure and skipped as failed', () => {
         const raw = `<testsuite name="s" failures="1" errors="0">
   <testcase classname="C" name="flaky" file="f.test.ts"><skipped/><failure message="x"/></testcase>
