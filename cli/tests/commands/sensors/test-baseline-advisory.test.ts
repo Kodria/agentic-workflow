@@ -87,6 +87,7 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
         expect(result.warnings).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 sensor: 'test',
+                kind: 'test-baseline-refresh',
                 detail: expect.stringMatching(/awm sensors baseline|results artifact|re-?run/i),
             }),
         ]));
@@ -104,6 +105,7 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
         expect(result.warnings).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 sensor: 'test',
+                kind: 'test-baseline-refresh',
                 detail: expect.stringMatching(/awm sensors baseline|results artifact|re-?run/i),
             }),
         ]));
@@ -143,7 +145,7 @@ describe('test baseline refresh advisory emit path (RF-3.1)', () => {
         expect(result.warnings ?? []).not.toEqual(expect.arrayContaining([
             expect.objectContaining({
                 sensor: 'test',
-                detail: expect.stringMatching(/awm sensors baseline|results artifact|re-?run/i),
+                kind: 'test-baseline-refresh',
             }),
         ]));
     });

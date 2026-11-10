@@ -6,7 +6,8 @@ import type { ProjectDeclaredSensor } from '../../src/commands/sensors/compatibi
 /**
  * RF-4.1 mechanical gate (M1): do not prose-grep the docs. Extract the documented
  * project-sensor JSON example under the test-results section and assert the real
- * parser accepts `resultsFile`. Deleting that field from the example must fail.
+ * parser accepts `resultsFile`. Stripping that field from the docs example must
+ * make extraction refuse (docs contract kill).
  */
 const ROOT = path.resolve(__dirname, '../../..');
 const DOC = path.join(ROOT, 'docs/cli-reference.md');
@@ -27,6 +28,13 @@ function extractTestResultsExample(markdown: string): string {
     return withResultsFile[1].trim();
 }
 
+/** Strip `"resultsFile": "..."` from JSON text and repair trailing commas. */
+function stripResultsFileProperty(jsonText: string): string {
+    return jsonText
+        .replace(/,?\s*"resultsFile"\s*:\s*"[^"]*"\s*/g, '')
+        .replace(/,\s*([}\]])/g, '$1');
+}
+
 describe('documented test-sensor resultsFile example (RF-4.1)', () => {
     it('extracts a parseable project-sensor example that accepts resultsFile', () => {
         const markdown = fs.readFileSync(DOC, 'utf8');
@@ -44,20 +52,29 @@ describe('documented test-sensor resultsFile example (RF-4.1)', () => {
         expect(testSensor!.resultsFile!.length).toBeGreaterThan(0);
     });
 
-    it('fails when resultsFile is deleted from the documented example', () => {
+    it('refuses extraction when resultsFile is stripped from the documented example (docs contract kill)', () => {
         const markdown = fs.readFileSync(DOC, 'utf8');
         const raw = extractTestResultsExample(markdown);
-        const example = JSON.parse(raw) as Record<string, unknown>;
-        const sensors = example.sensors as Record<string, Record<string, unknown>>;
-        expect(sensors.test).toBeDefined();
-        delete sensors.test.resultsFile;
+        expect(raw).toMatch(/"resultsFile"\s*:/);
 
-        const parsed = parseSensorManifest(example, 'docs/cli-reference.md#mutated');
+        const stripped = stripResultsFileProperty(raw);
+        expect(stripped).not.toMatch(/"resultsFile"\s*:/);
+        expect(markdown).toContain(raw);
+
+        // Replace the live docs example body once. Extractor must then refuse —
+        // weakening it to accept any fence without resultsFile fails this kill.
+        const poisoned = markdown.replace(raw, stripped);
+        expect(() => extractTestResultsExample(poisoned)).toThrow(
+            /no fenced example that includes resultsFile/,
+        );
+
+        // Accept boundary: stripped JSON still parses as a project sensor, just
+        // without resultsFile (optional field) — kill is the extractor, not JSON.
+        const parsed = parseSensorManifest(JSON.parse(stripped), 'docs/cli-reference.md#stripped');
         expect(parsed.kind).toBe('v3');
         if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') {
             throw new Error('expected v3 project-sensors example');
         }
-        const testSensor = parsed.pack.sensors.test as ProjectDeclaredSensor;
-        expect(testSensor.resultsFile).toBeUndefined();
+        expect((parsed.pack.sensors.test as ProjectDeclaredSensor).resultsFile).toBeUndefined();
     });
 });
