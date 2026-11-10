@@ -1,3 +1,8 @@
+## v9.24.0 - 2026-11-10
+
+### Features
+- **sensors:** test findings for baseline ratchet (#248) (#249)
+
 ## v9.23.0 - 2026-11-07
 
 ### Features
