@@ -1,6 +1,8 @@
 # Test sensor findings — Implementation Plan (#248)
 
 <!-- awm-qa-complete: 2026-11-10 -->
+<!-- awm-docs-complete: 2026-11-10 -->
+<!-- awm-retro-complete: 2026-11-10 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
