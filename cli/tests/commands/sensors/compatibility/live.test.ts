@@ -110,7 +110,7 @@ describe('resolveParsedPackCompatibility — contained Python commands', () => {
 
             const live = await resolveParsedPackCompatibility(root, pack);
 
-            expect(live.sensors.security).toMatchObject({ state: 'unverifiable', reason: 'probe-inconclusive', toolVersion: '1.91.0' });
+            expect(live.sensors.security).toMatchObject({ state: 'unverifiable', reason: 'probe-exception', toolVersion: '1.91.0' });
             expect(() => runStructuredCommand(live.pack.sensors.security.variants[0].command, { cwd: root, timeout: 5_000 }))
                 .toThrow('python environment executable is not a contained local regular file');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }

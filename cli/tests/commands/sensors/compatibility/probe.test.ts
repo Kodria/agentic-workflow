@@ -55,8 +55,28 @@ describe('runCompatibilityProbe', () => {
         expect(spawn).toHaveBeenCalledWith(
             'npm',
             ['--version'],
-            expect.objectContaining({ timeout: COMPATIBILITY_PROBE_TIMEOUT_MS }),
+            expect.objectContaining({
+                timeout: COMPATIBILITY_PROBE_TIMEOUT_MS,
+                shell: false,
+                maxBuffer: 1024,
+                windowsHide: true,
+            }),
         );
+    });
+
+    it('reports probe-spawn-error when the executor signals spawn failure', async () => {
+        const spawnError = Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException;
+        fakeExecutor.mockResolvedValueOnce(execResult({
+            code: null, signal: null, stdout: '', spawnError,
+        }));
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toEqual({ status: 'unverifiable', reason: 'probe-spawn-error' });
+    });
+
+    it('reports probe-exception when the executor throws', async () => {
+        fakeExecutor.mockRejectedValueOnce(new Error('boom'));
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toEqual({ status: 'unverifiable', reason: 'probe-exception' });
     });
 
     it('matches only the registry-declared package script', async () => {
