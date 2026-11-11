@@ -1,3 +1,9 @@
+## v9.24.1 - 2026-11-11
+
+### Fixes
+- **sensors:** honor probe-timeout and raise probe deadline to 30s (#251)
+- **ci:** run ci.yml only on pull_request (#244) (#250)
+
 ## v9.24.0 - 2026-11-10
 
 ### Features
