@@ -23,6 +23,8 @@
 
 **Origen:** #242. Design: `docs/plans/2026-11-11-probe-timeout-honesty-design.md` (owner-approved). Dispatch: owner did not select AWM routing → `compact-slices/v1`.
 
+**Amendment (2026-11-11, audit #251 P1):** Replace the `live.ts` source-text pin with a behavior test: export `pathPackageManagerVersion` with optional `spawn` inject (default `spawnSync`) and assert `timeout: COMPATIBILITY_PROBE_TIMEOUT_MS` on the options passed to the mock. P2 (CLI reference docs) remains out of scope; P3 (PR title `fix(sensors):`) applies when code lands.
+
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
   "schema": "compact-slices/v1",
@@ -39,7 +41,7 @@
       "id": "SRC-LIVE",
       "path": "cli/src/commands/sensors/compatibility/live.ts",
       "locator": "pathPackageManagerVersion",
-      "fact": "pathPackageManagerVersion uses spawnSync(tool, ['--version'], { ..., timeout: 5_000, maxBuffer: 1024, ... }). This is the live package-manager version probe bound by RF-2 alongside the compatibility probe executor timeout."
+      "fact": "pathPackageManagerVersion is a private helper that calls spawnSync(tool, ['--version'], { ..., timeout: 5_000, maxBuffer: 1024, ... }). For RF-2 + audit P1: export it as pathPackageManagerVersion(tool, spawn = spawnSync), pass COMPATIBILITY_PROBE_TIMEOUT_MS as timeout, and keep discoverProjectEvidence wired to the same function (default spawn). Behavior test must mock spawn and assert timeout on the options object — never regex the .ts source."
     },
     {
       "id": "SRC-RESOLVE",
@@ -154,15 +156,21 @@ it('bounds the probe executor at COMPATIBILITY_PROBE_TIMEOUT_MS (RF-2)', async (
     );
 });
 
-it('bounds the live package-manager version probe at the same constant (RF-2)', () => {
-    const liveSource = fs.readFileSync(
-        path.resolve(__dirname, '../../../../src/commands/sensors/compatibility/live.ts'),
-        'utf8',
+it('bounds the live package-manager version probe at COMPATIBILITY_PROBE_TIMEOUT_MS (RF-2, audit P1)', () => {
+    const spawn = jest.fn().mockReturnValue({
+        status: 0, error: undefined, signal: null, stdout: '10.9.2\n', stderr: '',
+    });
+    const { pathPackageManagerVersion } = require('../../../../src/commands/sensors/compatibility/live');
+    expect(pathPackageManagerVersion('npm', spawn)).toBe('10.9.2');
+    expect(spawn).toHaveBeenCalledWith(
+        'npm',
+        ['--version'],
+        expect.objectContaining({ timeout: COMPATIBILITY_PROBE_TIMEOUT_MS }),
     );
-    expect(liveSource).toMatch(/COMPATIBILITY_PROBE_TIMEOUT_MS/);
-    expect(liveSource).not.toMatch(/timeout:\s*5_000/);
 });
 ```
+
+   Prefer a static import of `pathPackageManagerVersion` from `live.ts` if Jest + TS path already resolves (same as other compatibility tests); use `require` only if a circular import appears. Do **not** add `fs`/`path` source-text pins for RF-2.
 
    Keep the existing overflow assertion (`status: 'unverifiable'`) or tighten it to `reason: 'probe-output-limit'` in the same file if the old combined test is split — do not weaken overflow coverage.
 
@@ -212,7 +220,7 @@ export const COMPATIBILITY_PROBE_TIMEOUT_MS = 30_000;
 
 5. **GREEN — probe.ts** — Import `COMPATIBILITY_PROBE_TIMEOUT_MS` from `./timeout` and replace `timeout: 5_000` with `timeout: COMPATIBILITY_PROBE_TIMEOUT_MS`. Do not change the timedOut / overflow / spawnError / catch reason mapping (already RF-1 compliant).
 
-6. **GREEN — live.ts** — Import `COMPATIBILITY_PROBE_TIMEOUT_MS` from `./timeout` and replace `timeout: 5_000` in `pathPackageManagerVersion` with `timeout: COMPATIBILITY_PROBE_TIMEOUT_MS`.
+6. **GREEN — live.ts** — Import `COMPATIBILITY_PROBE_TIMEOUT_MS` from `./timeout`. Export `pathPackageManagerVersion` with signature `(tool: string, spawn: typeof spawnSync = spawnSync): string | null`, use `timeout: COMPATIBILITY_PROBE_TIMEOUT_MS` in the spawn options, and keep the existing call site `discoverProjectEvidence(..., { pathToolVersion: pathPackageManagerVersion })` (default spawn).
 
 7. **GREEN — resolve.ts** — Widen the probe field on `ResolveEvidence`:
 
@@ -251,7 +259,8 @@ if (evidence.probe?.status !== 'matched') {
 - `not-matched` with any reason string → RF-5 always `probe-not-matched`.
 - Overflow / spawn / exception reasons must not be remapped to timeout.
 - Do not change execution `resolveTimeout` fallbacks (10_000 / 120_000) — those are not RF-2.
-- Source pin on `live.ts` must fail if someone reintroduces a literal `timeout: 5_000` on that file.
+- Live RF-2 test must fail if `spawn` is called without `timeout: COMPATIBILITY_PROBE_TIMEOUT_MS` (even if the constant is imported unused).
+- Non package-manager tools (`pathPackageManagerVersion('eslint', spawn)`) still return null without calling spawn.
 
 #### Evidence
 - Declared sources SRC-PROBE, SRC-LIVE, SRC-RESOLVE, SRC-TIMEOUT-HELPER, SRC-PROBE-TEST, SRC-RESOLVE-TEST.
@@ -267,7 +276,7 @@ Risk `full-context` / fallback `public-contract`: if reason allowlisting or the 
 | Req | Task(s) | Test(s) |
 |-----|---------|---------|
 | RF-1 | S1 steps 1, 4–5 | `reports probe-timeout when the executor times out` via CMD-PROBE |
-| RF-2 | S1 steps 1, 4–6 | `bounds the probe executor…` + `bounds the live package-manager…` via CMD-PROBE |
+| RF-2 | S1 steps 1, 4–6 | `bounds the probe executor…` + live `pathPackageManagerVersion` mock-spawn timeout assert via CMD-PROBE |
 | RF-3 | S1 steps 2, 7 | `propagates unverifiable probe reason %s` via CMD-RESOLVE |
 | RF-4 | S1 steps 2, 7 | `falls back to probe-inconclusive…` via CMD-RESOLVE |
 | RF-5 | S1 steps 2, 7 | `keeps probe-not-matched…` via CMD-RESOLVE |

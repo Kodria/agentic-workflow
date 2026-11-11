@@ -50,7 +50,7 @@ Compatibility probes must tolerate normal host load without false `probe-inconcl
 Three call sites only:
 
 1. **Probe runner** (`probe.ts`) — already maps `timedOut` → `{ status: 'unverifiable', reason: 'probe-timeout' }`. Change the executor options from `5_000` to `30_000`.
-2. **Live package-manager version** (`live.ts` `pathPackageManagerVersion`) — same numeric bound for `spawnSync` so discovery under load matches probe policy.
+2. **Live package-manager version** (`live.ts` `pathPackageManagerVersion`) — same numeric bound for `spawnSync` so discovery under load matches probe policy. Export the helper with an optional `spawn` inject (default `spawnSync`) so RF-2 is proven by a behavior test that asserts the options object, not by regex over source text (audit P1 on #251).
 3. **Resolver** (`resolve.ts`) — today:
 
    ```ts
@@ -82,7 +82,7 @@ Downstream behavior is unchanged structurally: `prepareV2Sensor` still synthesiz
 
 ## Testing
 
-- `probe.test.ts`: assert `reason: 'probe-timeout'` on timedOut executor results; assert executor received `timeout: 30_000`.
+- `probe.test.ts`: assert `reason: 'probe-timeout'` on timedOut executor results; assert executor received `timeout: 30_000`; behavior-test live `pathPackageManagerVersion` via injected mock `spawn` (assert options.timeout), not source regex.
 - `resolve.test.ts`: table for each RF-3 reason → same compatibility reason; missing/other → `probe-inconclusive`; `not-matched` unchanged.
 - No CI e2e that synthesizes host CPU load.
 
