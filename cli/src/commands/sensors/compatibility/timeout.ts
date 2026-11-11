@@ -16,3 +16,6 @@ export function resolveTimeout(input: {
     if (input.pack !== undefined) return { timeoutMs: positiveTimeout(input.pack, 'pack timeout'), source: 'pack' };
     return { timeoutMs: input.fast ? 10_000 : 120_000, source: 'fallback' };
 }
+
+/** Bound for compatibility probes and live package-manager --version reads (not sensor execution). */
+export const COMPATIBILITY_PROBE_TIMEOUT_MS = 30_000;
