@@ -142,4 +142,35 @@ describe('resolveSensorCompatibility', () => {
         expect(resolveSensorCompatibility(precedenceSensor as any, evidence({ os }), context)).toMatchObject({ variantId: 'narrow' });
         expect(() => resolveSensorCompatibility({ ...precedenceSensor, variants: [variant('a'), variant('b')] } as any, evidence({ os }), context)).toThrow(/ambiguous/i);
     });
+
+    test.each([
+        ['probe-timeout', 'probe-timeout'],
+        ['probe-output-limit', 'probe-output-limit'],
+        ['probe-spawn-error', 'probe-spawn-error'],
+        ['probe-exception', 'probe-exception'],
+    ] as const)('propagates unverifiable probe reason %s (RF-3)', (probeReason, expected) => {
+        expect(resolveSensorCompatibility(
+            sensor as any,
+            evidence({ probe: { status: 'unverifiable', reason: probeReason } }),
+            context,
+        )).toMatchObject({ state: 'unverifiable', reason: expected, variantId: 'eslint-main' });
+    });
+
+    it('falls back to probe-inconclusive when unverifiable reason is absent or unknown (RF-4)', () => {
+        expect(resolveSensorCompatibility(sensor as any, evidence({ probe: { status: 'unverifiable' } }), context))
+            .toMatchObject({ state: 'unverifiable', reason: 'probe-inconclusive' });
+        expect(resolveSensorCompatibility(
+            sensor as any,
+            evidence({ probe: { status: 'unverifiable', reason: 'something-else' } }),
+            context,
+        )).toMatchObject({ state: 'unverifiable', reason: 'probe-inconclusive' });
+    });
+
+    it('keeps probe-not-matched for not-matched probes (RF-5)', () => {
+        expect(resolveSensorCompatibility(
+            sensor as any,
+            evidence({ probe: { status: 'not-matched', reason: 'probe-exit-nonzero' } }),
+            context,
+        )).toMatchObject({ state: 'unverifiable', reason: 'probe-not-matched', variantId: 'eslint-main' });
+    });
 });

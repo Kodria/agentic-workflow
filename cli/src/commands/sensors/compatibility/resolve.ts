@@ -3,7 +3,7 @@ import { legacyCompatibility } from './manifest';
 import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant } from './types';
 import type { ProjectEvidence } from './discovery';
 
-export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; toolProvenance?: Record<string, 'node-modules-bin' | 'python-environment' | 'path' | null>; runtimeVersions?: Record<string, string | null>; packageJsonFields?: string[]; os?: NodeJS.Platform; probe?: { status?: string } };
+export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; toolProvenance?: Record<string, 'node-modules-bin' | 'python-environment' | 'path' | null>; runtimeVersions?: Record<string, string | null>; packageJsonFields?: string[]; os?: NodeJS.Platform; probe?: { status?: string; reason?: string } };
 export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
@@ -78,7 +78,22 @@ export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<str
         const matching = tied.sort((a, b) => a.id.localeCompare(b.id)).map(variant => `${variant.id} (tool ${variant.requirements.toolRange}, runtime ${variant.requirements.runtimeRange})`).join(', ');
         throw new Error(`ambiguous sensor variants in pack "${context.pack}" sensor "${context.sensor}": ${matching}`);
     }
-    if (evidence.probe?.status !== 'matched') return result('unverifiable', evidence.probe?.status === 'not-matched' ? 'probe-not-matched' : 'probe-inconclusive', best, evidence);
+    const SPECIFIC_UNVERIFIABLE = new Set([
+        'probe-timeout',
+        'probe-output-limit',
+        'probe-spawn-error',
+        'probe-exception',
+    ]);
+    if (evidence.probe?.status !== 'matched') {
+        if (evidence.probe?.status === 'not-matched') {
+            return result('unverifiable', 'probe-not-matched', best, evidence);
+        }
+        const probeReason = evidence.probe?.reason;
+        const reason = typeof probeReason === 'string' && SPECIFIC_UNVERIFIABLE.has(probeReason)
+            ? probeReason
+            : 'probe-inconclusive';
+        return result('unverifiable', reason, best, evidence);
+    }
     return semver.satisfies(toolFor(best, evidence)!, best.certifiedRange)
         ? result('certified', 'range-and-probe', best, evidence)
         : result('compatible-unverified', 'operational-range-and-probe', best, evidence);

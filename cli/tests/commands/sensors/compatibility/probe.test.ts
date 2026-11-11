@@ -1,4 +1,6 @@
 import { runCompatibilityProbe } from '../../../../src/commands/sensors/compatibility/probe';
+import { pathPackageManagerVersion } from '../../../../src/commands/sensors/compatibility/live';
+import { COMPATIBILITY_PROBE_TIMEOUT_MS } from '../../../../src/commands/sensors/compatibility/timeout';
 import type { ExecResult } from '../../../../src/commands/sensors/exec';
 
 const execResult = (overrides: Partial<ExecResult> = {}): ExecResult => ({
@@ -24,11 +26,57 @@ describe('runCompatibilityProbe', () => {
             expect(JSON.stringify(result)).not.toContain('SECRET_VALUE');
         });
 
-    it('never treats a timeout or overflow as a match', async () => {
+    it('reports probe-timeout when the executor times out (RF-1)', async () => {
         fakeExecutor.mockResolvedValueOnce(execResult({ code: null, signal: 'SIGKILL', timedOut: true, stdout: '' }));
-        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toEqual({ status: 'unverifiable', reason: 'probe-timeout' });
+    });
+
+    it('never treats an overflow as a match', async () => {
         fakeExecutor.mockResolvedValueOnce(execResult({ overflowed: true, stdout: 'ok' }));
-        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toMatchObject({ status: 'unverifiable', reason: 'probe-output-limit' });
+    });
+
+    it('bounds the probe executor at COMPATIBILITY_PROBE_TIMEOUT_MS (RF-2)', async () => {
+        expect(COMPATIBILITY_PROBE_TIMEOUT_MS).toBe(30_000);
+        await runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor);
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.any(Object),
+            expect.objectContaining({ timeout: COMPATIBILITY_PROBE_TIMEOUT_MS }),
+        );
+    });
+
+    it('bounds the live package-manager version probe at COMPATIBILITY_PROBE_TIMEOUT_MS (RF-2, audit P1)', () => {
+        const spawn = jest.fn().mockReturnValue({
+            status: 0, error: undefined, signal: null, stdout: '10.9.2\n', stderr: '',
+        });
+        expect(pathPackageManagerVersion('npm', spawn)).toBe('10.9.2');
+        expect(spawn).toHaveBeenCalledWith(
+            'npm',
+            ['--version'],
+            expect.objectContaining({
+                timeout: COMPATIBILITY_PROBE_TIMEOUT_MS,
+                shell: false,
+                maxBuffer: 1024,
+                windowsHide: true,
+            }),
+        );
+    });
+
+    it('reports probe-spawn-error when the executor signals spawn failure', async () => {
+        const spawnError = Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException;
+        fakeExecutor.mockResolvedValueOnce(execResult({
+            code: null, signal: null, stdout: '', spawnError,
+        }));
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toEqual({ status: 'unverifiable', reason: 'probe-spawn-error' });
+    });
+
+    it('reports probe-exception when the executor throws', async () => {
+        fakeExecutor.mockRejectedValueOnce(new Error('boom'));
+        await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor))
+            .resolves.toEqual({ status: 'unverifiable', reason: 'probe-exception' });
     });
 
     it('matches only the registry-declared package script', async () => {

@@ -3,6 +3,7 @@ import { parseSensorPack } from './contract';
 import { discoverProjectEvidence } from './discovery';
 import { resolveProjectCompatibility } from './resolve';
 import { runCompatibilityProbe } from './probe';
+import { COMPATIBILITY_PROBE_TIMEOUT_MS } from './timeout';
 import type { CompatibilityEvidence, SensorPackV2, SensorVariant } from './types';
 import path from 'path';
 import { spawnSync } from 'child_process';
@@ -15,10 +16,10 @@ export type LiveCompatibility = {
 export type LiveCompatibilityOptions = { packSelection?: 'explicit' };
 
 /** Execution-time evidence only. Status/discovery never invokes this resolver. */
-function pathPackageManagerVersion(tool: string): string | null {
+export function pathPackageManagerVersion(tool: string, spawn: typeof spawnSync = spawnSync): string | null {
     if (!['npm', 'pnpm', 'yarn', 'bun'].includes(tool)) return null;
     try {
-        const result = spawnSync(tool, ['--version'], { cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: 5_000, maxBuffer: 1024, windowsHide: true, stdio: 'pipe' });
+        const result = spawn(tool, ['--version'], { cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: COMPATIBILITY_PROBE_TIMEOUT_MS, maxBuffer: 1024, windowsHide: true, stdio: 'pipe' });
         if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string' || result.stdout.length > 256) return null;
         return semver.valid(result.stdout.trim());
     } catch { return null; }
