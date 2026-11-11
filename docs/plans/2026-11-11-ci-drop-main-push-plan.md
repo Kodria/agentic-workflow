@@ -1,5 +1,10 @@
 # CI: drop push-to-main trigger (#244) Implementation Plan
 
+<!-- awm-qa-complete: 2026-11-11 -->
+<!-- awm-docs-complete: 2026-11-11 -->
+<!-- awm-retro-complete: 2026-11-11 -->
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
