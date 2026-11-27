@@ -32,7 +32,9 @@ codex --version
 awm init --agent codex --machine-only
 ```
 
-Codex is hooks-native and requires version 0.145.0 or newer. It asks the user to
+Codex is hooks-native and requires version 0.145.0 or newer. Prerelease and build
+suffixes (for example `codex-cli 0.172.0-alpha.2+exp.sha.5114f85`) are accepted when
+the core version meets 0.145.0 — comparison uses the core only. It asks the user to
 trust a new or changed hook; approve that trust prompt before expecting the hook
 to run. AWM respects `CODEX_HOME` for Codex-managed configuration, while shared
 skills remain co-owned with OpenCode. Inspect the resolved state with:

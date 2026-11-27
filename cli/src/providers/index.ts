@@ -189,7 +189,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
             label: 'Codex',
             configHome: configHomeFor('codex'),
             minimumVersion: '0.145.0',
-            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
+            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/ },
             skill: {
                 global: path.join(home, '.agents/skills'),
                 local: '.agents/skills',

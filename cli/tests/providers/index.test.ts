@@ -64,7 +64,7 @@ describe('Providers Routing', () => {
             // El unico proveedor con override confirmado contra su binario real (D-011).
             configHome: { envVar: 'CODEX_HOME', dir: '.codex', resolved: path.join(tmpHome, '.codex') },
             minimumVersion: '0.145.0',
-            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
+            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/ },
             skill: {
                 global: path.join(tmpHome, '.agents/skills'),
                 local: '.agents/skills',
