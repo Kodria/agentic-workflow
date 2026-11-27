@@ -1,6 +1,15 @@
 # Harness Retros
 
 
+## 2026-11-27 — BigInt high-bit inode observability (#252)
+
+- **Hallazgos:** SDD + QA Track B tests/robustness. Blocker: high-bit `unchangedSince` kill masked by `Number(bigint mtimeMs)` truncation. Importants: zero-inode same-path kill used `0n` vs `8n` (vacuous if guards removed); discovery missing leaf `0n` kill; product-less toString asserts; `requestEnvelope`/`hashFile` accepted `0n===0n`.
+- **Recurrente:** vacuous kill-RED / dual-door class already in AGENTS (covers≠coverage; clear/read). New surface: Number precision near 2^63 for FS identity.
+- **Curas:** lección en `AGENTS.md` (bigint `dev`/`ino`; pin size/mtime; same-dev dual `0n` for unobservable kills; equality sites tolerate Windows `ino 0`). Code fixes in `6638ab82` + #253 C1/C2 (`inodeIdentityFragment`, obligatory observable doors, `mtimeNs`, drop zero-reject on `hashFile`/`requestEnvelope`).
+- **Descartes:** `test-results-artifact` `Number(ino)` — design Out (fail-closed on collision). Wins de ledger — no regla nueva. Zero-reject on recommended equality sites — out of design (Windows FAT); reverted after #253 C1.
+- **Docs:** sin drift de usuario final (`cli-reference` ya describe identity bigint); marker docs-complete sin edits.
+- **Captura:** journal `not-required` (`proveedor-nativo` interactivo → cierre a PR); sensors `overall: pass`. B3 Codex alpha follow-up issue still pending before closing #252.
+
 ## 2026-11-10 — Test sensor findings (#248)
 
 - **Hallazgos:** SDD + QA Track A/B sobre file-first test findings (S1–S3). Blockers: clear unlinked arbitrary `resultsFile` (incl. `package.json`); JUnit `walkSuites` stack overflow; vacuous all-pass JSON preferred over failing XML. Importants: reserved `.awm`/`.git` readable after clear refused them; `priorIdentities: {}` fail-open; prepare defaulted `name=test` to `formatter: exit-code`; RF-3.1 emit/test holes; legacy docs gap; readOnly unlink widened by safe-basename alone.

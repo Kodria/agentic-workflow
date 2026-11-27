@@ -29,15 +29,17 @@ function validatedId(value: unknown, label: string): string {
 /** Reads only one canonical, bounded request file. The inode check closes a
  * swap between lstat and open, including platforms without O_NOFOLLOW. */
 function requestEnvelope(file: string, requestId: string): RequestEnvelope & { requestId: string } {
-    const before = fs.lstatSync(file);
-    if (!before.isFile() || before.isSymbolicLink() || before.size < 1 || before.size > MAX_REQUEST_BYTES) {
+    const before = fs.lstatSync(file, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.size < 1n || before.size > BigInt(MAX_REQUEST_BYTES)) {
         throw new Error('request de recovery no es un archivo regular acotado');
     }
     const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
     let body: string;
     try {
-        const opened = fs.fstatSync(descriptor);
-        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+        const opened = fs.fstatSync(descriptor, { bigint: true });
+        // Exact BigInt equality only — do not reject ino 0 (Windows FAT/exFAT / some shares).
+        if (!opened.isFile()
+            || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
             throw new Error('request de recovery cambio de identidad');
         }
         body = fs.readFileSync(descriptor, { encoding: 'utf8' });

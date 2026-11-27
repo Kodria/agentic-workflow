@@ -198,19 +198,19 @@ describe('unchangedSince', () => {
     });
     test('is false when the modification time differs, whatever the size says', () => {
         const { file, snap: s } = snapshotOf('abc');
-        expect(unchangedSince(file, { ...s, mtimeMs: s.mtimeMs + 1 })).toBe(false);
+        expect(unchangedSince(file, { ...s, mtimeNs: s.mtimeNs + 1n })).toBe(false);
     });
     test('is false for a directory, even with a snapshot that matches it exactly', () => {
         const dir = scratch();
-        const stat = fs.lstatSync(dir);
-        expect(unchangedSince(dir, { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino })).toBe(false);
+        const stat = fs.lstatSync(dir, { bigint: true });
+        expect(unchangedSince(dir, { size: Number(stat.size), mtimeNs: stat.mtimeNs, ino: stat.ino })).toBe(false);
     });
     posixOnly('is false for a symlink, even with a snapshot that matches it exactly', () => {
         const dir = scratch();
         fs.writeFileSync(path.join(dir, 'real.md'), 'abc');
         fs.symlinkSync(path.join(dir, 'real.md'), path.join(dir, 'l.md'));
-        const stat = fs.lstatSync(path.join(dir, 'l.md'));
-        expect(unchangedSince(path.join(dir, 'l.md'), { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino })).toBe(false);
+        const stat = fs.lstatSync(path.join(dir, 'l.md'), { bigint: true });
+        expect(unchangedSince(path.join(dir, 'l.md'), { size: Number(stat.size), mtimeNs: stat.mtimeNs, ino: stat.ino })).toBe(false);
     });
     test('is false when the file is gone', () => {
         const { file, snap: s } = snapshotOf('abc');
@@ -219,18 +219,18 @@ describe('unchangedSince', () => {
     });
     posixOnly('is false when the inode differs (same size and time, another file)', () => {
         const { file, snap: s } = snapshotOf('abc');
-        expect(s.ino).not.toBe(0);
-        expect(unchangedSince(file, { ...s, ino: s.ino + 1 })).toBe(false);
+        expect(s.ino).not.toBe(0n);
+        expect(unchangedSince(file, { ...s, ino: s.ino + 1n })).toBe(false);
     });
     test('compares inodes only when the file reports one: an inode of 0 on the file side is ignored', () => {
         const { file, snap: s } = snapshotOf('abc');
-        expect(s.ino).not.toBe(0);
-        intercept('lstatSync', (a) => a[0] === file, (real, a) => Object.assign(Object.create(Object.getPrototypeOf(real(...a))), real(...a), { ino: 0 }));
+        expect(s.ino).not.toBe(0n);
+        intercept('lstatSync', (a) => a[0] === file, (real, a) => Object.assign(Object.create(Object.getPrototypeOf(real(...a))), real(...a), { ino: 0n }));
         expect(unchangedSince(file, s)).toBe(true);
     });
     test('compares inodes only when both sides carry one', () => {
         const { file, snap: s } = snapshotOf('abc');
-        expect(unchangedSince(file, { ...s, ino: 0 })).toBe(true);
+        expect(unchangedSince(file, { ...s, ino: 0n })).toBe(true);
     });
     posixOnly('is false when a symlink took its place', () => {
         const { file, snap: s } = snapshotOf('abc');
@@ -239,6 +239,36 @@ describe('unchangedSince', () => {
         fs.rmSync(file);
         fs.symlinkSync(other, file);
         expect(unchangedSince(file, s)).toBe(false);
+    });
+    posixOnly('is false when high-bit inodes collide as Number but differ as BigInt (RF-1.7)', () => {
+        // Kill: size/mtimeNs must match the snapshot so only inode identity can fail.
+        // Mutating unchangedSince to Number(stat.ino)===Number(snapshot.ino) (or dropping the
+        // inode check while size/mtime match) must turn this assertion red.
+        const { file, snap: s } = snapshotOf('abc');
+        const inoA = (1n << 63n) + 92n;
+        const inoB = (1n << 63n) + 900n;
+        expect(Number(inoA) === Number(inoB)).toBe(true);
+
+        const real = fs.lstatSync.bind(fs);
+        jest.spyOn(fs, 'lstatSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+            if (String(p) !== file) return real(p, opts as never);
+            if (opts && opts.bigint === true) {
+                const st = real(p, { bigint: true });
+                return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                    ino: inoB,
+                    size: BigInt(s.size),
+                    mtimeNs: s.mtimeNs,
+                });
+            }
+            const st = real(p);
+            return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                ino: Number(inoB),
+                size: s.size,
+                mtimeMs: Number(s.mtimeNs / 1_000_000n),
+            });
+        }) as never);
+
+        expect(unchangedSince(file, { ...s, ino: inoA })).toBe(false);
     });
 });
 

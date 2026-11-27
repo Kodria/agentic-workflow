@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
 import type { CompactPlanManifest, CompactPlanV2, PlanSlice, PlanValidationReport } from './types';
+import { isObservableInode } from '../fs-identity';
 import { executionPlanDigest } from './identity';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
@@ -138,7 +139,7 @@ function regularInside(root: string, relative: string): InspectedFile | undefine
     } catch { return undefined; }
 }
 function sameIdentity(inspected: fs.BigIntStats, opened: fs.BigIntStats): boolean {
-    return typeof inspected.dev === 'bigint' && typeof inspected.ino === 'bigint' && inspected.ino !== 0n
+    return typeof inspected.dev === 'bigint' && typeof inspected.ino === 'bigint' && isObservableInode(inspected.ino)
         && opened.isFile() && inspected.dev === opened.dev && inspected.ino === opened.ino;
 }
 function readInspected(file: InspectedFile, max: number): InspectedRead {

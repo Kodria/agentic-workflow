@@ -83,4 +83,46 @@ describe('sameExistingPath', () => {
         fs.mkdirSync(a);
         expect(sameExistingPath(a, path.join(root, '.', 'a', '..', 'a'))).toBe(true);
     });
+
+    itPosix('distinguishes high-bit inodes that collide as Number (RF-1.7)', () => {
+        const a = path.join(root, 'hb-a');
+        const b = path.join(root, 'hb-b');
+        fs.mkdirSync(a); fs.mkdirSync(b);
+        const inoA = (1n << 63n) + 92n;
+        const inoB = (1n << 63n) + 900n;
+        expect(Number(inoA) === Number(inoB)).toBe(true); // documents the host lie
+
+        const stat = jest.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+            const ino = String(p).includes('hb-a') ? inoA : inoB;
+            if (opts && opts.bigint === true) {
+                return { dev: 1n, ino, isFile: () => false, isDirectory: () => true } as unknown as fs.BigIntStats;
+            }
+            return { dev: 1, ino: Number(ino), isFile: () => false, isDirectory: () => true } as unknown as fs.Stats;
+        }) as unknown as typeof fs.statSync);
+
+        try {
+            expect(sameExistingPath(a, b)).toBe(false);
+        } finally {
+            stat.mockRestore();
+        }
+    });
+
+    itPosix('does not claim identity when either inode is unobservable zero (RF-1.7)', () => {
+        // Kill: both sides report the same unobservable 0n + same dev. Without
+        // isObservableInode guards, 0n===0n would yield true across distinct realpaths.
+        const a = path.join(root, 'z-a');
+        const b = path.join(root, 'z-b');
+        fs.mkdirSync(a); fs.mkdirSync(b);
+        const stat = jest.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+            if (opts && opts.bigint === true) {
+                return { dev: 1n, ino: 0n, isFile: () => false, isDirectory: () => true } as unknown as fs.BigIntStats;
+            }
+            return { dev: 1, ino: 0, isFile: () => false, isDirectory: () => true } as unknown as fs.Stats;
+        }) as unknown as typeof fs.statSync);
+        try {
+            expect(sameExistingPath(a, b)).toBe(false);
+        } finally {
+            stat.mockRestore();
+        }
+    });
 });

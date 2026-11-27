@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { writeFileAtomic } from '../atomic-file';
+import { isObservableInode } from '../fs-identity';
 import { RECORD_FILE_RE } from './parse';
 import { esc, isObj } from './text-safety';
 import { MAX_RECORD_BYTES, RECORD_DIR } from './types';
@@ -65,7 +66,7 @@ export function recordsWithSlug(dir: string, slug: string): string[] | null {
 }
 
 /** What a file looked like when it was read: enough to notice that someone else changed it since. */
-export interface FileSnapshot { size: number; mtimeMs: number; ino: number }
+export interface FileSnapshot { size: number; mtimeNs: bigint; ino: bigint }
 
 /** `tooLarge` marks the size refusal (the validator reports it as `record-too-large`, R1.8); `code` stays `record-invalid` for the writers. */
 export type RecordRead = { ok: true; text: string; snapshot: FileSnapshot } | { ok: false; code: string; message: string; tooLarge?: true };
@@ -80,12 +81,14 @@ const unreadable = (code: string, message: string, extras: { tooLarge?: true } =
 export function readRecord(target: string, name: string): RecordRead {
     const label = esc(name);
     try {
-        const stat = fs.lstatSync(target);
+        const stat = fs.lstatSync(target, { bigint: true });
         if (stat.isSymbolicLink()) return unreadable('unsafe-path', `${label} is a symlink; refusing to write`);
         if (!stat.isFile()) return unreadable('record-invalid', `${label} is not a regular file`);
-        if (stat.size > MAX_RECORD_BYTES) return unreadable('record-invalid', `${label} is larger than ${MAX_RECORD_BYTES} bytes`, { tooLarge: true });
+        // Records are capped well below Number.MAX_SAFE_INTEGER; keep size as number, mtime as exact bigint ns.
+        const size = Number(stat.size);
+        if (stat.size > BigInt(MAX_RECORD_BYTES)) return unreadable('record-invalid', `${label} is larger than ${MAX_RECORD_BYTES} bytes`, { tooLarge: true });
         const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(target));
-        return { ok: true, text, snapshot: { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino } };
+        return { ok: true, text, snapshot: { size, mtimeNs: stat.mtimeNs, ino: stat.ino } };
     } catch (error) {
         const code = errorCode(error);
         return code === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? unreadable('record-invalid', `${label} is not valid UTF-8`) : unreadable('io-failed', `could not read ${label} (${esc(code)})`);
@@ -95,10 +98,10 @@ export function readRecord(target: string, name: string): RecordRead {
 /** True only when the path is still a regular file (not a link) with the size, modification time and inode it had when it was read. */
 export function unchangedSince(target: string, snapshot: FileSnapshot): boolean {
     try {
-        const stat = fs.lstatSync(target);
-        if (!stat.isFile() || stat.size !== snapshot.size || stat.mtimeMs !== snapshot.mtimeMs) return false;
+        const stat = fs.lstatSync(target, { bigint: true });
+        if (!stat.isFile() || Number(stat.size) !== snapshot.size || stat.mtimeNs !== snapshot.mtimeNs) return false;
         // An inode number can be 0 or imprecise on some Windows file systems: compare only when both sides carry one.
-        return stat.ino === 0 || snapshot.ino === 0 || stat.ino === snapshot.ino;
+        return !isObservableInode(stat.ino) || !isObservableInode(snapshot.ino) || stat.ino === snapshot.ino;
     } catch {
         return false;
     }
