@@ -19,6 +19,9 @@
 | Compare policy | Core triple only (existing `compareSemver`); not strict semver where prerelease &lt; stable |
 | Scope of providers | Codex only; Cursor date-hash pattern unchanged |
 | Message redesign | Out — keep `could not parse` for non-matching lines |
+| Core-only floor (P1) | **Accepted risk** — `0.145.0-beta.1` passes `>= 0.145.0` even though strict semver treats prerelease as older; owner chose permissive onboarding over strict ordering |
+| Display string (P2) | Out of this PR — doctor may show the bare core (`0.172.0`) for an alpha install; optional follow-up to surface the full line |
+| Docs (P3) | Plan implementation updates `docs/agents-setup.md` to note prerelease/build cores that meet the floor |
 
 ## Specialist verdicts (at approach selection)
 
@@ -82,9 +85,14 @@ versionPattern: /^codex-cli (\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-
 
 None — no direct interaction / layout surface.
 
+## Accepted risks
+
+- **P1 (core-only floor):** A prerelease whose core equals the minimum (e.g. `0.145.0-beta.1`) is accepted. If that build lacks hooks-native behavior assumed by `0.145.0` stable, init may configure an unsupported runtime. Mitigate later only if real Codex alphas at the floor misbehave — not by inventing strict semver in this change.
+- **P2 (display):** Operator-facing version strings may omit the prerelease suffix until a separate display change.
+
 ## Self-review
 
 - No TBD/TODO placeholders.
-- Scope matches locked owner decisions (accept + build; Codex-only).
+- Scope matches locked owner decisions (accept + build; Codex-only; P1 accepted).
 - Each RF is 1:1 testable against `provider-version.test.ts` / `providers/index.test.ts`.
 - No contradiction with `compareSemver` core-only parsing.

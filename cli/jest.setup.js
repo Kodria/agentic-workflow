@@ -15,3 +15,13 @@
 // transitive `picocolors` require) loads — makes color support deterministically off
 // everywhere this suite runs. Confirmed via R6's first real CI run (2026-08-08).
 process.env.NO_COLOR = '1';
+
+// Keep CLI-spawned tests off the npm update worker. Without this, suites that
+// invoke the real binary (e.g. claude-hook-flow asserting empty stderr) race
+// the async check and print "⬆ awm vX.Y.Z available → …" whenever the
+// package.json on the branch lags the published latest — including every
+// branch opened before a release lands on main. Tests that intentionally
+// exercise the notice delete AWM_NO_UPDATE_CHECK and restore it
+// (update-check.test.ts, update.test.ts).
+process.env.AWM_NO_UPDATE_CHECK = '1';
+

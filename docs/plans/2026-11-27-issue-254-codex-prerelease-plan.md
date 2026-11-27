@@ -23,7 +23,9 @@
 
 **Modo de despacho:** proveedor-nativo
 
-**Origen:** #254. Design: `docs/plans/2026-11-27-issue-254-codex-prerelease-design.md` (owner-approved). Dispatch: owner did not select AWM routing → `compact-slices/v1`.
+**Origen:** #254. Design: `docs/plans/2026-11-27-issue-254-codex-prerelease-design.md` (owner-approved; amended 2026-11-27 for audit P1/P3 + CI jest harness). Dispatch: owner did not select AWM routing → `compact-slices/v1`.
+
+**Amendment (2026-11-27, PR #255 audit):** Document P1 accepted risk (core-only floor). Add P3 `docs/agents-setup.md` note to S1. CI: merge `main` (v9.24.2) and set `AWM_NO_UPDATE_CHECK=1` in `cli/jest.setup.js` so CLI-spawned tests do not race the npm update worker.
 
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
@@ -54,6 +56,12 @@
       "path": "cli/tests/providers/index.test.ts",
       "locator": "declares the complete Codex capability metadata",
       "fact": "Expects versionCommand.versionPattern: /^codex-cli (\\d+\\.\\d+\\.\\d+)$/. Update the expected RegExp to the widened pattern so the metadata contract stays green."
+    },
+    {
+      "id": "SRC-AGENTS-SETUP",
+      "path": "docs/agents-setup.md",
+      "locator": "## Codex",
+      "fact": "States 'requires version 0.145.0 or newer' without mentioning prerelease/build cores. After fix, note that lines whose core meets the floor (including -prerelease / +build) are accepted via core compare."
     }
   ],
   "commands": [
@@ -83,7 +91,7 @@
       "requirements": ["RF-1.1", "RF-1.2", "RF-1.3", "RF-1.4"],
       "dependsOn": [],
       "sectionAnchor": "slice-s1",
-      "sources": ["SRC-CODEX-PATTERN", "SRC-ASSERT-PROVIDER", "SRC-PROVIDER-VERSION-TEST", "SRC-PROVIDERS-INDEX-TEST"],
+      "sources": ["SRC-CODEX-PATTERN", "SRC-ASSERT-PROVIDER", "SRC-PROVIDER-VERSION-TEST", "SRC-PROVIDERS-INDEX-TEST", "SRC-AGENTS-SETUP"],
       "redCommands": ["CMD-PROVIDER-VERSION", "CMD-PROVIDERS-INDEX"],
       "greenCommands": ["CMD-PROVIDER-VERSION", "CMD-PROVIDERS-INDEX", "CMD-TYPECHECK"],
       "reviewEvidence": ["specification", "code-quality"],
@@ -100,7 +108,7 @@
 
 #### Surfaces
 
-Owns RF-1.1–RF-1.4 as one cohesive Codex version-gate parse fix: config regex + unit contracts only. Files: `cli/src/providers/index.ts`, `cli/tests/core/provider-version.test.ts`, `cli/tests/providers/index.test.ts`. No change to `assertProviderSupported` control flow. Grouping rationale: single pattern drives all acceptance/rejection behavior for this issue.
+Owns RF-1.1–RF-1.4 as one cohesive Codex version-gate parse fix: config regex + unit contracts + agents-setup note. Files: `cli/src/providers/index.ts`, `cli/tests/core/provider-version.test.ts`, `cli/tests/providers/index.test.ts`, `docs/agents-setup.md`. No change to `assertProviderSupported` control flow. Grouping rationale: single pattern drives all acceptance/rejection behavior for this issue.
 
 #### Implementation
 
@@ -120,14 +128,16 @@ Owns RF-1.1–RF-1.4 as one cohesive Codex version-gate parse fix: config regex 
    - Do not edit `provider-version.ts` unless a test proves group-1 / compare behavior broke (it should not).
    - Run CMD-PROVIDER-VERSION, CMD-PROVIDERS-INDEX, CMD-TYPECHECK → GREEN.
 
-3. **Commit** with subject `fix(cli): accept Codex prerelease and build version suffixes (#254)`.
+3. **Docs (P3)** — in `docs/agents-setup.md` Codex section, note that prerelease/build lines whose core meets `0.145.0` are accepted (core compare, not strict semver).
+4. **Commit** with subject `fix(cli): accept Codex prerelease and build version suffixes (#254)`.
 
 #### Edge cases
 
 - Prerelease alone, build alone (`codex-cli 0.172.0+build.1` if desired as optional assert), or both — all must match; empty `-` / `+` segments must NOT match (`[0-9A-Za-z.-]+` is one-or-more).
 - Core below floor with suffix still requires ≥ minimum (RF-1.2).
+- **P1 accepted:** `0.145.0-beta.1` passes the floor even though strict semver ranks it below `0.145.0`.
 - Cursor expects unchanged (RF-1.4) — providers index Cursor expect stays; CMD-PROVIDER-VERSION Cursor cases stay green without edits.
-- Returned `version` is always the bare core string, never including `-alpha` or `+build`.
+- Returned `version` is always the bare core string, never including `-alpha` or `+build` (P2 display follow-up out of scope).
 
 #### Evidence
 
@@ -148,6 +158,7 @@ If Codex emits a version line outside optional prerelease/build (e.g. spaces, mu
 | `cli/tests/core/provider-version.test.ts` | Accept/reject matrix |
 | `cli/tests/providers/index.test.ts` | Metadata expect |
 | `docs/plans/2026-11-27-issue-254-codex-prerelease-design.md` | Approved design |
+| `docs/agents-setup.md` | Note prerelease/build acceptance (P3) |
 | `docs/changes/` | Change Record at finish |
 
 ## Self-review (planning)
