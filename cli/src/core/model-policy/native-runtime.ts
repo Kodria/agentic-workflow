@@ -2,7 +2,6 @@ import { createHash } from 'crypto';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { isObservableInode } from '../fs-identity';
 
 export type RuntimeExecutable = { version: string; binaryDigest: string; inferenceDispatched: false };
 export type RuntimeExecutableQuery = { command: string; args: string[]; timeoutMs: number };
@@ -50,7 +49,8 @@ function versionOf(file: string, timeoutMs: number): Promise<string> {
 function hashFile(file: string): Promise<string> {
     return new Promise((resolve, reject) => {
         const before = fs.statSync(file, { bigint: true });
-        if (!before.isFile() || before.size > 512n * 1024n * 1024n || !isObservableInode(before.ino)) {
+        // Keep Windows-zero inodes: FAT/exFAT and some network shares report ino 0; reject only size/type.
+        if (!before.isFile() || before.size > 512n * 1024n * 1024n) {
             return reject(new Error('runtime executable file is invalid or too large'));
         }
         const hash = createHash('sha256');
@@ -59,9 +59,9 @@ function hashFile(file: string): Promise<string> {
         stream.on('error', () => reject(new Error('runtime executable could not be read')));
         stream.on('end', () => {
             const after = fs.statSync(file, { bigint: true });
-            if (!isObservableInode(after.ino)
-                || before.dev !== after.dev || before.ino !== after.ino
-                || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+            // Exact BigInt identity (0n===0n is fine). mtimeNs keeps sub-ms resolution lost by bigint mtimeMs.
+            if (before.dev !== after.dev || before.ino !== after.ino
+                || before.size !== after.size || before.mtimeNs !== after.mtimeNs) {
                 return reject(new Error('runtime executable changed while hashing'));
             }
             resolve(hash.digest('hex'));

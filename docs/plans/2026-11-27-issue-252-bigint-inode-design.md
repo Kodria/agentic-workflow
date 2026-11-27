@@ -79,8 +79,8 @@ No `isObservableDev` — callers keep `typeof … === 'bigint'` only (B2).
 | `plan/validate.ts` | `ino !== 0n` | `isObservableInode(ino)` | obligatory |
 | `paths.ts` `sameExistingPath` | `statSync` Number; `sa.ino !== 0 && …` | `statSync(…, { bigint: true })`; `isObservableInode(sa.ino) && isObservableInode(sb.ino) && sa.dev === sb.dev && sa.ino === sb.ino` (still gated by `!isWindowsNative()`) | **obligatory** |
 | `changes/record-io.ts` | `FileSnapshot.ino: number`; Number compare with Windows `0` tolerance | snapshot + re-stat `{ bigint: true }`; `ino: bigint`; `!isObservableInode` for Windows-zero tolerance | recommended |
-| `model-policy/native-runtime.ts` | Number `statSync` before/after hash | both `{ bigint: true }`; compare `dev`/`ino`/`size` as BigInt; keep `mtimeMs` (or switch to `mtimeNs`) | recommended |
-| `watch/request-recovery.ts` | Number `lstat`/`fstat` | both `{ bigint: true }`; `size` vs `BigInt(MAX_REQUEST_BYTES)` | recommended |
+| `model-policy/native-runtime.ts` | Number `statSync` before/after hash | both `{ bigint: true }`; compare `dev`/`ino`/`size`/`mtimeNs` as BigInt equality (tolerate `ino 0` on both sides — Windows FAT/exFAT); do **not** add `isObservableInode` reject | recommended |
+| `watch/request-recovery.ts` | Number `lstat`/`fstat` | both `{ bigint: true }`; `size` vs `BigInt(MAX_REQUEST_BYTES)`; identity via BigInt equality only (tolerate `ino 0`) | recommended |
 | `sensors/test-results-artifact.ts` | `Number(st.ino)` | unchanged (fail-closed) | — |
 
 **Invariants**

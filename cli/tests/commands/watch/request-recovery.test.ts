@@ -316,8 +316,8 @@ describe('issue #194: recovery of a rejected task request', () => {
         }
     });
 
-    test('rejects recovery when before/after inodes are both unobservable zero (RF-1.7)', () => {
-        // Kill: without isObservableInode guards, 0n===0n would accept the identity check.
+    test('accepts recovery when before/after inodes are both 0n (Windows FAT/exFAT tolerance)', () => {
+        // Design: request-recovery compares BigInt equality only — 0n===0n must not reject.
         const rejected = rejectedTask();
         const replacement = correctedTask();
         const requestPaths = new Set([`${rejected.file}.rejected`, replacement.file]);
@@ -359,7 +359,8 @@ describe('issue #194: recovery of a rejected task request', () => {
             expect(() => recoverRejectedTask(repo, 'rama', {
                 rejectedRequestId: rejected.requestId, replacementRequestId: replacement.requestId,
                 generationToken: 'g1', reason: 'corregido plan de verificación', resume: true,
-            })).toThrow(/cambio de identidad|unreadable|identidad/i);
+            })).not.toThrow();
+            expect(readJournal(repo, 'rama').state!.cycle.status).toBe('IN_PROGRESS');
         } finally {
             open.mockRestore();
             lstat.mockRestore();

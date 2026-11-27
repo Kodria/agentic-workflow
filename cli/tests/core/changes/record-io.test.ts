@@ -198,19 +198,19 @@ describe('unchangedSince', () => {
     });
     test('is false when the modification time differs, whatever the size says', () => {
         const { file, snap: s } = snapshotOf('abc');
-        expect(unchangedSince(file, { ...s, mtimeMs: s.mtimeMs + 1 })).toBe(false);
+        expect(unchangedSince(file, { ...s, mtimeNs: s.mtimeNs + 1n })).toBe(false);
     });
     test('is false for a directory, even with a snapshot that matches it exactly', () => {
         const dir = scratch();
         const stat = fs.lstatSync(dir, { bigint: true });
-        expect(unchangedSince(dir, { size: Number(stat.size), mtimeMs: Number(stat.mtimeMs), ino: stat.ino })).toBe(false);
+        expect(unchangedSince(dir, { size: Number(stat.size), mtimeNs: stat.mtimeNs, ino: stat.ino })).toBe(false);
     });
     posixOnly('is false for a symlink, even with a snapshot that matches it exactly', () => {
         const dir = scratch();
         fs.writeFileSync(path.join(dir, 'real.md'), 'abc');
         fs.symlinkSync(path.join(dir, 'real.md'), path.join(dir, 'l.md'));
         const stat = fs.lstatSync(path.join(dir, 'l.md'), { bigint: true });
-        expect(unchangedSince(path.join(dir, 'l.md'), { size: Number(stat.size), mtimeMs: Number(stat.mtimeMs), ino: stat.ino })).toBe(false);
+        expect(unchangedSince(path.join(dir, 'l.md'), { size: Number(stat.size), mtimeNs: stat.mtimeNs, ino: stat.ino })).toBe(false);
     });
     test('is false when the file is gone', () => {
         const { file, snap: s } = snapshotOf('abc');
@@ -241,7 +241,7 @@ describe('unchangedSince', () => {
         expect(unchangedSince(file, s)).toBe(false);
     });
     posixOnly('is false when high-bit inodes collide as Number but differ as BigInt (RF-1.7)', () => {
-        // Kill: size/mtime must Number()-equal the snapshot so only inode identity can fail.
+        // Kill: size/mtimeNs must match the snapshot so only inode identity can fail.
         // Mutating unchangedSince to Number(stat.ino)===Number(snapshot.ino) (or dropping the
         // inode check while size/mtime match) must turn this assertion red.
         const { file, snap: s } = snapshotOf('abc');
@@ -257,14 +257,14 @@ describe('unchangedSince', () => {
                 return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
                     ino: inoB,
                     size: BigInt(s.size),
-                    mtimeMs: BigInt(Math.trunc(s.mtimeMs)),
+                    mtimeNs: s.mtimeNs,
                 });
             }
             const st = real(p);
             return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
                 ino: Number(inoB),
                 size: s.size,
-                mtimeMs: s.mtimeMs,
+                mtimeMs: Number(s.mtimeNs / 1_000_000n),
             });
         }) as never);
 

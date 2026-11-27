@@ -72,19 +72,19 @@
       "id": "SRC-RECORD-IO",
       "path": "cli/src/core/changes/record-io.ts",
       "locator": "export function unchangedSince",
-      "fact": "FileSnapshot.ino is number; readRecord uses lstatSync without bigint; unchangedSince returns `stat.ino === 0 || snapshot.ino === 0 || stat.ino === snapshot.ino`. On high-bit hosts Number inodes lose precision. Migrate snapshot+re-stat to { bigint: true }, type ino: bigint, use !isObservableInode for Windows-zero tolerance."
+      "fact": "FileSnapshot uses ino: bigint and mtimeNs: bigint; readRecord/unchangedSince use lstatSync({ bigint: true }); Windows-zero via !isObservableInode on either side; size stays number from Number(stat.size)."
     },
     {
       "id": "SRC-NATIVE-RUNTIME",
       "path": "cli/src/core/model-policy/native-runtime.ts",
-      "locator": "function hashFile",
-      "fact": "hashFile stats before/after createReadStream with Number statSync and compares before.ino !== after.ino. Migrate both stats to { bigint: true }; compare BigInt dev/ino/size; keep mtimeMs or use mtimeNs."
+      "locator": "before.mtimeNs !== after.mtimeNs",
+      "fact": "hashFile stats before/after createReadStream with { bigint: true }; compares before.dev/ino/size/mtimeNs !== after.* as BigInt equality (tolerates ino 0n===0n for Windows). Does not call isObservableInode."
     },
     {
       "id": "SRC-REQUEST-RECOVERY",
       "path": "cli/src/commands/watch/request-recovery.ts",
       "locator": "function requestEnvelope",
-      "fact": "requestEnvelope lstatSync then fstatSync without bigint; rejects when opened.ino !== before.ino (Number). Migrate both to { bigint: true }; compare size against BigInt(MAX_REQUEST_BYTES)."
+      "fact": "requestEnvelope lstatSync then fstatSync with { bigint: true }; size vs BigInt(MAX_REQUEST_BYTES); identity via opened.dev/ino/size === before.* (tolerates ino 0n===0n). Does not call isObservableInode."
     },
     {
       "id": "SRC-DISCOVERY-TEST",
@@ -366,7 +366,7 @@ export function sameExistingPath(a: string, b: string): boolean {
 
 10. **GREEN — recommended Number sites** —
     - `record-io.ts`: `FileSnapshot.ino: bigint`; `lstatSync(…, { bigint: true })`; `unchangedSince` uses `!isObservableInode(stat.ino) || !isObservableInode(snapshot.ino) || stat.ino === snapshot.ino` for the Windows-zero tolerance branch (preserve: if either side unobservable, do not claim mismatch — match today's `=== 0` short-circuit semantics: treat as unchanged on that axis). Exact today: `return stat.ino === 0 || snapshot.ino === 0 || stat.ino === snapshot.ino` after size/mtime match. After: `return !isObservableInode(stat.ino) || !isObservableInode(snapshot.ino) || stat.ino === snapshot.ino`.
-    - `native-runtime.ts`: both `statSync(file, { bigint: true })`; compare `dev`/`ino`/`size` as BigInt; keep `mtimeMs` (Number) compare as today unless tests require `mtimeNs`.
+    - `native-runtime.ts`: both `statSync(file, { bigint: true })`; compare `dev`/`ino`/`size`/`mtimeNs` as BigInt equality; tolerate `ino 0` (no `isObservableInode` reject).
     - `request-recovery.ts`: `lstatSync`/`fstatSync` with `{ bigint: true }`; `before.size > BigInt(MAX_REQUEST_BYTES)` (and `< 1n`); identity compare on BigInt fields.
 
 11. **Run GREEN** — All CMD-* pass. Also run broader `npm --prefix cli test -- --runInBand tests/core tests/commands/watch` before claiming slice done (five `sameExistingPath` callers).

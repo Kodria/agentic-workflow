@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { parseJsonNoDuplicate } from '../../core/plan/json';
 import { fsyncDirSync } from '../../core/atomic-file';
-import { isObservableInode } from '../../core/fs-identity';
 import { activeRequestProblems, type JournalState } from '../../core/journal/types';
 import { digestOf, isWellFormedEnvelope, type RequestEnvelope } from '../../core/journal/requests';
 import { requestsDir } from '../../core/journal/paths';
@@ -38,8 +37,8 @@ function requestEnvelope(file: string, requestId: string): RequestEnvelope & { r
     let body: string;
     try {
         const opened = fs.fstatSync(descriptor, { bigint: true });
+        // Exact BigInt equality only — do not reject ino 0 (Windows FAT/exFAT / some shares).
         if (!opened.isFile()
-            || !isObservableInode(before.ino) || !isObservableInode(opened.ino)
             || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
             throw new Error('request de recovery cambio de identidad');
         }
