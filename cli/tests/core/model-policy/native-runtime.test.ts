@@ -36,4 +36,23 @@ describe('native runtime fingerprint', () => {
             spy.mockRestore();
         }
     });
+
+    it('rejects hashing when before/after inodes are both unobservable zero (RF-1.7)', async () => {
+        // Kill: without isObservableInode guards, 0n===0n would accept the hash.
+        const real = fs.statSync.bind(fs);
+        const spy = jest.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+            if (opts && opts.bigint === true) {
+                const base = real(p, { bigint: true });
+                return Object.assign(Object.create(Object.getPrototypeOf(base)), base, { ino: 0n });
+            }
+            const base = real(p);
+            return Object.assign(Object.create(Object.getPrototypeOf(base)), base, { ino: 0 });
+        }) as unknown as typeof fs.statSync);
+        try {
+            await expect(queryRuntimeExecutable({ command: process.execPath, args: ['--version'], timeoutMs: 5000 }))
+                .rejects.toThrow(/changed while hashing|invalid/i);
+        } finally {
+            spy.mockRestore();
+        }
+    });
 });

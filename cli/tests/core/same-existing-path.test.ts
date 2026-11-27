@@ -108,15 +108,16 @@ describe('sameExistingPath', () => {
     });
 
     itPosix('does not claim identity when either inode is unobservable zero (RF-1.7)', () => {
+        // Kill: both sides report the same unobservable 0n + same dev. Without
+        // isObservableInode guards, 0n===0n would yield true across distinct realpaths.
         const a = path.join(root, 'z-a');
         const b = path.join(root, 'z-b');
         fs.mkdirSync(a); fs.mkdirSync(b);
         const stat = jest.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
-            const ino = String(p).includes('z-a') ? 0n : 8n;
             if (opts && opts.bigint === true) {
-                return { dev: 1n, ino, isFile: () => false, isDirectory: () => true } as unknown as fs.BigIntStats;
+                return { dev: 1n, ino: 0n, isFile: () => false, isDirectory: () => true } as unknown as fs.BigIntStats;
             }
-            return { dev: 1, ino: Number(ino), isFile: () => false, isDirectory: () => true } as unknown as fs.Stats;
+            return { dev: 1, ino: 0, isFile: () => false, isDirectory: () => true } as unknown as fs.Stats;
         }) as unknown as typeof fs.statSync);
         try {
             expect(sameExistingPath(a, b)).toBe(false);

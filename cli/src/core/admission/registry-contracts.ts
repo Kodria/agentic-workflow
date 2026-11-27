@@ -13,7 +13,7 @@ import { checkCurrentness } from '../currentness/check';
 import { runSensors } from '../../commands/sensors/run';
 import type { RunOutput } from '../../commands/sensors/types';
 import { admitPlan, type AdmissionInput, type AdmissionReport } from './index';
-import { isObservableInode } from '../fs-identity';
+import { inodeIdentityFragment, isObservableInode } from '../fs-identity';
 import { readJournal } from '../journal/store';
 import { bindingPlanPath } from '../journal/paths';
 import { activeGeneration } from '../../commands/watch/generations';
@@ -45,7 +45,7 @@ function physicalDirectory(directory: string): string {
 function filesystemIdentity(file: string): string {
     const stat = fs.lstatSync(file, { bigint: true });
     if (stat.isSymbolicLink() || !isObservableInode(stat.ino)) throw new Error('filesystem identity is unavailable');
-    return `${stat.dev.toString()}:${stat.ino.toString()}`;
+    return `${stat.dev.toString()}:${inodeIdentityFragment(stat.ino)}`;
 }
 /** Native descriptor bytes plus exact bigint leaf identity are observed only
  * in memory. No source body or new journal snapshot is persisted. */
@@ -56,7 +56,7 @@ function contractFileIdentity(file: string): string {
     const after = fs.lstatSync(file, { bigint: true });
     if (!after.isFile() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
         || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error('contract identity changed during inspection');
-    return crypto.createHash('sha256').update(`${before.dev.toString()}:${before.ino.toString()}\0`).update(bytes).digest('hex');
+    return crypto.createHash('sha256').update(`${before.dev.toString()}:${inodeIdentityFragment(before.ino)}\0`).update(bytes).digest('hex');
 }
 /** ENOENT proves absence only when the nearest existing parent is readable.
  * A dangling/replaced ancestor never certifies an empty provider install. */

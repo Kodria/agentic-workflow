@@ -315,4 +315,55 @@ describe('issue #194: recovery of a rejected task request', () => {
             fstat.mockRestore();
         }
     });
+
+    test('rejects recovery when before/after inodes are both unobservable zero (RF-1.7)', () => {
+        // Kill: without isObservableInode guards, 0n===0n would accept the identity check.
+        const rejected = rejectedTask();
+        const replacement = correctedTask();
+        const requestPaths = new Set([`${rejected.file}.rejected`, replacement.file]);
+        const realLstat = fs.lstatSync.bind(fs);
+        const realFstat = fs.fstatSync.bind(fs);
+        const realOpen = fs.openSync.bind(fs);
+        const openFds = new Set<number>();
+        const open = jest.spyOn(fs, 'openSync').mockImplementation(((p: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+            const fd = realOpen(p, flags, mode);
+            if (requestPaths.has(String(p))) openFds.add(fd);
+            return fd;
+        }) as typeof fs.openSync);
+        const lstat = jest.spyOn(fs, 'lstatSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+            const st = realLstat(p, opts as never) as fs.Stats & Partial<fs.BigIntStats>;
+            if (!requestPaths.has(String(p))) return st;
+            if (opts && opts.bigint === true) {
+                return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                    ino: 0n,
+                    size: typeof st.size === 'bigint' ? st.size : BigInt(st.size),
+                    dev: typeof st.dev === 'bigint' ? st.dev : BigInt(st.dev),
+                });
+            }
+            return Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: 0 });
+        }) as unknown as typeof fs.lstatSync);
+        const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, opts?: { bigint?: boolean }) => {
+            const st = realFstat(fd, opts as never) as fs.Stats & Partial<fs.BigIntStats>;
+            if (!openFds.has(fd)) return st;
+            if (opts && opts.bigint === true) {
+                return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                    ino: 0n,
+                    size: typeof st.size === 'bigint' ? st.size : BigInt(st.size),
+                    dev: typeof st.dev === 'bigint' ? st.dev : BigInt(st.dev),
+                });
+            }
+            return Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: 0 });
+        }) as unknown as typeof fs.fstatSync);
+
+        try {
+            expect(() => recoverRejectedTask(repo, 'rama', {
+                rejectedRequestId: rejected.requestId, replacementRequestId: replacement.requestId,
+                generationToken: 'g1', reason: 'corregido plan de verificación', resume: true,
+            })).toThrow(/cambio de identidad|unreadable|identidad/i);
+        } finally {
+            open.mockRestore();
+            lstat.mockRestore();
+            fstat.mockRestore();
+        }
+    });
 });

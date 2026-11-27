@@ -241,6 +241,9 @@ describe('unchangedSince', () => {
         expect(unchangedSince(file, s)).toBe(false);
     });
     posixOnly('is false when high-bit inodes collide as Number but differ as BigInt (RF-1.7)', () => {
+        // Kill: size/mtime must Number()-equal the snapshot so only inode identity can fail.
+        // Mutating unchangedSince to Number(stat.ino)===Number(snapshot.ino) (or dropping the
+        // inode check while size/mtime match) must turn this assertion red.
         const { file, snap: s } = snapshotOf('abc');
         const inoA = (1n << 63n) + 92n;
         const inoB = (1n << 63n) + 900n;
@@ -251,10 +254,18 @@ describe('unchangedSince', () => {
             if (String(p) !== file) return real(p, opts as never);
             if (opts && opts.bigint === true) {
                 const st = real(p, { bigint: true });
-                return Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: inoB });
+                return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                    ino: inoB,
+                    size: BigInt(s.size),
+                    mtimeMs: BigInt(Math.trunc(s.mtimeMs)),
+                });
             }
             const st = real(p);
-            return Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: Number(inoB) });
+            return Object.assign(Object.create(Object.getPrototypeOf(st)), st, {
+                ino: Number(inoB),
+                size: s.size,
+                mtimeMs: s.mtimeMs,
+            });
         }) as never);
 
         expect(unchangedSince(file, { ...s, ino: inoA })).toBe(false);

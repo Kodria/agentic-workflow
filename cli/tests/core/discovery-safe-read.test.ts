@@ -143,4 +143,24 @@ describe.each([true, false])('skill descriptor safety (O_NOFOLLOW available: %s)
         expect(() => discoverSkills([root])).toThrow(/directory identity/i);
         expect(fs.openSync).not.toHaveBeenCalled();
     });
+
+    it('rejects zero leaf inode without reading (RF-1.3)', () => {
+        const lstat = (fs.lstatSync as jest.Mock).getMockImplementation()!;
+        (fs.lstatSync as jest.Mock).mockImplementation((file, options) => file === skillFile
+            ? { ...inspected, ino: 0n }
+            : lstat(file, options));
+
+        expect(() => discoverSkills([root])).toThrow(/identity|unobservable/i);
+        expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('rejects negative leaf size without reading (RF-1.3)', () => {
+        const lstat = (fs.lstatSync as jest.Mock).getMockImplementation()!;
+        (fs.lstatSync as jest.Mock).mockImplementation((file, options) => file === skillFile
+            ? { ...inspected, size: -1n }
+            : lstat(file, options));
+
+        expect(() => discoverSkills([root])).toThrow(/identity|unobservable|size/i);
+        expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
 });
