@@ -276,7 +276,7 @@ describe('plan validate Commander wiring', () => {
             const result = spawnSync(process.execPath, ['-r', registerPath, indexPath, 'plan', 'validate', 'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', '--cwd', repoRoot, '--json'], {
                 cwd: repoRoot,
                 encoding: 'utf8',
-                env: { ...process.env, AWM_HOME: awmHome, TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
+                env: { ...process.env, AWM_HOME: awmHome, AWM_NO_UPDATE_CHECK: '', TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
 
@@ -288,7 +288,7 @@ describe('plan validate Commander wiring', () => {
             const humanResult = spawnSync(process.execPath, ['-r', registerPath, indexPath, 'plan', 'validate', 'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', '--cwd', repoRoot], {
                 cwd: repoRoot,
                 encoding: 'utf8',
-                env: { ...process.env, AWM_HOME: awmHome, TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
+                env: { ...process.env, AWM_HOME: awmHome, AWM_NO_UPDATE_CHECK: '', TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
             expect(humanResult.status).toBe(0);

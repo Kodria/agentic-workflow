@@ -1,6 +1,15 @@
 # Harness Retros
 
 
+## 2026-11-27 — Codex prerelease version parse (#254)
+
+- **Hallazgos:** SDD + Track A/B. Feature is a one-line regex widen; QA clean. Non-blocking: empty `-`/`+` suffix kills and build-alone accept added post quality review.
+- **Recurrente:** CI flake when branch lags npm latest — CLI-spawned tests without `AWM_NO_UPDATE_CHECK` print update banner to stderr (`claude-hook-flow`). Fixed in `cli/jest.setup.js` on this branch before S1.
+- **Curas:** default `AWM_NO_UPDATE_CHECK=1` in Jest setup (tests that need the banner already delete/restore it). Design documents P1 core-only floor as accepted risk.
+- **Descartes:** P2 doctor display of full prerelease string — out of scope. Strict semver ordering — owner rejected.
+- **Docs:** `docs/agents-setup.md` notes prerelease/build cores that meet the floor.
+- **Captura:** journal `not-required`; sensors for Change Record next.
+
 ## 2026-11-27 — BigInt high-bit inode observability (#252)
 
 - **Hallazgos:** SDD + QA Track B tests/robustness. Blocker: high-bit `unchangedSince` kill masked by `Number(bigint mtimeMs)` truncation. Importants: zero-inode same-path kill used `0n` vs `8n` (vacuous if guards removed); discovery missing leaf `0n` kill; product-less toString asserts; `requestEnvelope`/`hashFile` accepted `0n===0n`.
