@@ -1,3 +1,8 @@
+## v9.24.2 - 2026-11-27
+
+### Fixes
+- **cli:** accept high-bit bigint inodes for FS identity (#252) (#253)
+
 ## v9.24.1 - 2026-11-11
 
 ### Fixes
