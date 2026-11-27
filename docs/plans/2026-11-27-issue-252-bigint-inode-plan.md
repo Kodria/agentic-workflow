@@ -26,6 +26,8 @@
 
 **Amendment (2026-11-27, PR #253 audit):** Include RF-1.7 Number→BigInt identity compares; drop `isObservableDev`; B3 Codex alpha remains a follow-up issue.
 
+**Amendment (2026-11-27, post-S1):** Refresh `SRC-EXEC-WRAPPER` / `SRC-PLAN-VALIDATE` locators to post-migration `isObservableInode(...)` strings so `awm plan validate` remains valid against the implemented sources.
+
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
   "schema": "compact-slices/v1",
@@ -47,14 +49,14 @@
     {
       "id": "SRC-EXEC-WRAPPER",
       "path": "cli/src/commands/job/exec-wrapper.ts",
-      "locator": "actual.ino === 0n",
-      "fact": "isCommittedController rejects custody dirs with `actual.ino === 0n` before comparing expected/actual identity. Migrate to !isObservableInode(actual.ino); leave raw equality."
+      "locator": "!isObservableInode(actual.ino)",
+      "fact": "isCommittedController rejects custody dirs with !isObservableInode(actual.ino) before comparing expected/actual identity on raw BigInt equality (migrated from actual.ino === 0n)."
     },
     {
       "id": "SRC-PLAN-VALIDATE",
       "path": "cli/src/core/plan/validate.ts",
-      "locator": "inspected.ino !== 0n",
-      "fact": "Leaf identity helper requires `typeof inspected.dev === 'bigint' && typeof inspected.ino === 'bigint' && inspected.ino !== 0n` plus matching opened fstat. Replace `!== 0n` with isObservableInode(inspected.ino)."
+      "locator": "isObservableInode(inspected.ino)",
+      "fact": "Leaf identity helper requires typeof inspected.dev/ino === 'bigint' && isObservableInode(inspected.ino) plus matching opened fstat (migrated from inspected.ino !== 0n)."
     },
     {
       "id": "SRC-SAME-PATH",
