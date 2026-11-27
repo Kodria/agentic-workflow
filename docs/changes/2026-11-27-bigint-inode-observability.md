@@ -19,13 +19,13 @@ links:
   plan: docs/plans/2026-11-27-issue-252-bigint-inode-plan.md
   issue: https://github.com/Kodria/agentic-workflow/issues/252
 verification:
-  commit: d2e74c1bf32d51762d837a24ad9f007f105478b9
+  commit: 00456222473a18031bed1984d36e673199458ed1
   overall: pass
   sensors:
     depcheck: pass
     lint: pass
     typecheck: pass
-  receipt_digest: sha256:13c134d231e2aabe7dd6bbe85c73735cd690efeed6bd5d8c267f0e9f09295bf1
+  receipt_digest: sha256:a695821f5eec8dad9e1e94874021e8681155211673502638ebc38ee7b0b0bcb0
 manual_validation:
   - step: "On a host where fs.lstatSync(path, { bigint: true }).ino is negative from the high bit (e.g. Codex Cloud /workspace), run awm registry add … --no-install and skill discovery against that tree."
     expected: "No directory identity is unobservable; registry clones and skills are discovered."
@@ -44,15 +44,16 @@ rollback: "Revert this branch's commits (or restore the prior CLI release). Iden
 
 ## Qué se hizo
 
-Added `cli/src/core/fs-identity.ts` with `isObservableInode` (`BigInt.asUintN(64, ino) !== 0n`) and `inodeIdentityFragment` (raw `toString()`). Migrated discovery, registry-contracts, exec-wrapper, plan-validate, `sameExistingPath`, record-io, native-runtime, and request-recovery off signed inequality / Number `ino`/`dev` compares. Kill-tests cover high-bit acceptance, zero rejection, digest formatting, and Number-collision RED cases; QA tightened vacuous kills (mtime pin, same-dev dual `0n`). Docs/plan markers + AGENTS lesson + harness-retro entry.
+Added `cli/src/core/fs-identity.ts` with `isObservableInode` (`BigInt.asUintN(64, ino) !== 0n`) and `inodeIdentityFragment` (raw `toString()`). Migrated discovery, registry-contracts, exec-wrapper, plan-validate, `sameExistingPath`, record-io, native-runtime, and request-recovery off signed inequality / Number `ino`/`dev` compares. Obligatory gates reject inode zero; recommended equality sites (`hashFile`, `requestEnvelope`) tolerate `ino 0n===0n` for Windows FAT/exFAT (#253 C1). Change-while-read checks use `mtimeNs` / `FileSnapshot.mtimeNs` (#253 C2). Kill-tests cover high-bit acceptance, Number-collision RED, and Windows-zero acceptance on equality sites. Docs/plan markers + AGENTS lesson + harness-retro entry.
 
 ## Qué se probó
 
 - CMD-FS-IDENTITY / discovery / same-path / Number-identity Jest suites (incl. kill-RED after QA fixes) — pass
+- native-runtime / request-recovery / record-io suites after C1/C2 (76 tests) — pass
 - `npm --prefix cli run typecheck` — pass
-- `awm plan validate` after post-S1 locator amend — valid
-- Post-implementation QA Track A/B fix loop (B1–B5 vacuous kills) — closed; `awm-qa-complete`
-- Full `awm sensors run` at Change Record verification commit `d2e74c1b` — overall pass (lint/typecheck/depcheck)
+- `awm plan validate` after locator/mtimeNs amend — valid
+- Post-implementation QA Track A/B fix loop — closed; `awm-qa-complete`
+- Full `awm sensors run` at Change Record verification commit `00456222` — overall pass (lint/typecheck/depcheck)
 
 ## Qué falta validar
 
@@ -61,4 +62,4 @@ Added `cli/src/core/fs-identity.ts` with `isObservableInode` (`BigInt.asUintN(64
 
 ## Riesgos y rollback
 
-See frontmatter `risks` and `rollback`. Do not widen `test-results-artifact` Number(ino) without amending its RF; keep digests on raw signed BigInt strings.
+See frontmatter `risks` and `rollback`. Do not widen `test-results-artifact` Number(ino) without amending its RF; keep digests on raw signed BigInt strings; do not reintroduce `isObservableInode` rejects on Windows-tolerant equality sites.
