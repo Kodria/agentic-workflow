@@ -1,3 +1,8 @@
+## v9.24.3 - 2026-11-27
+
+### Fixes
+- **cli:** accept Codex prerelease version suffixes (#254) (#255)
+
 ## v9.24.2 - 2026-11-27
 
 ### Fixes
