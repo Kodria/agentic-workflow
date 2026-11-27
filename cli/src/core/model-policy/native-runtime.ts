@@ -48,14 +48,14 @@ function versionOf(file: string, timeoutMs: number): Promise<string> {
 
 function hashFile(file: string): Promise<string> {
     return new Promise((resolve, reject) => {
-        const before = fs.statSync(file);
-        if (!before.isFile() || before.size > 512 * 1024 * 1024) return reject(new Error('runtime executable file is invalid or too large'));
+        const before = fs.statSync(file, { bigint: true });
+        if (!before.isFile() || before.size > 512n * 1024n * 1024n) return reject(new Error('runtime executable file is invalid or too large'));
         const hash = createHash('sha256');
         const stream = fs.createReadStream(file);
         stream.on('data', chunk => hash.update(chunk));
         stream.on('error', () => reject(new Error('runtime executable could not be read')));
         stream.on('end', () => {
-            const after = fs.statSync(file);
+            const after = fs.statSync(file, { bigint: true });
             if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) return reject(new Error('runtime executable changed while hashing'));
             resolve(hash.digest('hex'));
         });

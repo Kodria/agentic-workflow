@@ -117,4 +117,30 @@ describe.each([true, false])('skill descriptor safety (O_NOFOLLOW available: %s)
         expect(fs.openSync).not.toHaveBeenCalled();
         expect(fs.readFileSync).not.toHaveBeenCalled();
     });
+
+    it('accepts high-bit parent inode and signed-negative device (RF-1.1, RF-1.2, RF-1.5)', () => {
+        const highBitDir = { ...directory, dev: -1n, ino: -9223372036854775716n };
+        const highBitLeaf = { ...inspected, dev: -1n, ino: -9223372036854775715n };
+        (fs.lstatSync as jest.Mock).mockImplementation((file) => {
+            if (file === skillFile) return highBitLeaf;
+            if (typeof file === 'string' && file.endsWith('awm-registry.json')) {
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            }
+            return highBitDir;
+        });
+        (fs.fstatSync as jest.Mock).mockReturnValue(highBitLeaf);
+
+        expect(discoverSkills([root])).toEqual([{ name: 'safe', path: skillDir, description: 'Ordinary skill' }]);
+        expect(fs.readFileSync).toHaveBeenCalledWith(descriptor, 'utf-8');
+    });
+
+    it('rejects zero parent inode (RF-1.3)', () => {
+        const lstat = (fs.lstatSync as jest.Mock).getMockImplementation()!;
+        (fs.lstatSync as jest.Mock).mockImplementation((file, options) => file === skillDir
+            ? { ...directory, ino: 0n }
+            : lstat(file, options));
+
+        expect(() => discoverSkills([root])).toThrow(/directory identity/i);
+        expect(fs.openSync).not.toHaveBeenCalled();
+    });
 });

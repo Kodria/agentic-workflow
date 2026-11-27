@@ -1,6 +1,7 @@
 // src/core/discovery.ts
 import fs from 'fs';
 import path from 'path';
+import { isObservableInode } from './fs-identity';
 import { contentRoots, readRegistryManifest } from './registries';
 
 export interface SkillArtifact {
@@ -49,7 +50,7 @@ function inspectSkillDirectory(parent: string, expected?: fs.BigIntStats): fs.Bi
     const stat = fs.lstatSync(parent, { bigint: true });
     if (stat.isSymbolicLink()) throw new Error(`${parent}: must not be a symbolic link`);
     if (!stat.isDirectory()) throw new Error(`${parent}: must be a directory`);
-    if (typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.dev < 0n || stat.ino <= 0n) {
+    if (typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || !isObservableInode(stat.ino)) {
         throw new Error(`${parent}: directory identity is unobservable`);
     }
     if (expected && (stat.dev !== expected.dev || stat.ino !== expected.ino)) {
@@ -82,8 +83,8 @@ function readSkillDescription(file: string): string | null {
     if (inspected.isSymbolicLink()) throw new Error('must not be a symbolic link');
     if (!inspected.isFile()) throw new Error('must be a regular file');
     if (typeof inspected.dev !== 'bigint' || typeof inspected.ino !== 'bigint'
-        || typeof inspected.size !== 'bigint' || inspected.dev < 0n
-        || inspected.ino <= 0n || inspected.size < 0n) {
+        || typeof inspected.size !== 'bigint'
+        || !isObservableInode(inspected.ino) || inspected.size < 0n) {
         throw new Error('file identity or size is unobservable');
     }
     const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);

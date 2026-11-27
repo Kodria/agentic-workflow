@@ -12,6 +12,7 @@ import { secureFs } from '../../core/secure-fs/native-bridge';
 import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
 import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
+import { isObservableInode } from '../../core/fs-identity';
 import type { ProcessRef } from '../../core/journal/types';
 
 function validateSidecarIdentity(logsRoot: string, jobId: string, nonce: string): void {
@@ -67,7 +68,7 @@ function isCommittedController(logsRoot: string, repoRoot: string, jobId: string
         const actual = fs.lstatSync(logsRoot, { bigint: true });
         const expected = fs.lstatSync(logsDir(repoRoot, state.branch), { bigint: true });
         if (!actual.isDirectory() || actual.isSymbolicLink() || !expected.isDirectory() || expected.isSymbolicLink()
-            || actual.ino === 0n || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('controller custody directory identity invalid');
+            || !isObservableInode(actual.ino) || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('controller custody directory identity invalid');
         const committed = state.generations.some(gen => gen.controllerJobId === jobId && jobId === `controller-gen-${gen.n}`
             && gen.spawnNonce === nonce && gen.resumePrompt === undefined && isControllerRecoveryAction(gen.resumeAction)
             && gen.launchArgvDigest === argvDigest(argv));

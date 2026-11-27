@@ -11,7 +11,7 @@ import path from 'path';
 import childProcess, { execFileSync } from 'child_process';
 import { Command } from 'commander';
 import { cloneRepo, makeHiddenSubmodule, makeRepo, posixOnly, type TestRepo } from './helpers';
-import { allowsUnmeasuredRelaxation, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, readReceipt, sensorPairs, writeReceipt, type SensorReceiptV2 } from '../../../src/core/changes/receipt';
+import { allowsUnmeasuredRelaxation, buildReceipt, captureReceiptPrecondition, computeReceiptDigest, finalizeReceipt, isFullSelection, isRootManifest, readReceipt, sensorPairs, writeReceipt, type SensorReceiptV2 } from '../../../src/core/changes/receipt';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { runSensors, findManifestDir, shouldRun } from '../../../src/commands/sensors/run';
 import { resolveSensorProject } from '../../../src/commands/sensors/project';
@@ -1135,5 +1135,40 @@ describe('RF-4.3 receipt schema 2', () => {
         expect(mk(['!src/**'])).toEqual({ ok: false, code: 'receipt-invalid' });
         expect(mk(['src/{a,b}.ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
         expect(mk(['src/@(a|b).ts'])).toEqual({ ok: false, code: 'receipt-invalid' });
+    });
+});
+
+const itPosixRoot = process.platform !== 'win32' ? test : test.skip;
+
+describe('isRootManifest high-bit inode identity (RF-1.7)', () => {
+    itPosixRoot('does not treat root vs subpackage manifests as the same when Number inodes collide', () => {
+        const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-root-manifest-')));
+        try {
+            const rootManifest = path.join(tmp, '.awm', 'sensors.json');
+            const subManifest = path.join(tmp, 'packages', 'app', '.awm', 'sensors.json');
+            fs.mkdirSync(path.dirname(rootManifest), { recursive: true });
+            fs.mkdirSync(path.dirname(subManifest), { recursive: true });
+            fs.writeFileSync(rootManifest, '{"v":1}');
+            fs.writeFileSync(subManifest, '{"v":1}');
+            const inoRoot = (1n << 63n) + 300n;
+            const inoSub = (1n << 63n) + 900n;
+            expect(Number(inoRoot) === Number(inoSub)).toBe(true);
+
+            const stat = jest.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, opts?: { bigint?: boolean }) => {
+                const ino = String(p).includes(`${path.sep}packages${path.sep}`) ? inoSub : inoRoot;
+                if (opts && opts.bigint === true) {
+                    return { dev: 1n, ino, isFile: () => true, isDirectory: () => false } as unknown as fs.BigIntStats;
+                }
+                return { dev: 1, ino: Number(ino), isFile: () => true, isDirectory: () => false } as unknown as fs.Stats;
+            }) as unknown as typeof fs.statSync);
+
+            try {
+                expect(isRootManifest(tmp, subManifest)).toBe(false);
+            } finally {
+                stat.mockRestore();
+            }
+        } finally {
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
     });
 });

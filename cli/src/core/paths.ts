@@ -6,6 +6,7 @@
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
+import { isObservableInode } from './fs-identity';
 
 
 /** User home directory with a robust fallback. Never returns a raw, possibly-empty process.env.HOME. */
@@ -181,11 +182,11 @@ export function resolveOnPath(bin: string): boolean {
  * nunca se afirma sin prueba.
  */
 export function sameExistingPath(a: string, b: string): boolean {
-  let sa: fs.Stats;
-  let sb: fs.Stats;
+  let sa: fs.BigIntStats;
+  let sb: fs.BigIntStats;
   try {
-    sa = fs.statSync(a);
-    sb = fs.statSync(b);
+    sa = fs.statSync(a, { bigint: true });
+    sb = fs.statSync(b, { bigint: true });
   } catch {
     return false;
   }
@@ -201,5 +202,9 @@ export function sameExistingPath(a: string, b: string): boolean {
   const cb = canonical(b);
   if (ca === null || cb === null) return false;
   if (ca === cb) return true;
-  return !isWindowsNative() && sa.ino !== 0 && sb.ino !== 0 && sa.dev === sb.dev && sa.ino === sb.ino;
+  return !isWindowsNative()
+    && isObservableInode(sa.ino)
+    && isObservableInode(sb.ino)
+    && sa.dev === sb.dev
+    && sa.ino === sb.ino;
 }

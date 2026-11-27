@@ -13,6 +13,7 @@ import { checkCurrentness } from '../currentness/check';
 import { runSensors } from '../../commands/sensors/run';
 import type { RunOutput } from '../../commands/sensors/types';
 import { admitPlan, type AdmissionInput, type AdmissionReport } from './index';
+import { isObservableInode } from '../fs-identity';
 import { readJournal } from '../journal/store';
 import { bindingPlanPath } from '../journal/paths';
 import { activeGeneration } from '../../commands/watch/generations';
@@ -43,14 +44,14 @@ function physicalDirectory(directory: string): string {
 }
 function filesystemIdentity(file: string): string {
     const stat = fs.lstatSync(file, { bigint: true });
-    if (stat.isSymbolicLink() || stat.ino === 0n) throw new Error('filesystem identity is unavailable');
+    if (stat.isSymbolicLink() || !isObservableInode(stat.ino)) throw new Error('filesystem identity is unavailable');
     return `${stat.dev.toString()}:${stat.ino.toString()}`;
 }
 /** Native descriptor bytes plus exact bigint leaf identity are observed only
  * in memory. No source body or new journal snapshot is persisted. */
 function contractFileIdentity(file: string): string {
     const before = fs.lstatSync(file, { bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || before.ino === 0n) throw new Error('contract identity is unavailable');
+    if (!before.isFile() || before.isSymbolicLink() || !isObservableInode(before.ino)) throw new Error('contract identity is unavailable');
     const bytes = secureFs.readRegularFile(file, MAX_CONTRACT_BYTES).bytes;
     const after = fs.lstatSync(file, { bigint: true });
     if (!after.isFile() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
