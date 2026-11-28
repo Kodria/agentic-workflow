@@ -7,7 +7,10 @@ Perfil que lee la skill `auditing-pull-requests` (registry personal, bundle
 - **Reply language:** es (comentarios en el PR y reportes al owner).
 - **Default branch:** `main`. Cada push a `main` corre `.github/workflows/release.yml`: si hay
   commits releasables desde el último tag, bumpea la versión y publica en npm (OIDC Trusted
-  Publisher). No hay publish manual ni workflow paralelo de publish (`CLAUDE.md`, D-005).
+  Publisher). No se corre `npm publish` a mano ni hay workflow paralelo de publish (`CLAUDE.md`,
+  D-005). La única vía manual es el `workflow_dispatch` de `release.yml` (`dry_run`, y `bump` para
+  forzar un release sin commits releasables, D-022). Un cambio de metadata publicada del paquete
+  se titula `fix:`, no `chore:` (D-022).
 - **Draft PRs run CI:** sí. `ci.yml` corre en todo `pull_request`, sin gate de draft. El veredicto
   «aprobado» exige los 12 jobs en verde sobre el SHA auditado. Con jobs pendientes, el veredicto es
   «⚠️ casi listo — CI pendiente».
@@ -21,15 +24,27 @@ Perfil que lee la skill `auditing-pull-requests` (registry personal, bundle
     1. guard `wait-npm-publication.test.cjs`;
     2. `npm ci`, `native:build`, `build` y `native:test-build`;
     3. `tsc --noEmit`;
-    4. regenerar la support matrix contra el registry `v2.0.1` y luego
+    4. regenerar la support matrix contra el registry `v2.0.1` (`6f40632…`, `ci.yml:117`) y luego
        `git diff --exit-code docs/support-matrix.md`;
     5. Jest `--runInBand --bail` (en Windows, solo el «remainder»);
-    6. `published-doctor-evidence`.
+    6. consumidor R3 publicado: `npm install --prefix published-consumer
+       agentic-workflow-manager@8.1.2` y luego `published-r3-acceptance.e2e.test.ts`;
+    7. guard de procedencia `published-doctor-evidence.e2e.test.ts`. El doctor contra el paquete
+       realmente publicado corre recién en `release.yml`, después del publish.
   - **`windows-shards` × 6:** `windows-2022` y `windows-11-arm`, cada uno con los shards `watch`,
     `changes-core` y `changes-commands`.
-  - **Gate de release:** en `release.yml`, `release` declara `needs: [test, windows-shards]`, la
-    misma matriz de 12 jobs. Si algo está rojo en cualquier plataforma o shard, no se publica.
+  - **Gate de release:** en `release.yml`, `release` declara `needs: [test, windows-shards]`, con
+    las mismas 12 combinaciones de plataforma y shard. Si algo está rojo en cualquiera, no se
+    publica. Ojo: el job `test` de `release.yml` corre install, build, addon y Jest, pero **no**
+    `tsc`, la support matrix ni el guard de publicación; esos solo los corre `ci.yml` en el PR.
     Después del publish corre `published-doctor-evidence`.
+  - **El gate de hecho son estos jobs:** según la API de GitHub, `main` no tiene branch
+    protection ni rulesets (404 «Branch not protected»), y merge, squash y rebase están
+    habilitados. GitHub no bloquea un merge con CI rojo; lo que impide publicar es el `needs` de
+    `release.yml`. Por eso el veredicto exige los 12 jobs verdes antes del merge.
+  - **Los workflows mandan sobre la prosa:** `CLAUDE.md` (CTX-CLAUDE-008, «`ubuntu-latest`,
+    `windows-latest`, `macos-latest`») y CTX-CONSTITUTION-032 describen una matriz anterior. Ante
+    una diferencia, vale `ci.yml` / `release.yml`.
 - **Install / build** (desde `cli/`):
   `npm ci && npm run native:build && npm run build && npm run native:test-build`.
   Sin el addon nativo, la suite da unos 123 fallos de `secure_fs` (conteo de `AGENTS.md`), que no son del PR (ver la
@@ -52,8 +67,13 @@ Perfil que lee la skill `auditing-pull-requests` (registry personal, bundle
     - `tests/commands/registry/doctor.test.ts > doctorRegistry (RF-4.4–4.8, RF-5.1) > reports unreadable SKILL.md as structural (fail closed)`
   - **Addon nativo sin buildear:** unos 123 fallos que nombran `secure_fs` (`AGENTS.md`). Se curan con el
     comando de build de arriba.
-  - **Support matrix:** `npm run docs:matrix` necesita un checkout de `awm-baseline-registry` en el
-    tag `v2.0.1` como hermano del repo. El CI lo clona; en local falta.
+  - **Support matrix:** `npm run docs:matrix` (`cli/package.json:35`) fija el registry `v2.0.0`
+    (`c35c087…`) en `../../awm-baseline-registry`, como hermano del repo, y verifica la identidad
+    de ese checkout. Para reproducir el check del CI, que usa otro tag, correr desde `cli/` el
+    comando de `ci.yml:117` con un checkout de `v2.0.1` (`6f40632…`):
+    `npx ts-node scripts/sensor-support-matrix.ts --registry-root <checkout> --registry-tag v2.0.1
+    --registry-commit 6f40632006fc65300ac633c5a54f2635cf0eb8e9`, y luego
+    `git diff --exit-code -- docs/support-matrix.md`.
   - **Suites `describe.skip` sin coordenadas de publicación:**
     - `tests/integration/published-r3-acceptance.e2e.test.ts` (`AWM_PUBLISHED_CLI_ROOT`);
     - `tests/integration/published-sensor-gate-matrix.e2e.test.ts`
@@ -82,6 +102,13 @@ Perfil que lee la skill `auditing-pull-requests` (registry personal, bundle
     - `dev`/`ino` con `{ bigint: true }`;
     - contratos duales sobre `release.yml` `needs`;
     - un `covers` de plan no es cobertura.
+  - CTX-CONSTITUTION-051: separar la preparación portable (`npm --prefix cli ci`, build solo
+    cuando una prueba lo necesita) del diagnóstico de producto. Un fallo previo a la línea base es
+    evidencia de preparación, no un bug. Nunca editar la instalación global, los registries ni los
+    caches para hacer pasar una rama.
+  - Cards selectivas de `docs/awm/context/constitution/`: `release.md`, `documentation.md`,
+    `implementation.md`, `execution-boundary.md`, `sensor-floor.md` y `support-matrix.md`.
+    Aplican cuando el PR toca ese tema.
   - `CLAUDE.md` y `docs/decisions.md` (D-001…).
 - **Release / versioning:**
   - El release lee los conventional commits desde el último tag (`cli/src/release/core.ts:44-46`):
